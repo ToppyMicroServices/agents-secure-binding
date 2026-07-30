@@ -1,0 +1,265 @@
+(* Copyright (c) 2026 ToppyMicroServices OÜ
+   SPDX-License-Identifier: Apache-2.0
+
+   Symbolic core binding-acceptance model for ProVerif 2.05.
+
+   Trust boundary:
+   - The authority and honest Agents keep their signing keys secret.
+   - The public network is controlled by a Dolev-Yao attacker.
+   - Exporter, nonce, request context, and attestation binder inputs are fresh
+     for each modeled accepted session.
+   - Cryptographic primitives are ideal constructors and destructors.
+*)
+
+type skey.
+type pkey.
+
+fun pk(skey): pkey.
+fun sign(bitstring, skey): bitstring.
+reduc forall message: bitstring, key: skey;
+  checksign(sign(message, key), pk(key)) = message.
+
+fun digest(bitstring): bitstring.
+fun grant_payload(
+  pkey,
+  bitstring,
+  bitstring,
+  bitstring
+): bitstring.
+fun binding_payload(
+  bitstring,
+  bitstring,
+  bitstring,
+  bitstring,
+  bitstring
+): bitstring.
+
+free net: channel.
+
+free authority_key: skey [private].
+free agent_a_key: skey [private].
+free agent_b_key: skey [private].
+
+free required_audience: bitstring.
+free required_values: bitstring.
+
+event grant_issued(
+  pkey,
+  bitstring,
+  bitstring,
+  bitstring
+).
+event agent_bound(
+  pkey,
+  bitstring,
+  bitstring,
+  bitstring,
+  bitstring,
+  bitstring
+).
+event accepted(
+  pkey,
+  bitstring,
+  bitstring,
+  bitstring,
+  bitstring,
+  bitstring,
+  bitstring,
+  bitstring,
+  bitstring
+).
+
+query attacker(authority_key).
+query attacker(agent_a_key).
+query attacker(agent_b_key).
+
+query agent_public: pkey,
+      grant_id: bitstring,
+      grant_digest: bitstring,
+      exporter: bitstring,
+      nonce: bitstring,
+      context: bitstring,
+      attestation: bitstring,
+      audience: bitstring,
+      values: bitstring;
+  event(accepted(
+    agent_public,
+    grant_id,
+    grant_digest,
+    exporter,
+    nonce,
+    context,
+    attestation,
+    audience,
+    values
+  )) ==>
+  event(grant_issued(
+    agent_public,
+    audience,
+    values,
+    grant_id
+  )) &&
+  event(agent_bound(
+    agent_public,
+    grant_digest,
+    exporter,
+    nonce,
+    context,
+    attestation
+  )).
+
+query agent_public: pkey,
+      grant_id: bitstring,
+      grant_digest: bitstring,
+      exporter: bitstring,
+      nonce: bitstring,
+      context: bitstring,
+      attestation: bitstring,
+      audience: bitstring,
+      values: bitstring;
+  inj-event(accepted(
+    agent_public,
+    grant_id,
+    grant_digest,
+    exporter,
+    nonce,
+    context,
+    attestation,
+    audience,
+    values
+  )) ==>
+  inj-event(agent_bound(
+    agent_public,
+    grant_digest,
+    exporter,
+    nonce,
+    context,
+    attestation
+  )).
+
+let honest_agent(
+  agent_key: skey,
+  grant: bitstring,
+  grant_digest_value: bitstring,
+  exporter: bitstring,
+  nonce: bitstring,
+  context: bitstring,
+  attestation: bitstring
+) =
+  let agent_public = pk(agent_key) in
+  event agent_bound(
+    agent_public,
+    grant_digest_value,
+    exporter,
+    nonce,
+    context,
+    attestation
+  );
+  let binding = sign(
+    binding_payload(
+      grant_digest_value,
+      exporter,
+      nonce,
+      context,
+      attestation
+    ),
+    agent_key
+  ) in
+  out(net, (grant, binding)).
+
+let verifier(
+  expected_agent_public: pkey,
+  expected_grant_id: bitstring,
+  expected_exporter: bitstring,
+  expected_nonce: bitstring,
+  expected_context: bitstring,
+  expected_attestation: bitstring
+) =
+  in(net, (received_grant: bitstring, received_binding: bitstring));
+  let received_grant_payload =
+    checksign(received_grant, pk(authority_key)) in
+  if received_grant_payload =
+    grant_payload(
+      expected_agent_public,
+      required_audience,
+      required_values,
+      expected_grant_id
+    )
+  then
+    let received_binding_payload =
+      checksign(received_binding, expected_agent_public) in
+    let received_grant_digest = digest(received_grant) in
+    if received_binding_payload =
+      binding_payload(
+        received_grant_digest,
+        expected_exporter,
+        expected_nonce,
+        expected_context,
+        expected_attestation
+      )
+    then
+      event accepted(
+        expected_agent_public,
+        expected_grant_id,
+        received_grant_digest,
+        expected_exporter,
+        expected_nonce,
+        expected_context,
+        expected_attestation,
+        required_audience,
+        required_values
+      ).
+
+let binding_session(agent_key: skey) =
+  new grant_id: bitstring;
+  new exporter: bitstring;
+  new nonce: bitstring;
+  new context: bitstring;
+  new attestation: bitstring;
+  let agent_public = pk(agent_key) in
+  let grant = sign(
+    grant_payload(
+      agent_public,
+      required_audience,
+      required_values,
+      grant_id
+    ),
+    authority_key
+  ) in
+  let grant_digest_value = digest(grant) in
+  event grant_issued(
+    agent_public,
+    required_audience,
+    required_values,
+    grant_id
+  );
+  (
+    honest_agent(
+      agent_key,
+      grant,
+      grant_digest_value,
+      exporter,
+      nonce,
+      context,
+      attestation
+    )
+  |
+    verifier(
+      agent_public,
+      grant_id,
+      exporter,
+      nonce,
+      context,
+      attestation
+    )
+  ).
+
+process
+  out(net, pk(authority_key));
+  out(net, pk(agent_a_key));
+  out(net, pk(agent_b_key));
+  (
+    (!binding_session(agent_a_key))
+  |
+    (!binding_session(agent_b_key))
+  )

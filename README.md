@@ -1,77 +1,34 @@
 # Agents Secure Binding
 
-## Status
-
-Draft status: repository security-hardening draft.
-
-Current source of truth: `docs/SSOT.md`, Draft v0.5-review2.
-
-Standards status: this is not an IETF consensus document and does not define a
-new TLS handshake, TLS extension, attestation evidence format, identity
-provider, or application protocol.
-
-Evaluation boundary: the v0.4 evaluation is useful implementation evidence for
-the checked fail-closed verifier behavior. It is not a formal proof and should
-not be cited as validation of TLS, attestation formats, or all deployments. The
-latest recorded remote implementation checkpoint is commit
-`b493d2c3733cd0fa5c35035175f5f9d3466f92f7`: GitHub Actions `CI` run
-`28431874162` and `Security Red Team` run `28431874166` both completed
-successfully on 2026-06-30 UTC.
-
-## What This Is / Is Not
-
-Agents Secure Binding implements one experimental Direct-Agent binding profile
-based on the core acceptance rules. It is not the draft itself, and it does not
-claim to implement every binding profile.
+Agents Secure Binding is a verifier-side acceptance profile and implementation
+repository for binding an Agent identity to the session, context, attestation
+facts, and local policy under which it is accepted.
 
 A verifier accepts an Agent only when a verified authority grant,
 holder-of-key proof, accepted TLS or exported-authenticator session, freshness
 and replay state, any required attestation result, and verifier-local policy
 all describe the same intended interaction.
 
-This repository contains profile text, implementation helpers, tests, vectors,
-and derived notes for that acceptance rule.
+The primary failure class is context diversion: accepting cryptographically
+valid material for a different service, tenant, Agent, task, delegation, or
+authority boundary than the verifier intended.
 
-The Direct-Agent runtime implementation is centered on `pkg/clients`,
-`pkg/atls`, and `pkg/atls/identitypolicy`. The `pkg/atls` name is a legacy
-implementation package name from the inherited codebase; it does not mean this
-repository defines attested TLS or a TLS extension. The legacy-named `pkg/agtp`
-package is retained as an experimental reference-adapter surface for JWT/JWS,
-CWT/COSE, and gateway-route policy experiments; it is not the core verifier
-dependency.
+## Acceptance Contract
 
-This profile is not:
+The verifier evaluates one ordered contract:
 
-- a TLS extension;
-- an attestation evidence format;
-- an identity provider;
-- a holder-side presentation format;
-- a registry, control plane, gateway, or application protocol;
-- a replacement for AGTP, A2A, Cocos, TLS, OAuth/OIDC, or remote attestation
-  standards;
-- new cryptography.
+1. Authenticate the authority grant and its policy scope.
+2. Verify holder-of-key proof over the exact grant and accepted session.
+3. Check freshness, nonce, and replay state.
+4. Bind any required attestation result to the same session.
+5. Compare authenticated observed values with verifier-local expected policy.
+6. Commit one-shot replay state before returning the accepted identity.
 
-Application protocols can carry the profile material, but they do not by
-themselves supply the verifier-side acceptance rule.
+The core implementation is centered on `pkg/clients`, `pkg/atls`, and
+`pkg/atls/identitypolicy`. `pkg/agtp` contains reference adapters for JWT/JWS,
+CWT/COSE, and gateway-route policy experiments.
 
-Wallets are optional presentation or signing components, not trust roots or
-sources of expected policy. Gateway-routed mode is out of scope for this
-Direct-Agent implementation surface.
-
-Review boundary:
-
-- TLS 1.3, certificate-path validation, exporter computation, and key-schedule
-  security are delegated to the deployment TLS stack. This repository consumes
-  an already accepted TLS connection.
-- Attestation evidence formats and appraisal policy are delegated to the
-  concrete binding profile or deployment appraisal profile. This repository
-  checks the accepted binder value when that profile supplies one.
-- The red-team evidence supports the tested fail-closed verifier behavior. It
-  is not a formal proof and does not validate every deployment topology.
-- Legacy package names such as `pkg/atls` and `pkg/agtp` are implementation
-  compatibility names. They do not define the protocol trust model.
-
-## Start Here
+## Repository Map
 
 - `docs/SSOT.md`: normative repository source for profile behavior, dimensions,
   verification order, and compatibility notes.
@@ -79,6 +36,10 @@ Review boundary:
   gateway-route, downgrade, and privacy threat model.
 - `docs/live-red-team-report.md`: current live-style red-team evidence and
   evaluation boundaries.
+- `formal/`: ProVerif and TLA+ models, recorded results, and
+  model-to-implementation traceability.
+- `pkg/clients`, `pkg/atls`, and `pkg/atls/identitypolicy`: Direct-Agent
+  acceptance implementation.
 - `PUBLICATION_TODO.md`: publication blockers, inherited runtime risk
   classification, module identity choice, and CI/red-team checkpoint status.
 
@@ -89,9 +50,8 @@ profile-authenticated Agent identity unless the verified grant, proof, accepted
 session, freshness state, replay state, any required attestation result, and
 local policy identify the same intended interaction.
 
-This profile uses D0 through D6 as acceptance dimensions. These labels are for
-policy separation and diagnostics. They are not OSI layers, wire-format layers,
-or a trust hierarchy.
+This profile uses D0 through D6 as acceptance dimensions for policy separation
+and diagnostics.
 
 | Dimension | Verification target | Main failure class |
 | --- | --- | --- |
@@ -119,9 +79,9 @@ them deterministically and do not repair peer-provided aliases, display labels,
 URI variants, natural-language phrases, or model interpretations in the final
 acceptance path.
 
-## Evaluation Status
+## Evaluation Evidence
 
-Covered in the current v0.4 evidence:
+The current v0.4 evidence covers:
 
 - focused local checks and unit-level coverage;
 - positive and negative profile vectors;
@@ -132,24 +92,35 @@ Covered in the current v0.4 evidence:
   early-data pre-binding rejection, malformed token corpora, bounded fuzz smoke
   for compact JWT/JWS parsing, and deterministic acceptance invariants;
 - route-assertion policy tests and a local HTTP route-assertion harness for the
-  documented gateway boundary, with no runtime gateway mode.
+  documented gateway boundary.
 
 For accepted TLS sessions, the AGTP observed-identity path derives
 `tls_exporter_sha256` from the accepted `tls.ConnectionState`. Fixed exporter
 bytes are used only in synthetic unit fixtures.
 
-Not yet validated as a broad deployment security claim:
+The latest recorded remote implementation checkpoint is commit
+`444b81d2484214b2247b31013b372f73937808c7`. GitHub Actions `CI` run
+`28434430030` and `Security Red Team` run `28434430103` both completed
+successfully on 2026-06-30 UTC.
 
-- end-to-end application 0-RTT payload behavior beyond the dependency-free
-  QUIC/TLS early-data harness;
-- broader gRPC deployment pooling beyond the local reuse harness;
-- runtime gateway wiring beyond the route-assertion HTTP harness;
-- longer fuzz/property campaigns beyond the bounded token-parser smoke target
-  and the current 60-second local fuzz pass;
-- hardware-backed confidential-VM attestation replay coverage.
+See `docs/live-red-team-report.md` for the evidence matrix.
 
-See `docs/live-red-team-report.md` for the evidence matrix and
-`PUBLICATION_TODO.md` for release blockers.
+## Formal Assurance
+
+The repository includes two complementary formal models:
+
+- `formal/proverif/binding_acceptance.pv` checks signing-key secrecy,
+  correspondence from acceptance to an authority-issued grant and exact Agent
+  binding, and injective Agent-binding correspondence. ProVerif 2.05 reported
+  all five selected queries as true.
+- `formal/tla/DurableGate.tla` checks a generic durable-state target contract
+  for replay, revocation, leases, audit delivery, restart, failure handling,
+  and logical time. TLC generated 7,692,655 states and found 1,555,674 distinct
+  states without an invariant violation in the recorded finite configuration.
+
+`formal/MODEL_MAP.md` identifies the current implementation surface for the
+binding model and the remaining implementation boundary for the durable-state
+model.
 
 ## Implementation Provenance
 
@@ -158,9 +129,6 @@ manager, agent, HAL, proxy, OCI, and helper code from
 [ultravioletrs/cocos](https://github.com/ultravioletrs/cocos), plus
 profile-specific documentation, tests, vectors, and security-profile helpers
 for Agents Secure Binding.
-
-Cocos remains implementation provenance and experience. It is not the normative
-scope of this security profile.
 
 The repository keeps the Apache-2.0 license and retained upstream notices. See
 `ATTRIBUTION.md`.
@@ -197,9 +165,6 @@ Product security gate:
 make product-security-gate
 ```
 
-Some client and red-team tests open local loopback listeners. Restricted
-sandboxes may need a less constrained local environment for those tests.
-
 ## Security Reporting
 
 Report suspected vulnerabilities through GitHub private vulnerability reporting
@@ -216,3 +181,37 @@ maintainer.
 
 This repository currently keeps the original Apache-2.0 license and retained
 upstream notices. See `ATTRIBUTION.md`.
+
+## Caveats and Scope Boundaries
+
+- The core verifier-side acceptance profile is frozen for review. The current
+  standards-facing baseline should change only for submission errors,
+  reviewer-requested fixes, factual corrections, broken references, or
+  requirements ambiguity.
+- This repository is a non-normative implementation and evidence repository
+  for one experimental Direct-Agent binding profile. It is not an IETF
+  consensus document and does not define a TLS handshake or extension,
+  attestation evidence format, identity provider, holder-side presentation
+  format, registry, control plane, gateway, or application protocol.
+- TLS 1.3, certificate-path validation, exporter computation, and key-schedule
+  security remain the responsibility of the deployment TLS stack. Attestation
+  formats and appraisal policy remain the responsibility of the selected
+  binding and deployment profiles.
+- Gateway-routed runtime wiring is outside the current Direct-Agent
+  implementation. Wallets can provide presentation or signing functions, but
+  are not trust roots or sources of verifier-local expected policy.
+- The v0.4 evaluation is evidence for the tested fail-closed verifier behavior,
+  not a formal proof or validation of every deployment. Broader application
+  0-RTT behavior, production gRPC pooling, runtime gateway wiring, longer
+  fuzz/property campaigns, and hardware-backed confidential-VM attestation
+  replay remain outside the recorded evaluation.
+- The ProVerif model uses symbolic cryptography and does not prove TLS, X.509,
+  JWT parsing, certificate handling, or equivalence with compiled Go code. The
+  TLA+ result is bounded evidence for a generic target state machine; the
+  current Go tree does not implement its complete durable snapshot, revocation,
+  lease, audit-outbox, or logical-time contract.
+- `pkg/atls` and `pkg/agtp` are legacy compatibility names and do not define the
+  protocol trust model. Cocos is implementation provenance rather than the
+  normative scope of the profile.
+- Some client and red-team tests open local loopback listeners and may require
+  a less restricted test environment.
