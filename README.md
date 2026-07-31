@@ -105,6 +105,26 @@ successfully on 2026-06-30 UTC.
 
 See `docs/live-red-team-report.md` for the evidence matrix.
 
+## Agent-to-Agent Demonstration
+
+Run a local Agent A to Agent B communication demonstration:
+
+```sh
+go run ./examples/a2a
+```
+
+The demo creates ephemeral keys and certificates, opens a mutually
+authenticated TLS 1.3 connection, derives the live TLS exporter and canonical
+request-context binding, and sends a task with a Manager-signed grant and an
+Agent-signed Session Binding Statement. Agent B applies its own expected policy
+and replay state before accepting the task.
+
+The same run shows fail-closed rejection of scope escalation, a request for a
+resource outside the authenticated grant, a wrong audience, a binding borrowed
+from another TLS session, and reuse of an accepted binding. It is a
+software-only localhost demonstration; it does not perform hardware attestation
+or define an application-protocol message format.
+
 ## Formal Assurance
 
 The repository includes two complementary formal models:
