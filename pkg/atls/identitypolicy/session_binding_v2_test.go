@@ -10,6 +10,8 @@ import (
 	"time"
 )
 
+const testAttemptIDV2 = "attempt-1"
+
 func TestValidateAcceptedBindingV2RequiresLocalMandatoryValues(t *testing.T) {
 	now := time.Unix(1_700_000_000, 0)
 	observed := testBindingV2(now)
@@ -77,7 +79,7 @@ func TestValidateAcceptedBindingV2RequiresExactOptionalPresence(t *testing.T) {
 			name: "unexpected attempt ID",
 			observed: func() BindingV2 {
 				binding := base
-				binding.AttemptID = "attempt-1"
+				binding.AttemptID = testAttemptIDV2
 				return binding
 			}(),
 			expected: base,
@@ -88,7 +90,7 @@ func TestValidateAcceptedBindingV2RequiresExactOptionalPresence(t *testing.T) {
 			observed: base,
 			expected: func() BindingV2 {
 				binding := base
-				binding.AttemptID = "attempt-1"
+				binding.AttemptID = testAttemptIDV2
 				return binding
 			}(),
 			field: FieldAttemptID,
@@ -202,7 +204,7 @@ func TestValidateSessionBindingStatementV2RejectsReplacementCharacter(t *testing
 func TestSessionReplayKeyV2CoversMinimumTupleAndHidesNonce(t *testing.T) {
 	now := time.Unix(1_700_000_000, 0)
 	base := testSessionBindingStatementV2(now)
-	base.Binding.AttemptID = "attempt-1"
+	base.Binding.AttemptID = testAttemptIDV2
 	baseKey, err := SessionReplayKeyV2(base)
 	if err != nil {
 		t.Fatalf("SessionReplayKeyV2() error = %v", err)

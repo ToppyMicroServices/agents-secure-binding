@@ -267,10 +267,6 @@ func validateCertificateAtV2(certificate *x509.Certificate, now time.Time) error
 	return nil
 }
 
-func channelTagV2(state *tls.ConnectionState) (string, error) {
-	return channelTagV2At(state, time.Now().UTC())
-}
-
 func channelTagV2At(state *tls.ConnectionState, now time.Time) (string, error) {
 	if err := validateTLSSessionAtV2(state, now); err != nil {
 		return "", err
@@ -539,7 +535,7 @@ func decodeSBOV2(raw json.RawMessage) (securityBindingObjectV2, error) {
 
 func validateSBOV2(sbo securityBindingObjectV2, expected identitypolicy.BindingV2, challengeExpiresAt, now time.Time) error {
 	if sbo.Type != "sbaip.security-binding" || sbo.Version != 2 || sbo.Audience != demoAudience || sbo.ID == "" ||
-		sbo.Mode != "identity-grant+jws-session-binding" || sbo.GrantFormat != "jwt" || sbo.BindingFormat != "jwt" ||
+		sbo.Mode != "identity-grant+jws-session-binding" || sbo.GrantFormat != jwtFormat || sbo.BindingFormat != jwtFormat ||
 		sbo.Grant == "" || sbo.Binding == "" || sbo.EndpointRole != v2EndpointRole || sbo.InteractionType != v2InteractionType {
 		return fmt.Errorf("Security Binding Object contract mismatch")
 	}

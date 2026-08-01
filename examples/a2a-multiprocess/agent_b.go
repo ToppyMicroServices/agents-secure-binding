@@ -207,7 +207,7 @@ func (s *agentBServer) handleMessage(w http.ResponseWriter, r *http.Request) {
 
 func validateSBO(sbo securityBindingObject, expected identitypolicy.Binding, binderHash string) error {
 	if sbo.Type != "sbaip.security-binding" || sbo.Version != 1 || sbo.Audience != demoAudience || sbo.ID == "" ||
-		sbo.Mode != "identity-grant+jws-session-binding" || sbo.GrantFormat != "jwt" || sbo.BindingFormat != "jwt" ||
+		sbo.Mode != "identity-grant+jws-session-binding" || sbo.GrantFormat != jwtFormat || sbo.BindingFormat != jwtFormat ||
 		sbo.Grant == "" || sbo.Binding == "" || sbo.Nonce == "" {
 		return fmt.Errorf("Security Binding Object contract mismatch")
 	}

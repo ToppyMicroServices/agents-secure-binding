@@ -20,6 +20,7 @@ const (
 	testV2ManagerKeyID = "manager-key-v2"
 	testV2AgentKeyID   = "agent-key-v2"
 	testV2AlternateKey = "alternate-key-v2"
+	testV2Target       = "queue:documents"
 )
 
 var (
@@ -68,7 +69,7 @@ func TestIdentityGrantDigestPreservesV1Hash(t *testing.T) {
 func TestVerifyIdentityGrantJWTV2ExtractsTargetWithoutChangingAuthorization(t *testing.T) {
 	fixture := newJWTV2Fixture()
 	claims := fixture.grantClaims()
-	claims["target_resource"] = "queue:documents"
+	claims["target_resource"] = testV2Target
 	claims["target_operation"] = "message:send"
 	claims["resource"] = "records:read"
 	claims["x-non-critical"] = "ignored"
@@ -78,7 +79,7 @@ func TestVerifyIdentityGrantJWTV2ExtractsTargetWithoutChangingAuthorization(t *t
 	if err != nil {
 		t.Fatalf("VerifyIdentityGrantJWTV2() error = %v", err)
 	}
-	if grant.Target.Resource != "queue:documents" || grant.Target.Operation != "message:send" {
+	if grant.Target.Resource != testV2Target || grant.Target.Operation != "message:send" {
 		t.Fatalf("Target = %#v", grant.Target)
 	}
 	if len(grant.Values.Resources) != 1 || grant.Values.Resources[0] != "records:read" {
@@ -126,7 +127,7 @@ func TestVerifyIdentityGrantJWTV2RejectsAmbiguousWireForms(t *testing.T) {
 			name: "case alias",
 			mutateClaims: func(claims jwt.MapClaims) {
 				delete(claims, "target_resource")
-				claims["Target_Resource"] = "queue:documents"
+				claims["Target_Resource"] = testV2Target
 			},
 			want: ErrInvalidJWTMember,
 		},
@@ -499,7 +500,7 @@ func TestVerifySessionIdentityJWTV2AttestationAndReplayOrder(t *testing.T) {
 		if !attestationCalled || replay.calls != 1 {
 			t.Fatalf("attestation called = %t, replay calls = %d", attestationCalled, replay.calls)
 		}
-		if result.Accepted.Target.Resource != "queue:documents" || result.Accepted.EffectiveAuthorization.CapabilityRef != "cap:summarize" {
+		if result.Accepted.Target.Resource != testV2Target || result.Accepted.EffectiveAuthorization.CapabilityRef != "cap:summarize" {
 			t.Fatalf("result = %#v", result)
 		}
 		if result.Accepted.Values.Service != "document-service" || result.Accepted.Values.Agent != "" || result.Accepted.Values.TaskID != "" {
@@ -626,7 +627,7 @@ func (f jwtV2Fixture) grantClaims() jwt.MapClaims {
 		"agent":                 "agent-a",
 		"task_id":               "task-1",
 		"thread_id":             "thread-1",
-		"target_resource":       "queue:documents",
+		"target_resource":       testV2Target,
 		"target_operation":      "message:send",
 		"capability_ref":        "cap:summarize",
 		"scope":                 "document:write",
@@ -714,7 +715,7 @@ func (f jwtV2Fixture) sessionOptions(replay identitypolicy.ReplayCache) SessionI
 				Service: "document-service",
 			},
 			ExpectedTarget: identitypolicy.TargetV2{
-				Resource:  "queue:documents",
+				Resource:  testV2Target,
 				Operation: "message:send",
 			},
 			ExpectedAuthorization: identitypolicy.AuthorizationV2{

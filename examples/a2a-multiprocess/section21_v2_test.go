@@ -56,10 +56,10 @@ func TestDraft06Section21RejectsWrongRoleTypeTaskContextTargetAndOperation(t *te
 	now, grant, statement, expected := section21FixtureV2()
 	tests := map[string]func(*identitypolicy.VerifiedGrantV2, *identitypolicy.VerifiedSessionBindingStatementV2){
 		"endpoint_role": func(_ *identitypolicy.VerifiedGrantV2, s *identitypolicy.VerifiedSessionBindingStatementV2) {
-			s.Binding.EndpointRole = "server-tls-endpoint"
+			s.Binding.EndpointRole = demoDisallowedEndpointRole
 		},
 		"interaction_type": func(_ *identitypolicy.VerifiedGrantV2, s *identitypolicy.VerifiedSessionBindingStatementV2) {
-			s.Binding.InteractionType = "callback"
+			s.Binding.InteractionType = demoDisallowedInteractionType
 		},
 		"task": func(g *identitypolicy.VerifiedGrantV2, _ *identitypolicy.VerifiedSessionBindingStatementV2) {
 			g.Values.TaskID = "task-other"
@@ -68,10 +68,10 @@ func TestDraft06Section21RejectsWrongRoleTypeTaskContextTargetAndOperation(t *te
 			g.Values.ThreadID = "context-other"
 		},
 		"target": func(g *identitypolicy.VerifiedGrantV2, _ *identitypolicy.VerifiedSessionBindingStatementV2) {
-			g.Target.Resource = "urn:example:document:other"
+			g.Target.Resource = demoOtherResource
 		},
 		"operation": func(g *identitypolicy.VerifiedGrantV2, _ *identitypolicy.VerifiedSessionBindingStatementV2) {
-			g.Target.Operation = "delete"
+			g.Target.Operation = demoDisallowedOperation
 		},
 	}
 	for name, mutate := range tests {
@@ -141,7 +141,7 @@ func TestDraft06Section21RejectsWrongAppraisalPolicy(t *testing.T) {
 func TestDraft06Section21SurplusAuthorizationDoesNotExpandEffectiveSet(t *testing.T) {
 	now, grant, statement, expected := section21FixtureV2()
 	grant.Values.Scopes = append(grant.Values.Scopes, "documents:delete")
-	grant.Values.Resources = append(grant.Values.Resources, "urn:example:document:other")
+	grant.Values.Resources = append(grant.Values.Resources, demoOtherResource)
 	policy := receiverPolicyV2()
 	policy.SetMode = identitypolicy.SetModeContainsAll
 	assertion, err := identitypolicy.NewAssertionFromSessionBindingV2(grant, statement, now)
@@ -205,9 +205,11 @@ func TestDraft06Section21RejectsReverseCallbackContinuationAndDerivedSigner(t *t
 	now, grant, statement, expected := section21FixtureV2()
 	tests := map[string]func(*identitypolicy.VerifiedSessionBindingStatementV2){
 		"reverse_role": func(s *identitypolicy.VerifiedSessionBindingStatementV2) {
-			s.Binding.EndpointRole = "server-tls-endpoint"
+			s.Binding.EndpointRole = demoDisallowedEndpointRole
 		},
-		"callback":     func(s *identitypolicy.VerifiedSessionBindingStatementV2) { s.Binding.InteractionType = "callback" },
+		"callback": func(s *identitypolicy.VerifiedSessionBindingStatementV2) {
+			s.Binding.InteractionType = demoDisallowedInteractionType
+		},
 		"continuation": func(s *identitypolicy.VerifiedSessionBindingStatementV2) { s.Binding.InteractionType = "continuation" },
 		"derived_grant_signer": func(s *identitypolicy.VerifiedSessionBindingStatementV2) {
 			s.SignerKey = "derived-agent-key"
@@ -242,7 +244,10 @@ func TestDraft06Section21FailsClosedWhenCreatorIsolationIsRequired(t *testing.T)
 }
 
 func TestDraft06Section21FailsClosedWhenReplayIsUnavailable(t *testing.T) {
-	_, _, statement, _ := section21FixtureV2()
+	_, grant, statement, _ := section21FixtureV2()
+	if grant.GrantHash != statement.GrantHash {
+		t.Fatal("section 21 replay fixture grant hash mismatch")
+	}
 	if err := identitypolicy.MarkSessionBindingUsedV2(nil, statement); !errors.Is(err, identitypolicy.ErrMissingReplayCacheV2) {
 		t.Fatalf("nil replay cache error = %v", err)
 	}
@@ -295,8 +300,8 @@ func TestDraft06Section21TaskAndTargetMutationsChangeSeparateContexts(t *testing
 		t.Fatal("task mutation did not remain isolated to task_context")
 	}
 	for name, mutate := range map[string]func(*a2aSendMessageRequest){
-		"target":    func(r *a2aSendMessageRequest) { r.Message.Parts[0].Metadata["resource"] = "urn:example:document:other" },
-		"operation": func(r *a2aSendMessageRequest) { r.Message.Parts[0].Metadata["operation"] = "delete" },
+		"target":    func(r *a2aSendMessageRequest) { r.Message.Parts[0].Metadata["resource"] = demoOtherResource },
+		"operation": func(r *a2aSendMessageRequest) { r.Message.Parts[0].Metadata["operation"] = demoDisallowedOperation },
 	} {
 		t.Run(name, func(t *testing.T) {
 			request := newRequest()

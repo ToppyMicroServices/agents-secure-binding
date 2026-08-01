@@ -169,16 +169,16 @@ func runAgentAV2(ctx context.Context, opts options, out outputWriter) error {
 	}
 	scenarios := []scenario{
 		{label: "target substitution", risk: "data_exfiltration", reason: "binding-context", mutation: func(_ jwt.MapClaims, _ *securityBindingObjectV2, request *a2aSendMessageRequest) {
-			request.Message.Parts[0].Metadata["resource"] = "urn:example:document:other"
+			request.Message.Parts[0].Metadata["resource"] = demoOtherResource
 		}},
 		{label: "operation substitution", risk: "authority_expansion", reason: "binding-context", mutation: func(_ jwt.MapClaims, _ *securityBindingObjectV2, request *a2aSendMessageRequest) {
-			request.Message.Parts[0].Metadata["operation"] = "delete"
+			request.Message.Parts[0].Metadata["operation"] = demoDisallowedOperation
 		}},
 		{label: "wrong endpoint role", risk: "role_confusion", reason: "profile-rejected", mutation: func(claims jwt.MapClaims, _ *securityBindingObjectV2, _ *a2aSendMessageRequest) {
-			claims["endpoint_role"] = "server-tls-endpoint"
+			claims["endpoint_role"] = demoDisallowedEndpointRole
 		}},
 		{label: "wrong interaction type", risk: "interaction_confusion", reason: "profile-rejected", mutation: func(claims jwt.MapClaims, _ *securityBindingObjectV2, _ *a2aSendMessageRequest) {
-			claims["interaction_type"] = "callback"
+			claims["interaction_type"] = demoDisallowedInteractionType
 		}},
 		{label: "missing exporter", risk: "channel_unbound", reason: "profile-rejected", mutation: func(claims jwt.MapClaims, _ *securityBindingObjectV2, _ *a2aSendMessageRequest) {
 			delete(claims, "tls_exporter_sha256")
@@ -281,7 +281,7 @@ func issueBoundRequestV2(ctx context.Context, conn *a2aConnection, challenge cha
 	sbo := securityBindingObjectV2{
 		Type: "sbaip.security-binding", Version: 2, Audience: demoAudience, ID: sboID,
 		IssuedAt: now.Unix(), ExpiresAt: proofExpiresAt.Unix(), Mode: "identity-grant+jws-session-binding",
-		GrantFormat: "jwt", Grant: grant.IdentityGrant, GrantSHA256: sha256String([]byte(grant.IdentityGrant)), BindingFormat: "jwt",
+		GrantFormat: jwtFormat, Grant: grant.IdentityGrant, GrantSHA256: sha256String([]byte(grant.IdentityGrant)), BindingFormat: jwtFormat,
 		EndpointRole: binding.EndpointRole, InteractionType: binding.InteractionType,
 		AcceptedEndpointSPKISHA256: binding.AcceptedEndpointSPKISHA256,
 		TLSExporterSHA256:          binding.TLSExporterSHA256, BindingContextSHA256: binding.BindingContextSHA256,

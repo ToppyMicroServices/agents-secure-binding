@@ -161,10 +161,6 @@ func (s *challengeStoreV2) pruneLocked(now time.Time) {
 	}
 }
 
-func currentPeerSPKIHashV2(state *tls.ConnectionState) (string, error) {
-	return currentPeerSPKIHashV2At(state, time.Now().UTC())
-}
-
 func currentPeerSPKIHashV2At(state *tls.ConnectionState, now time.Time) (string, error) {
 	if err := validateTLSSessionAtV2(state, now); err != nil {
 		return "", err

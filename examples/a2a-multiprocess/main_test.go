@@ -127,7 +127,7 @@ func TestCanonicalContextCoversApplicationFieldsButNotExtensionPayloads(t *testi
 	if !bytes.Equal(firstContext, secondContext) {
 		t.Fatal("security extension payloads changed canonical request context")
 	}
-	second.Message.Parts[0].Metadata["resource"] = "urn:example:document:other"
+	second.Message.Parts[0].Metadata["resource"] = demoOtherResource
 	changedContext, err := canonicalRequestContext(second)
 	if err != nil {
 		t.Fatal(err)

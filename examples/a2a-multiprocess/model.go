@@ -53,6 +53,12 @@ const (
 	demoOperation   = "summarize"
 	demoMeasurement = "asb-simulation-measurement-v1"
 
+	demoOtherResource             = "urn:example:document:other"
+	demoDisallowedOperation       = "delete"
+	demoDisallowedEndpointRole    = "server-tls-endpoint"
+	demoDisallowedInteractionType = "callback"
+	jwtFormat                     = "jwt"
+
 	modeSimulation    = "simulation"
 	modeHardware      = "hardware"
 	platformAuto      = "auto"
