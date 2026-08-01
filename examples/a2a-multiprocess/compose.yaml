@@ -32,7 +32,7 @@ services:
 
   manager:
     <<: *service-defaults
-    command: ["--role", "manager", "--state-dir", "/state", "--listen", "0.0.0.0:8443"]
+    command: ["--role", "manager", "--state-dir", "/state", "--listen", "0.0.0.0:8443", "--binding-profile", "${BINDING_PROFILE:-v1}"]
     depends_on:
       bootstrap: {condition: service_completed_successfully}
     volumes: [manager-state:/state/manager]
@@ -46,14 +46,14 @@ services:
 
   verifier:
     <<: *service-defaults
-    command: ["--role", "verifier", "--state-dir", "/state", "--listen", "0.0.0.0:8445"]
+    command: ["--role", "verifier", "--state-dir", "/state", "--listen", "0.0.0.0:8445", "--binding-profile", "${BINDING_PROFILE:-v1}"]
     depends_on:
       bootstrap: {condition: service_completed_successfully}
     volumes: [verifier-state:/state/verifier]
 
   agent-b:
     <<: *service-defaults
-    command: ["--role", "agent-b", "--state-dir", "/state", "--listen", "0.0.0.0:8447", "--replay-url", "https://replay:8446", "--public-url", "https://agent-b:8447", "--allow-simulation"]
+    command: ["--role", "agent-b", "--state-dir", "/state", "--listen", "0.0.0.0:8447", "--replay-url", "https://replay:8446", "--public-url", "https://agent-b:8447", "--allow-simulation", "--binding-profile", "${BINDING_PROFILE:-v1}"]
     depends_on:
       bootstrap: {condition: service_completed_successfully}
       replay: {condition: service_started}
@@ -61,7 +61,7 @@ services:
 
   agent-a:
     <<: *service-defaults
-    command: ["--role", "agent-a", "--state-dir", "/state", "--manager-url", "https://manager:8443", "--attester-url", "https://attester:8444", "--verifier-url", "https://verifier:8445", "--agent-b-url", "https://agent-b:8447", "--attestation-mode", "simulation"]
+    command: ["--role", "agent-a", "--state-dir", "/state", "--manager-url", "https://manager:8443", "--attester-url", "https://attester:8444", "--verifier-url", "https://verifier:8445", "--agent-b-url", "https://agent-b:8447", "--attestation-mode", "simulation", "--binding-profile", "${BINDING_PROFILE:-v1}"]
     depends_on:
       manager: {condition: service_started}
       attester: {condition: service_started}

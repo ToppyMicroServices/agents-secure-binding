@@ -42,6 +42,12 @@ type a2aResult struct {
 var demoMessageSequence atomic.Uint64
 
 func runAgentA(ctx context.Context, opts options, out outputWriter) error {
+	if opts.bindingProfile == bindingProfileDraft06V2 {
+		return runAgentAV2(ctx, opts, out)
+	}
+	if opts.bindingProfile != bindingProfileV1 {
+		return fmt.Errorf("unsupported binding profile %q", opts.bindingProfile)
+	}
 	for name, value := range map[string]string{
 		"manager": opts.managerURL, "attester": opts.attesterURL,
 		"verifier": opts.verifierURL, "agent-b": opts.agentBURL,
@@ -198,7 +204,7 @@ func runAgentA(ctx context.Context, opts options, out outputWriter) error {
 		substitutionConn.close()
 		return err
 	}
-	substitutionRequest.Message.Parts[0].Metadata["resource"] = "urn:example:document:other"
+	substitutionRequest.Message.Parts[0].Metadata["resource"] = demoOtherResource
 	substitutionResult, err := substitutionConn.send(substitutionRequest, a2aVersion)
 	substitutionConn.close()
 	if err != nil {
@@ -291,8 +297,8 @@ func issueBoundRequest(ctx context.Context, conn *a2aConnection, request a2aSend
 	sbo := securityBindingObject{
 		Type: "sbaip.security-binding", Version: 1, Audience: demoAudience, ID: sboID,
 		IssuedAt: now.Unix(), ExpiresAt: now.Add(2 * time.Minute).Unix(), Mode: "identity-grant+jws-session-binding",
-		GrantFormat: "jwt", Grant: grant.IdentityGrant, GrantSHA256: sha256String([]byte(grant.IdentityGrant)),
-		BindingFormat: "jwt", Binding: bindingToken, BindingSHA256: sha256String([]byte(bindingToken)),
+		GrantFormat: jwtFormat, Grant: grant.IdentityGrant, GrantSHA256: sha256String([]byte(grant.IdentityGrant)),
+		BindingFormat: jwtFormat, Binding: bindingToken, BindingSHA256: sha256String([]byte(bindingToken)),
 		RequestContextSHA256: binding.RequestContextSHA256, TLSExporterSHA256: binding.TLSExporterSHA256, Nonce: nonce,
 	}
 	sboJSON, err := json.Marshal(sbo)

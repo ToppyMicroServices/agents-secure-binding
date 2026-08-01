@@ -10,11 +10,25 @@ import (
 )
 
 const (
-	a2aVersion                 = "1.0"
-	a2aMediaType               = "application/a2a+json"
-	problemMediaType           = "application/problem+json"
-	securityBindingExtension   = "urn:agents-secure-binding:security-binding:v1"
-	attestationResultExtension = "urn:agents-secure-binding:attestation-result:v1"
+	a2aVersion                   = "1.0"
+	a2aMediaType                 = "application/a2a+json"
+	problemMediaType             = "application/problem+json"
+	securityBindingExtension     = "urn:agents-secure-binding:security-binding:v1"
+	attestationResultExtension   = "urn:agents-secure-binding:attestation-result:v1"
+	securityBindingExtensionV2   = "urn:agents-secure-binding:security-binding:v2"
+	attestationResultExtensionV2 = "urn:agents-secure-binding:attestation-result:v2"
+
+	bindingProfileV1         = "v1"
+	bindingProfileDraft06V2  = "draft06-v2"
+	v2EndpointRole           = "client-tls-endpoint"
+	v2InteractionType        = "agent-to-agent"
+	v2ProtocolID             = "urn:agents-secure-binding:a2a-http-json:v2"
+	v2ExporterLabel          = "EXPORTER-Agents-Secure-Binding-A2A-v2"
+	v2ChallengeExporterLabel = "EXPORTER-Agents-Secure-Binding-A2A-Challenge-v2"
+	v2ChallengePath          = "/extensions/agents-secure-binding/v2/challenges"
+	v2AttestationProfile     = "sbaip.attestation-result"
+	v2AttestationVersion     = "2"
+	v2AppraisalPolicyID      = "urn:agents-secure-binding:attestation-policy:demo-v2"
 
 	demoAudience       = "agent-b"
 	demoManagerIssuer  = "demo-manager"
@@ -28,6 +42,7 @@ const (
 
 	demoTaskID      = "task-demo-1"
 	demoContextID   = "context-demo-1"
+	demoThreadID    = demoContextID
 	demoService     = "task-executor"
 	demoDeployment  = "multiprocess-demo"
 	demoWorkload    = "coordinator"
@@ -37,6 +52,12 @@ const (
 	demoResource    = "urn:example:document:demo"
 	demoOperation   = "summarize"
 	demoMeasurement = "asb-simulation-measurement-v1"
+
+	demoOtherResource             = "urn:example:document:other"
+	demoDisallowedOperation       = "delete"
+	demoDisallowedEndpointRole    = "server-tls-endpoint"
+	demoDisallowedInteractionType = "callback"
+	jwtFormat                     = "jwt"
 
 	modeSimulation    = "simulation"
 	modeHardware      = "hardware"
@@ -162,6 +183,8 @@ type problem struct {
 type attestationResultClaims struct {
 	jwt.RegisteredClaims
 	ProfileType       string `json:"profile_type"`
+	ProfileVersion    string `json:"profile_version,omitempty"`
+	AppraisalPolicyID string `json:"appraisal_policy_id,omitempty"`
 	Platform          string `json:"platform"`
 	Simulation        bool   `json:"simulation"`
 	BinderSHA256      string `json:"binder_sha256"`

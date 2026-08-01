@@ -31,6 +31,12 @@ type agentBServer struct {
 }
 
 func runAgentB(ctx context.Context, opts options, out outputWriter) error {
+	if opts.bindingProfile == bindingProfileDraft06V2 {
+		return runAgentBV2(ctx, opts, out)
+	}
+	if opts.bindingProfile != bindingProfileV1 {
+		return fmt.Errorf("unsupported binding profile %q", opts.bindingProfile)
+	}
 	if opts.replayURL == "" {
 		return fmt.Errorf("replay URL is required")
 	}
@@ -201,7 +207,7 @@ func (s *agentBServer) handleMessage(w http.ResponseWriter, r *http.Request) {
 
 func validateSBO(sbo securityBindingObject, expected identitypolicy.Binding, binderHash string) error {
 	if sbo.Type != "sbaip.security-binding" || sbo.Version != 1 || sbo.Audience != demoAudience || sbo.ID == "" ||
-		sbo.Mode != "identity-grant+jws-session-binding" || sbo.GrantFormat != "jwt" || sbo.BindingFormat != "jwt" ||
+		sbo.Mode != "identity-grant+jws-session-binding" || sbo.GrantFormat != jwtFormat || sbo.BindingFormat != jwtFormat ||
 		sbo.Grant == "" || sbo.Binding == "" || sbo.Nonce == "" {
 		return fmt.Errorf("Security Binding Object contract mismatch")
 	}

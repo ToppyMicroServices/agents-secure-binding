@@ -74,7 +74,7 @@ func runOrchestrator(ctx context.Context, opts options, out outputWriter) error 
 	if err != nil {
 		return err
 	}
-	managerURL, err := start("manager")
+	managerURL, err := start("manager", "--binding-profile", opts.bindingProfile)
 	if err != nil {
 		return err
 	}
@@ -82,11 +82,11 @@ func runOrchestrator(ctx context.Context, opts options, out outputWriter) error 
 	if err != nil {
 		return err
 	}
-	verifierURL, err := start("verifier", "--expected-measurement-hex", opts.expectedMeasurementHex)
+	verifierURL, err := start("verifier", "--expected-measurement-hex", opts.expectedMeasurementHex, "--binding-profile", opts.bindingProfile)
 	if err != nil {
 		return err
 	}
-	agentBArgs := []string{"--replay-url", replayURL, "--expected-measurement-hex", opts.expectedMeasurementHex}
+	agentBArgs := []string{"--replay-url", replayURL, "--expected-measurement-hex", opts.expectedMeasurementHex, "--binding-profile", opts.bindingProfile}
 	if strings.EqualFold(opts.attestationMode, modeSimulation) {
 		agentBArgs = append(agentBArgs, "--allow-simulation")
 	} else if opts.allowSimulation {
@@ -102,6 +102,7 @@ func runOrchestrator(ctx context.Context, opts options, out outputWriter) error 
 		"--manager-url", managerURL, "--attester-url", attesterURL,
 		"--verifier-url", verifierURL, "--agent-b-url", agentBURL,
 		"--attestation-mode", opts.attestationMode,
+		"--binding-profile", opts.bindingProfile,
 	}
 	agent := exec.CommandContext(ctx, executable, agentArgs...)
 	agent.Stdout = writerAdapter{out}

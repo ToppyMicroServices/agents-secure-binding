@@ -27,6 +27,7 @@ type options struct {
 	attestationPlatform    string
 	expectedMeasurementHex string
 	allowSimulation        bool
+	bindingProfile         string
 }
 
 func main() {
@@ -61,6 +62,7 @@ func parseFlags() options {
 	flag.StringVar(&opts.attestationPlatform, "attestation-platform", platformAuto, "hardware platform: auto, snp, or tdx")
 	flag.StringVar(&opts.expectedMeasurementHex, "expected-measurement-hex", "", "required hardware measurement (SNP MEASUREMENT or TDX MRTD), hex encoded")
 	flag.BoolVar(&opts.allowSimulation, "allow-simulation", false, "allow explicitly marked simulation attestation results")
+	flag.StringVar(&opts.bindingProfile, "binding-profile", bindingProfileV1, "binding profile: v1 or draft06-v2")
 	flag.Parse()
 	return opts
 }

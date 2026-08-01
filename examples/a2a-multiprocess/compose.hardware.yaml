@@ -6,16 +6,16 @@ services:
       - "${ATTESTATION_DEVICE:?set ATTESTATION_DEVICE to the guest device path}:${ATTESTATION_DEVICE}:rwm"
 
   verifier:
-    command: ["--role", "verifier", "--state-dir", "/state", "--listen", "0.0.0.0:8445", "--expected-measurement-hex", "${EXPECTED_MEASUREMENT_HEX:?set the exact 48-byte measurement in hex}"]
+    command: ["--role", "verifier", "--state-dir", "/state", "--listen", "0.0.0.0:8445", "--expected-measurement-hex", "${EXPECTED_MEASUREMENT_HEX:?set the exact 48-byte measurement in hex}", "--binding-profile", "${BINDING_PROFILE:-v1}"]
     networks:
       - a2a
       - collateral
 
   agent-b:
-    command: ["--role", "agent-b", "--state-dir", "/state", "--listen", "0.0.0.0:8447", "--replay-url", "https://replay:8446", "--public-url", "https://agent-b:8447", "--expected-measurement-hex", "${EXPECTED_MEASUREMENT_HEX:?set the exact 48-byte measurement in hex}"]
+    command: ["--role", "agent-b", "--state-dir", "/state", "--listen", "0.0.0.0:8447", "--replay-url", "https://replay:8446", "--public-url", "https://agent-b:8447", "--expected-measurement-hex", "${EXPECTED_MEASUREMENT_HEX:?set the exact 48-byte measurement in hex}", "--binding-profile", "${BINDING_PROFILE:-v1}"]
 
   agent-a:
-    command: ["--role", "agent-a", "--state-dir", "/state", "--manager-url", "https://manager:8443", "--attester-url", "https://attester:8444", "--verifier-url", "https://verifier:8445", "--agent-b-url", "https://agent-b:8447", "--attestation-mode", "hardware"]
+    command: ["--role", "agent-a", "--state-dir", "/state", "--manager-url", "https://manager:8443", "--attester-url", "https://attester:8444", "--verifier-url", "https://verifier:8445", "--agent-b-url", "https://agent-b:8447", "--attestation-mode", "hardware", "--binding-profile", "${BINDING_PROFILE:-v1}"]
 
 networks:
   collateral:

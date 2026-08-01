@@ -127,7 +127,7 @@ func TestCanonicalContextCoversApplicationFieldsButNotExtensionPayloads(t *testi
 	if !bytes.Equal(firstContext, secondContext) {
 		t.Fatal("security extension payloads changed canonical request context")
 	}
-	second.Message.Parts[0].Metadata["resource"] = "urn:example:document:other"
+	second.Message.Parts[0].Metadata["resource"] = demoOtherResource
 	changedContext, err := canonicalRequestContext(second)
 	if err != nil {
 		t.Fatal(err)
@@ -175,6 +175,34 @@ func TestMultiprocessSimulationEndToEnd(t *testing.T) {
 	} {
 		if !bytes.Contains(output, []byte(expected)) {
 			t.Fatalf("demo output missing %q\n%s", expected, output)
+		}
+	}
+}
+
+func TestMultiprocessDraft06V2EndToEnd(t *testing.T) {
+	if testing.Short() {
+		t.Skip("multiprocess loopback test disabled in short mode")
+	}
+	binary := filepath.Join(t.TempDir(), "asb-a2a-v2")
+	build := exec.Command("go", "build", "-o", binary, ".")
+	build.Env = os.Environ()
+	if output, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build demo: %v\n%s", err, output)
+	}
+	run := exec.Command(binary, "--role", "orchestrator", "--binding-profile", bindingProfileDraft06V2)
+	output, err := run.CombinedOutput()
+	if err != nil {
+		t.Fatalf("run draft-06 demo: %v\n%s", err, output)
+	}
+	for _, expected := range []string{
+		"authorized Send Message v2", "nonce reuse on another task",
+		"borrowed challenge on TLS", "target substitution", "operation substitution",
+		"wrong endpoint role", "wrong interaction type", "missing exporter",
+		"reserialized grant hash", "missing attestation binder", "missing attestation result",
+		"summary: 11/11 expected draft06-v2 decisions observed",
+	} {
+		if !bytes.Contains(output, []byte(expected)) {
+			t.Fatalf("draft-06 demo output missing %q\n%s", expected, output)
 		}
 	}
 }

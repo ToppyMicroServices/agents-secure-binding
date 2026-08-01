@@ -16,6 +16,9 @@ import (
 )
 
 func runManager(ctx context.Context, opts options, out outputWriter) error {
+	if opts.bindingProfile != bindingProfileV1 && opts.bindingProfile != bindingProfileDraft06V2 {
+		return fmt.Errorf("unsupported binding profile %q", opts.bindingProfile)
+	}
 	key, err := loadPrivateKey(filepath.Join(roleDirectory(opts.stateDir, "manager"), signingKeyFile))
 	if err != nil {
 		return fmt.Errorf("load Manager signing key: %w", err)
@@ -43,7 +46,7 @@ func runManager(ctx context.Context, opts options, out outputWriter) error {
 			writeProblem(w, http.StatusInternalServerError, "internal", "Grant issuance failed", "identifier generation failed")
 			return
 		}
-		token, err := signJWT(demoManagerKeyID, key, jwt.MapClaims{
+		claims := jwt.MapClaims{
 			"iss": demoManagerIssuer, "sub": demoAgentIssuer, "aud": demoAudience,
 			"jti": id, "iat": now.Unix(), "exp": now.Add(2 * time.Minute).Unix(),
 			"profile_type": clients.TokenTypeIdentityGrant, "profile_version": clients.ProfileVersion,
@@ -51,7 +54,13 @@ func runManager(ctx context.Context, opts options, out outputWriter) error {
 			"service": demoService, "deployment": demoDeployment, "workload": demoWorkload,
 			"agent": demoAgentIssuer, "task_id": demoTaskID, "intent_ref": demoIntent,
 			"capability_ref": demoCapability, "scope": demoReadScope, "resource": demoResource,
-		})
+		}
+		if opts.bindingProfile == bindingProfileDraft06V2 {
+			claims["target_resource"] = demoResource
+			claims["target_operation"] = demoOperation
+			claims["thread_id"] = demoThreadID
+		}
+		token, err := signJWT(demoManagerKeyID, key, claims)
 		if err != nil {
 			writeProblem(w, http.StatusInternalServerError, "internal", "Grant issuance failed", "signing failed")
 			return

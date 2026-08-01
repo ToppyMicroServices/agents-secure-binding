@@ -34,6 +34,8 @@ CWT/COSE, and gateway-route policy experiments.
   verification order, and compatibility notes.
 - `docs/threat-model.md`: explanatory relay, replay, diversion, wrong-Agent,
   gateway-route, downgrade, and privacy threat model.
+- `docs/draft06-a2a-profile.md`: experimental, non-normative draft-06-inspired
+  v2 profile for the multiprocess A2A demonstration.
 - `docs/live-red-team-report.md`: current live-style red-team evidence and
   evaluation boundaries.
 - `formal/`: ProVerif and TLA+ models, recorded results, and
@@ -66,6 +68,10 @@ and diagnostics.
 D0 through D2 are authentication and binding dimensions. D3 through D6 are
 verifier-local policy dimensions. Peer-provided metadata can be observed input;
 it is not expected policy.
+
+The separate experimental A2A v2 profile splits target selection into D6 and
+effective authorization into D7. It does not change the existing v1 dimension
+mapping, API, or wire format.
 
 A concrete binding profile must still define its profile identifier, protocol
 identifier, TLS exporter label, canonical audience form, `grant_hash` bytes,
@@ -118,7 +124,8 @@ Agent B into operating-system processes. The same binary has a Docker Compose
 topology and an optional fail-closed SNP/TDX hardware mode. See the
 [multiprocess demonstration guide](examples/a2a-multiprocess/README.md) for the
 protocol subset, trust boundaries, Docker command, hardware prerequisites, and
-negative scenarios.
+negative scenarios. The guide also shows how to select the separate
+draft-06-inspired v2 profile; the no-flag behavior remains v1.
 
 The smaller software-only binding demonstration remains available:
 
@@ -222,7 +229,7 @@ upstream notices. See `ATTRIBUTION.md`.
   reviewer-requested fixes, factual corrections, broken references, or
   requirements ambiguity.
 - This repository is a non-normative implementation and evidence repository
-  for one experimental Direct-Agent binding profile. It is not an IETF
+  for experimental Direct-Agent binding profiles. It is not an IETF
   consensus document and does not define a TLS handshake or extension,
   attestation evidence format, identity provider, holder-side presentation
   format, registry, control plane, gateway, or application protocol.

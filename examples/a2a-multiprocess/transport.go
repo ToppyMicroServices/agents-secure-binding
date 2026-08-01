@@ -92,6 +92,9 @@ func serveTLS(ctx context.Context, opts options, role string, clientAuth tls.Cli
 	if err != nil {
 		return err
 	}
+	if role == "agent-b" && opts.bindingProfile == bindingProfileDraft06V2 {
+		config.SessionTicketsDisabled = true
+	}
 	listener, err := net.Listen("tcp", opts.listen)
 	if err != nil {
 		return fmt.Errorf("listen for %s: %w", role, err)
