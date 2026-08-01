@@ -1,0 +1,22 @@
+services:
+  attester:
+    user: "0:0"
+    command: ["--role", "attester", "--state-dir", "/state", "--listen", "0.0.0.0:8444", "--attestation-mode", "hardware", "--attestation-platform", "${ATTESTATION_PLATFORM:?set ATTESTATION_PLATFORM to snp or tdx}"]
+    devices:
+      - "${ATTESTATION_DEVICE:?set ATTESTATION_DEVICE to the guest device path}:${ATTESTATION_DEVICE}:rwm"
+
+  verifier:
+    command: ["--role", "verifier", "--state-dir", "/state", "--listen", "0.0.0.0:8445", "--expected-measurement-hex", "${EXPECTED_MEASUREMENT_HEX:?set the exact 48-byte measurement in hex}"]
+    networks:
+      - a2a
+      - collateral
+
+  agent-b:
+    command: ["--role", "agent-b", "--state-dir", "/state", "--listen", "0.0.0.0:8447", "--replay-url", "https://replay:8446", "--public-url", "https://agent-b:8447", "--expected-measurement-hex", "${EXPECTED_MEASUREMENT_HEX:?set the exact 48-byte measurement in hex}"]
+
+  agent-a:
+    command: ["--role", "agent-a", "--state-dir", "/state", "--manager-url", "https://manager:8443", "--attester-url", "https://attester:8444", "--verifier-url", "https://verifier:8445", "--agent-b-url", "https://agent-b:8447", "--attestation-mode", "hardware"]
+
+networks:
+  collateral:
+    internal: false
