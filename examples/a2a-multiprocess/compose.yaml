@@ -1,0 +1,82 @@
+name: asb-a2a-multiprocess
+
+x-service-defaults: &service-defaults
+  image: asb-a2a-multiprocess:local
+  build:
+    context: ../..
+    dockerfile: examples/a2a-multiprocess/Dockerfile
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  networks: [a2a]
+  restart: "no"
+
+services:
+  bootstrap:
+    <<: *service-defaults
+    command: ["--role", "bootstrap", "--state-dir", "/state"]
+    volumes:
+      - manager-state:/state/manager
+      - attester-state:/state/attester
+      - verifier-state:/state/verifier
+      - replay-state:/state/replay
+      - agent-a-state:/state/agent-a
+      - agent-b-state:/state/agent-b
+
+  replay:
+    <<: *service-defaults
+    command: ["--role", "replay", "--state-dir", "/state", "--listen", "0.0.0.0:8446"]
+    depends_on:
+      bootstrap: {condition: service_completed_successfully}
+    volumes: [replay-state:/state/replay]
+
+  manager:
+    <<: *service-defaults
+    command: ["--role", "manager", "--state-dir", "/state", "--listen", "0.0.0.0:8443"]
+    depends_on:
+      bootstrap: {condition: service_completed_successfully}
+    volumes: [manager-state:/state/manager]
+
+  attester:
+    <<: *service-defaults
+    command: ["--role", "attester", "--state-dir", "/state", "--listen", "0.0.0.0:8444", "--attestation-mode", "simulation"]
+    depends_on:
+      bootstrap: {condition: service_completed_successfully}
+    volumes: [attester-state:/state/attester]
+
+  verifier:
+    <<: *service-defaults
+    command: ["--role", "verifier", "--state-dir", "/state", "--listen", "0.0.0.0:8445"]
+    depends_on:
+      bootstrap: {condition: service_completed_successfully}
+    volumes: [verifier-state:/state/verifier]
+
+  agent-b:
+    <<: *service-defaults
+    command: ["--role", "agent-b", "--state-dir", "/state", "--listen", "0.0.0.0:8447", "--replay-url", "https://replay:8446", "--public-url", "https://agent-b:8447", "--allow-simulation"]
+    depends_on:
+      bootstrap: {condition: service_completed_successfully}
+      replay: {condition: service_started}
+    volumes: [agent-b-state:/state/agent-b]
+
+  agent-a:
+    <<: *service-defaults
+    command: ["--role", "agent-a", "--state-dir", "/state", "--manager-url", "https://manager:8443", "--attester-url", "https://attester:8444", "--verifier-url", "https://verifier:8445", "--agent-b-url", "https://agent-b:8447", "--attestation-mode", "simulation"]
+    depends_on:
+      manager: {condition: service_started}
+      attester: {condition: service_started}
+      verifier: {condition: service_started}
+      agent-b: {condition: service_started}
+    volumes: [agent-a-state:/state/agent-a]
+
+networks:
+  a2a:
+    internal: true
+
+volumes:
+  manager-state:
+  attester-state:
+  verifier-state:
+  replay-state:
+  agent-a-state:
+  agent-b-state:

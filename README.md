@@ -107,7 +107,20 @@ See `docs/live-red-team-report.md` for the evidence matrix.
 
 ## Agent-to-Agent Demonstration
 
-Run a local Agent A to Agent B communication demonstration:
+Run the multiprocess A2A 1.0 demonstration:
+
+```sh
+go run ./examples/a2a-multiprocess
+```
+
+It separates Manager, Attester, Verifier, durable Replay Store, Agent A, and
+Agent B into operating-system processes. The same binary has a Docker Compose
+topology and an optional fail-closed SNP/TDX hardware mode. See the
+[multiprocess demonstration guide](examples/a2a-multiprocess/README.md) for the
+protocol subset, trust boundaries, Docker command, hardware prerequisites, and
+negative scenarios.
+
+The smaller software-only binding demonstration remains available:
 
 ```sh
 go run ./examples/a2a
