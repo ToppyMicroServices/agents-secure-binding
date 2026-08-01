@@ -27,6 +27,9 @@ import (
 )
 
 func runVerifier(ctx context.Context, opts options, out outputWriter) error {
+	if opts.bindingProfile != bindingProfileV1 && opts.bindingProfile != bindingProfileDraft06V2 {
+		return fmt.Errorf("unsupported binding profile %q", opts.bindingProfile)
+	}
 	dir := roleDirectory(opts.stateDir, "verifier")
 	resultKey, err := loadPrivateKey(filepath.Join(dir, signingKeyFile))
 	if err != nil {
@@ -69,6 +72,11 @@ func runVerifier(ctx context.Context, opts options, out outputWriter) error {
 			Issuer: demoVerifierIssuer, Subject: demoAgentIssuer,
 			Audience: jwt.ClaimStrings{demoAudience}, ID: id,
 			IssuedAt: jwt.NewNumericDate(now), ExpiresAt: jwt.NewNumericDate(now.Add(time.Minute)),
+		}
+		if opts.bindingProfile == bindingProfileDraft06V2 {
+			claims.ProfileType = v2AttestationProfile
+			claims.ProfileVersion = v2AttestationVersion
+			claims.AppraisalPolicyID = v2AppraisalPolicyID
 		}
 		token, err := signJWT(demoVerifierKeyID, resultKey, claims)
 		if err != nil {

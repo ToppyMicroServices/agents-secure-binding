@@ -13,6 +13,8 @@ import (
 	"io"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/thinksyncs/agents-secure-binding/pkg/atls/identitypolicy"
@@ -43,6 +45,18 @@ var (
 	ErrDuplicateJWTMember      = errors.New("binding jwt: duplicate json member")
 )
 
+var (
+	ErrInvalidJWTEncoding         = errors.New("binding jwt v2: invalid compact jwt encoding")
+	ErrInvalidProtectedHeader     = errors.New("binding jwt v2: invalid protected header")
+	ErrInvalidJWTMember           = errors.New("binding jwt v2: invalid json member")
+	ErrInvalidAudience            = errors.New("binding jwt v2: audience must be one exact string")
+	ErrInvalidClaimEncoding       = errors.New("binding jwt v2: invalid claim encoding")
+	ErrMissingIssuedAt            = errors.New("binding jwt v2: missing issued-at time")
+	ErrMissingTargetField         = errors.New("binding jwt v2: missing target field")
+	ErrMissingAttestationBinder   = errors.New("binding jwt v2: missing locally expected attestation binder")
+	ErrMissingAttestationVerifier = errors.New("binding jwt v2: missing attestation verifier")
+)
+
 const (
 	ClaimTokenType      = "profile_type"
 	ClaimProfileVersion = "profile_version"
@@ -58,6 +72,15 @@ const (
 
 	ProfileVersion           = "1"
 	identityGrantJWTHashSeed = "sbaip.identity-grant.jwt.v1\x00"
+
+	// ProfileVersionV2 is used only by the draft-06 session proof. The
+	// authority grant remains the exact v1 compact-JWS profile.
+	ProfileVersionV2 = "2"
+
+	// IdentityGrantJWTTypeV2 and SessionBindingJWTTypeV2 are the exact
+	// protected typ values selected by the repository-local draft-06 profile.
+	IdentityGrantJWTTypeV2  = "JWT"
+	SessionBindingJWTTypeV2 = "sbaip-session-binding+jwt"
 )
 
 // KeyFunc resolves a JWT verification key by protected-header key id.
@@ -101,6 +124,37 @@ type SessionIdentityJWTResult struct {
 	Assertion identitypolicy.Assertion
 }
 
+// AttestationVerifierV2 authenticates the attestation result selected for the
+// accepted v2 binding. Configuring this callback requires a locally expected
+// and proof-carried attestation binder; it cannot silently select a channel-
+// binding-only path. The callback runs before D3-D7 policy or replay commit.
+type AttestationVerifierV2 func(
+	grant identitypolicy.VerifiedGrantV2,
+	statement identitypolicy.VerifiedSessionBindingStatementV2,
+	expected identitypolicy.BindingV2,
+) error
+
+// SessionIdentityJWTOptionsV2 contains the verifier-local inputs for the
+// repository's experimental draft-06 profile. It is intentionally separate
+// from SessionIdentityJWTOptions so the v1 API and validation path are stable.
+type SessionIdentityJWTOptionsV2 struct {
+	Grant               JWTVerifyOptions
+	SessionBinding      JWTVerifyOptions
+	Policy              identitypolicy.PolicyV2
+	ExpectedBinding     identitypolicy.BindingV2
+	ReplayCache         identitypolicy.ReplayCache
+	AttestationVerifier AttestationVerifierV2
+	Now                 time.Time
+}
+
+// SessionIdentityJWTResultV2 exposes only the verifier-local projection
+// accepted through the complete v2 path. Raw grant and proof material remains
+// internal to verification so applications cannot mistake surplus observed
+// fields for accepted identity or authorization.
+type SessionIdentityJWTResultV2 struct {
+	Accepted identitypolicy.AcceptedAssertionV2
+}
+
 type bindingJWTClaims struct {
 	jwt.RegisteredClaims
 
@@ -116,6 +170,13 @@ type bindingJWTClaims struct {
 	RequestContext  string   `json:"request_context_sha256,omitempty"`
 	AttestationBind string   `json:"attestation_binder_sha256,omitempty"`
 	Nonce           string   `json:"nonce,omitempty"`
+
+	EndpointRole               string `json:"endpoint_role,omitempty"`
+	InteractionType            string `json:"interaction_type,omitempty"`
+	AcceptedEndpointSPKISHA256 string `json:"accepted_endpoint_spki_sha256,omitempty"`
+	BindingContextSHA256       string `json:"binding_context_sha256,omitempty"`
+	VerifierNonce              string `json:"verifier_nonce,omitempty"`
+	AttemptID                  string `json:"attempt_id,omitempty"`
 
 	Service              string   `json:"service,omitempty"`
 	Tenant               string   `json:"tenant,omitempty"`
@@ -136,6 +197,8 @@ type bindingJWTClaims struct {
 	Resource             string   `json:"resource,omitempty"`
 	Resources            []string `json:"resources,omitempty"`
 	AuthorizationDetails []string `json:"authorization_details,omitempty"`
+	TargetResource       string   `json:"target_resource,omitempty"`
+	TargetOperation      string   `json:"target_operation,omitempty"`
 }
 
 type cnf struct {
@@ -155,8 +218,14 @@ func ValidateJWTVerifyOptions(opts JWTVerifyOptions) error {
 // IdentityGrantHash returns the domain-separated hash of the exact signed grant
 // bytes. The session-binding statement carries this value.
 func IdentityGrantHash(tokenString string) string {
-	sum := sha256.Sum256([]byte(identityGrantJWTHashSeed + tokenString))
+	sum := IdentityGrantDigest(tokenString)
 	return "sha256:" + hex.EncodeToString(sum[:])
+}
+
+// IdentityGrantDigest returns the raw domain-separated digest of the exact
+// compact-JWS grant bytes. IdentityGrantHash retains the v1 text encoding.
+func IdentityGrantDigest(tokenString string) [sha256.Size]byte {
+	return sha256.Sum256([]byte(identityGrantJWTHashSeed + tokenString))
 }
 
 // VerifyIdentityGrantJWT verifies a manager-issued identity grant JWT.
@@ -291,6 +360,554 @@ func VerifySessionIdentityJWT(grantToken, bindingToken string, opts SessionIdent
 		Statement: statement,
 		Assertion: assertion,
 	}, nil
+}
+
+// VerifyIdentityGrantJWTV2 verifies the exact compact-JWS authority-grant
+// profile selected by the experimental draft-06 path. The signed grant format
+// remains profile version 1; legacy AGTP claim aliases are not accepted here.
+func VerifyIdentityGrantJWTV2(tokenString string, opts JWTVerifyOptions) (identitypolicy.VerifiedGrantV2, error) {
+	if err := ValidateJWTVerifyOptions(opts); err != nil {
+		return identitypolicy.VerifiedGrantV2{}, err
+	}
+	if err := validateJWTV2Wire(tokenString, opts, IdentityGrantJWTTypeV2, v2GrantPayloadMembers, true); err != nil {
+		return identitypolicy.VerifiedGrantV2{}, err
+	}
+
+	claims, signerKey, err := parseBindingJWT(tokenString, opts)
+	if err != nil {
+		return identitypolicy.VerifiedGrantV2{}, err
+	}
+	if claims.ProfileType != TokenTypeIdentityGrant {
+		return identitypolicy.VerifiedGrantV2{}, ErrInvalidTokenType
+	}
+	if claims.ProfileVersion != ProfileVersion {
+		return identitypolicy.VerifiedGrantV2{}, ErrUnsupportedVersion
+	}
+	if claims.LegacyType != "" || claims.LegacyVersion != "" {
+		return identitypolicy.VerifiedGrantV2{}, ErrInvalidTokenType
+	}
+	if strings.TrimSpace(claims.ID) == "" {
+		return identitypolicy.VerifiedGrantV2{}, ErrMissingJWTID
+	}
+	if strings.TrimSpace(claims.Subject) == "" {
+		return identitypolicy.VerifiedGrantV2{}, ErrMissingSubject
+	}
+	if strings.TrimSpace(claims.Confirmation.KeyID) == "" {
+		return identitypolicy.VerifiedGrantV2{}, ErrMissingConfirmationKey
+	}
+	if claims.IssuedAt == nil {
+		return identitypolicy.VerifiedGrantV2{}, ErrMissingIssuedAt
+	}
+	if err := claims.validateIdentityGrantDecisionStringsV2(); err != nil {
+		return identitypolicy.VerifiedGrantV2{}, err
+	}
+	for _, value := range []string{claims.TargetResource, claims.TargetOperation} {
+		if err := requireGrantTargetV2(value); err != nil {
+			return identitypolicy.VerifiedGrantV2{}, err
+		}
+	}
+
+	values := identitypolicy.Values{
+		Service:              claims.Service,
+		Tenant:               claims.Tenant,
+		Deployment:           claims.Deployment,
+		Environment:          claims.Environment,
+		Workload:             claims.Workload,
+		Agent:                claims.Agent,
+		AgentPublicKey:       claims.AgentPublicKey,
+		ComputationID:        claims.ComputationID,
+		TaskID:               claims.TaskID,
+		ThreadID:             claims.ThreadID,
+		DelegationID:         claims.DelegationID,
+		IntentRef:            claims.IntentRef,
+		CapabilityRef:        claims.CapabilityRef,
+		OntologyID:           claims.OntologyID,
+		Scopes:               grantScopesV2(claims.Scopes, claims.Scope),
+		Resources:            grantResourcesV2(claims.Resources, claims.Resource),
+		AuthorizationDetails: claims.AuthorizationDetails,
+	}
+	if values.Agent == "" {
+		values.Agent = claims.Subject
+	}
+
+	return identitypolicy.VerifiedGrantV2{
+		VerifiedGrant: identitypolicy.VerifiedGrant{
+			Issuer:                 claims.Issuer,
+			IssuerKey:              signerKey,
+			Audience:               opts.ExpectedAudience,
+			GrantHash:              IdentityGrantHash(tokenString),
+			Values:                 values,
+			ConfirmationKey:        claims.Confirmation.KeyID,
+			AuthorizedEndpointKeys: claims.EndpointKeyIDs,
+			IssuedAt:               claimTime(claims.IssuedAt),
+			ExpiresAt:              claimTime(claims.ExpiresAt),
+		},
+		Target: identitypolicy.TargetV2{
+			Resource:  claims.TargetResource,
+			Operation: claims.TargetOperation,
+		},
+	}, nil
+}
+
+// VerifySessionBindingJWTV2 verifies the exact protected-header, payload, and
+// canonical claim encodings selected by the experimental draft-06 profile.
+func VerifySessionBindingJWTV2(tokenString string, opts JWTVerifyOptions) (identitypolicy.VerifiedSessionBindingStatementV2, error) {
+	if err := ValidateJWTVerifyOptions(opts); err != nil {
+		return identitypolicy.VerifiedSessionBindingStatementV2{}, err
+	}
+	if err := validateJWTV2Wire(tokenString, opts, SessionBindingJWTTypeV2, v2ProofPayloadMembers, false); err != nil {
+		return identitypolicy.VerifiedSessionBindingStatementV2{}, err
+	}
+
+	claims, signerKey, err := parseBindingJWT(tokenString, opts)
+	if err != nil {
+		return identitypolicy.VerifiedSessionBindingStatementV2{}, err
+	}
+	if claims.ProfileType != TokenTypeSessionBinding {
+		return identitypolicy.VerifiedSessionBindingStatementV2{}, ErrInvalidTokenType
+	}
+	if claims.ProfileVersion != ProfileVersionV2 {
+		return identitypolicy.VerifiedSessionBindingStatementV2{}, ErrUnsupportedVersion
+	}
+	if claims.LegacyType != "" || claims.LegacyVersion != "" {
+		return identitypolicy.VerifiedSessionBindingStatementV2{}, ErrInvalidTokenType
+	}
+	if strings.TrimSpace(claims.ID) == "" {
+		return identitypolicy.VerifiedSessionBindingStatementV2{}, ErrMissingJWTID
+	}
+	if claims.IssuedAt == nil {
+		return identitypolicy.VerifiedSessionBindingStatementV2{}, ErrMissingIssuedAt
+	}
+	if err := claims.requireSessionBindingFieldsV2(); err != nil {
+		return identitypolicy.VerifiedSessionBindingStatementV2{}, err
+	}
+	if err := claims.validateSessionProofDecisionStringsV2(); err != nil {
+		return identitypolicy.VerifiedSessionBindingStatementV2{}, err
+	}
+	for _, value := range []string{
+		claims.GrantHash,
+		claims.AcceptedEndpointSPKISHA256,
+		claims.TLSExporter,
+		claims.BindingContextSHA256,
+	} {
+		if err := requireCanonicalSHA256(value); err != nil {
+			return identitypolicy.VerifiedSessionBindingStatementV2{}, err
+		}
+	}
+	if claims.AttestationBind != "" {
+		if err := requireCanonicalSHA256(claims.AttestationBind); err != nil {
+			return identitypolicy.VerifiedSessionBindingStatementV2{}, err
+		}
+	}
+	if err := requireCanonicalBase64URL(claims.VerifierNonce, 16); err != nil {
+		return identitypolicy.VerifiedSessionBindingStatementV2{}, err
+	}
+	if claims.AttemptID != "" {
+		if err := requireCanonicalBase64URL(claims.AttemptID, 1); err != nil {
+			return identitypolicy.VerifiedSessionBindingStatementV2{}, err
+		}
+	}
+
+	return identitypolicy.VerifiedSessionBindingStatementV2{
+		GrantHash: claims.GrantHash,
+		Audience:  opts.ExpectedAudience,
+		SignerKey: signerKey,
+		Binding: identitypolicy.BindingV2{
+			EndpointRole:               claims.EndpointRole,
+			InteractionType:            claims.InteractionType,
+			AcceptedEndpointSPKISHA256: claims.AcceptedEndpointSPKISHA256,
+			TLSExporterSHA256:          claims.TLSExporter,
+			BindingContextSHA256:       claims.BindingContextSHA256,
+			AttestationBinderSHA256:    claims.AttestationBind,
+			VerifierNonce:              claims.VerifierNonce,
+			AttemptID:                  claims.AttemptID,
+			IssuedAt:                   claimTime(claims.IssuedAt),
+			ExpiresAt:                  claimTime(claims.ExpiresAt),
+		},
+	}, nil
+}
+
+// VerifySessionIdentityJWTV2 verifies the authority grant and session proof,
+// compares the accepted binding, authenticates an attestation result when one
+// is selected, evaluates D3-D7, and commits replay state last.
+func VerifySessionIdentityJWTV2(grantToken, bindingToken string, opts SessionIdentityJWTOptionsV2) (SessionIdentityJWTResultV2, error) {
+	if !opts.Policy.Enabled() {
+		return SessionIdentityJWTResultV2{}, ErrMissingIdentityPolicy
+	}
+	if opts.ReplayCache == nil {
+		return SessionIdentityJWTResultV2{}, ErrMissingReplayCache
+	}
+
+	now := opts.Now
+	if now.IsZero() {
+		now = time.Now()
+	}
+
+	grantOpts := opts.Grant
+	grantOpts.Now = now
+	grant, err := VerifyIdentityGrantJWTV2(grantToken, grantOpts)
+	if err != nil {
+		return SessionIdentityJWTResultV2{}, err
+	}
+
+	bindingOpts := opts.SessionBinding
+	bindingOpts.Now = now
+	statement, err := VerifySessionBindingJWTV2(bindingToken, bindingOpts)
+	if err != nil {
+		return SessionIdentityJWTResultV2{}, err
+	}
+
+	assertion, err := identitypolicy.NewAssertionFromSessionBindingV2(grant, statement, now)
+	if err != nil {
+		return SessionIdentityJWTResultV2{}, err
+	}
+	if err := identitypolicy.ValidateAcceptedBindingV2(statement.Binding, opts.ExpectedBinding, now); err != nil {
+		return SessionIdentityJWTResultV2{}, err
+	}
+	attestationSelected := opts.AttestationVerifier != nil || opts.ExpectedBinding.AttestationBinderSHA256 != ""
+	if attestationSelected {
+		if opts.ExpectedBinding.AttestationBinderSHA256 == "" || statement.Binding.AttestationBinderSHA256 == "" {
+			return SessionIdentityJWTResultV2{}, ErrMissingAttestationBinder
+		}
+		if opts.AttestationVerifier == nil {
+			return SessionIdentityJWTResultV2{}, ErrMissingAttestationVerifier
+		}
+		if err := opts.AttestationVerifier(grant, statement, opts.ExpectedBinding); err != nil {
+			return SessionIdentityJWTResultV2{}, fmt.Errorf("binding jwt v2: verify attestation: %w", err)
+		}
+	}
+	accepted, err := identitypolicy.AcceptAssertionV2(opts.Policy, assertion, opts.ExpectedBinding, now)
+	if err != nil {
+		return SessionIdentityJWTResultV2{}, err
+	}
+	if err := identitypolicy.MarkSessionBindingUsedV2(opts.ReplayCache, statement); err != nil {
+		return SessionIdentityJWTResultV2{}, err
+	}
+
+	return SessionIdentityJWTResultV2{
+		Accepted: accepted,
+	}, nil
+}
+
+var v2GrantPayloadMembers = stringSet(
+	"iss", "sub", "aud", "jti", "iat", "exp", "nbf",
+	ClaimTokenType, ClaimProfileVersion, "cnf", "authorized_endpoint_keys",
+	"service", "tenant", "deployment", "environment", "workload", "agent",
+	"agent_public_key", "computation_id", "task_id", "thread_id", "delegation_id",
+	"intent_ref", "capability_ref", "ontology_id", "scope", "scopes", "resource",
+	"resources", "authorization_details", "target_resource", "target_operation",
+)
+
+var v2ProofPayloadMembers = stringSet(
+	"iss", "aud", "jti", "iat", "exp", ClaimTokenType, ClaimProfileVersion,
+	"grant_hash", "endpoint_role", "interaction_type",
+	"accepted_endpoint_spki_sha256", "tls_exporter_sha256",
+	"binding_context_sha256", "verifier_nonce", "attempt_id",
+	"attestation_binder_sha256",
+)
+
+var v2LegacyProfileMembers = stringSet(LegacyClaimTokenType, LegacyClaimProfileVersion)
+
+func validateJWTV2Wire(tokenString string, opts JWTVerifyOptions, expectedType string, allowedPayload map[string]struct{}, allowUnknownPayload bool) error {
+	parts := strings.Split(tokenString, ".")
+	if len(parts) != 3 {
+		return ErrInvalidJWTEncoding
+	}
+	decoded := make([][]byte, len(parts))
+	for i, part := range parts {
+		if part == "" || strings.Contains(part, "=") {
+			return ErrInvalidJWTEncoding
+		}
+		raw, err := base64.RawURLEncoding.DecodeString(part)
+		if err != nil || base64.RawURLEncoding.EncodeToString(raw) != part {
+			return ErrInvalidJWTEncoding
+		}
+		decoded[i] = raw
+	}
+
+	header, err := strictJSONObject(decoded[0])
+	if err != nil {
+		if errors.Is(err, ErrDuplicateJWTMember) {
+			return err
+		}
+		return fmt.Errorf("%w: %v", ErrInvalidProtectedHeader, err)
+	}
+	if len(header) != 3 {
+		return ErrInvalidProtectedHeader
+	}
+	for name := range header {
+		if name != "alg" && name != "kid" && name != "typ" {
+			return ErrInvalidProtectedHeader
+		}
+	}
+	alg, err := exactJSONString(header["alg"])
+	if err != nil || alg == "" || alg != strings.TrimSpace(alg) {
+		return ErrInvalidProtectedHeader
+	}
+	kid, err := exactJSONString(header["kid"])
+	if err != nil || kid == "" || kid != strings.TrimSpace(kid) {
+		return ErrInvalidProtectedHeader
+	}
+	typ, err := exactJSONString(header["typ"])
+	if err != nil || typ != expectedType {
+		return ErrInvalidProtectedHeader
+	}
+	if !listed(alg, opts.ValidMethods) {
+		return ErrInvalidProtectedHeader
+	}
+	if err := requireDecisionStringV2(kid); err != nil {
+		return ErrInvalidProtectedHeader
+	}
+
+	payload, err := strictJSONObject(decoded[1])
+	if err != nil {
+		if errors.Is(err, ErrDuplicateJWTMember) {
+			return err
+		}
+		return fmt.Errorf("%w: %v", ErrInvalidJWTMember, err)
+	}
+	for name := range payload {
+		if _, forbidden := v2LegacyProfileMembers[name]; forbidden {
+			return ErrInvalidJWTMember
+		}
+		if _, ok := allowedPayload[name]; ok {
+			continue
+		}
+		if caseAliasesAny(name, allowedPayload) || caseAliasesAny(name, v2LegacyProfileMembers) || !allowUnknownPayload {
+			return ErrInvalidJWTMember
+		}
+	}
+	audience, err := exactJSONString(payload["aud"])
+	if err != nil || audience == "" || audience != opts.ExpectedAudience {
+		return ErrInvalidAudience
+	}
+	if err := requireDecisionStringV2(audience); err != nil {
+		return ErrInvalidAudience
+	}
+	if allowUnknownPayload {
+		if err := validateGrantAuthorizationWireV2(payload); err != nil {
+			return err
+		}
+	}
+	if cnfRaw, ok := payload["cnf"]; ok {
+		confirmation, err := strictJSONObject(cnfRaw)
+		if err != nil {
+			return ErrInvalidJWTMember
+		}
+		for name := range confirmation {
+			if name != "kid" && strings.EqualFold(name, "kid") {
+				return ErrInvalidJWTMember
+			}
+		}
+	}
+	for _, name := range []string{"attempt_id", "attestation_binder_sha256"} {
+		if raw, ok := payload[name]; ok {
+			value, err := exactJSONString(raw)
+			if err != nil || value == "" {
+				return ErrInvalidClaimEncoding
+			}
+		}
+	}
+	return nil
+}
+
+func strictJSONObject(raw []byte) (map[string]json.RawMessage, error) {
+	if !utf8.Valid(raw) {
+		return nil, ErrInvalidJWTEncoding
+	}
+	if err := rejectDuplicateJSONMembers(raw); err != nil {
+		return nil, err
+	}
+	var value map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return nil, err
+	}
+	if value == nil {
+		return nil, ErrInvalidJWTEncoding
+	}
+	return value, nil
+}
+
+func exactJSONString(raw json.RawMessage) (string, error) {
+	if len(raw) == 0 {
+		return "", ErrInvalidClaimEncoding
+	}
+	var value string
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return "", err
+	}
+	return value, nil
+}
+
+func caseAliasesAny(value string, allowed map[string]struct{}) bool {
+	for candidate := range allowed {
+		if value != candidate && strings.EqualFold(value, candidate) {
+			return true
+		}
+	}
+	return false
+}
+
+func stringSet(values ...string) map[string]struct{} {
+	out := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		out[value] = struct{}{}
+	}
+	return out
+}
+
+func requireCanonicalSHA256(value string) error {
+	if len(value) != len("sha256:")+sha256.Size*2 || !strings.HasPrefix(value, "sha256:") {
+		return ErrInvalidClaimEncoding
+	}
+	hexValue := strings.TrimPrefix(value, "sha256:")
+	if strings.ToLower(hexValue) != hexValue {
+		return ErrInvalidClaimEncoding
+	}
+	decoded, err := hex.DecodeString(hexValue)
+	if err != nil || len(decoded) != sha256.Size {
+		return ErrInvalidClaimEncoding
+	}
+	return nil
+}
+
+func requireCanonicalBase64URL(value string, minimumBytes int) error {
+	if value == "" || strings.Contains(value, "=") {
+		return ErrInvalidClaimEncoding
+	}
+	decoded, err := base64.RawURLEncoding.DecodeString(value)
+	if err != nil || len(decoded) < minimumBytes || base64.RawURLEncoding.EncodeToString(decoded) != value {
+		return ErrInvalidClaimEncoding
+	}
+	return nil
+}
+
+func requireGrantTargetV2(value string) error {
+	if strings.TrimSpace(value) == "" {
+		return ErrMissingTargetField
+	}
+	return requireDecisionStringV2(value)
+}
+
+func (c bindingJWTClaims) validateIdentityGrantDecisionStringsV2() error {
+	for _, value := range []string{
+		c.Issuer, c.Subject, c.ID, c.Confirmation.KeyID,
+		c.Service, c.Tenant, c.Deployment, c.Environment, c.Workload, c.Agent,
+		c.AgentPublicKey, c.ComputationID, c.TaskID, c.ThreadID, c.DelegationID,
+		c.IntentRef, c.CapabilityRef, c.OntologyID, c.TargetResource, c.TargetOperation,
+	} {
+		if value == "" {
+			continue
+		}
+		if err := requireDecisionStringV2(value); err != nil {
+			return err
+		}
+	}
+	for _, values := range [][]string{c.EndpointKeyIDs, c.Scopes, c.Resources, c.AuthorizationDetails} {
+		for _, value := range values {
+			if value == "" {
+				return ErrInvalidClaimEncoding
+			}
+			if err := requireDecisionStringV2(value); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func (c bindingJWTClaims) validateSessionProofDecisionStringsV2() error {
+	for _, value := range []string{c.Issuer, c.ID, c.EndpointRole, c.InteractionType} {
+		if err := requireDecisionStringV2(value); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateGrantAuthorizationWireV2(payload map[string]json.RawMessage) error {
+	for _, pair := range [][2]string{{"scope", "scopes"}, {"resource", "resources"}} {
+		_, singular := payload[pair[0]]
+		_, plural := payload[pair[1]]
+		if singular && plural {
+			return ErrInvalidClaimEncoding
+		}
+	}
+	if raw, ok := payload["scope"]; ok {
+		value, err := exactJSONString(raw)
+		if err != nil || value == "" {
+			return ErrInvalidClaimEncoding
+		}
+		parts := strings.Split(value, " ")
+		for _, part := range parts {
+			if part == "" {
+				return ErrInvalidClaimEncoding
+			}
+			for _, r := range part {
+				if unicode.IsSpace(r) {
+					return ErrInvalidClaimEncoding
+				}
+			}
+			if err := requireDecisionStringV2(part); err != nil {
+				return err
+			}
+		}
+	}
+	if raw, ok := payload["resource"]; ok {
+		value, err := exactJSONString(raw)
+		if err != nil || value == "" {
+			return ErrInvalidClaimEncoding
+		}
+		if err := requireDecisionStringV2(value); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func grantScopesV2(values []string, scope string) []string {
+	if scope != "" {
+		return strings.Split(scope, " ")
+	}
+	return append([]string(nil), values...)
+}
+
+func grantResourcesV2(values []string, resource string) []string {
+	if resource != "" {
+		return []string{resource}
+	}
+	return append([]string(nil), values...)
+}
+
+func requireDecisionStringV2(value string) error {
+	if value == "" || len(value) > identitypolicy.MaxValueLength || !utf8.ValidString(value) {
+		return ErrInvalidClaimEncoding
+	}
+	for _, r := range value {
+		if unicode.IsControl(r) || r == utf8.RuneError || r == '<' || r == '>' {
+			return ErrInvalidClaimEncoding
+		}
+	}
+	return nil
+}
+
+func (c bindingJWTClaims) requireSessionBindingFieldsV2() error {
+	if c.GrantHash == "" {
+		return ErrMissingGrantHash
+	}
+	for _, value := range []string{
+		c.EndpointRole,
+		c.InteractionType,
+		c.AcceptedEndpointSPKISHA256,
+		c.TLSExporter,
+		c.BindingContextSHA256,
+		c.VerifierNonce,
+	} {
+		if value == "" {
+			return ErrMissingBindingField
+		}
+	}
+	return nil
 }
 
 func parseBindingJWT(tokenString string, opts JWTVerifyOptions) (*bindingJWTClaims, string, error) {

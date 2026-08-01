@@ -31,6 +31,12 @@ type agentBServer struct {
 }
 
 func runAgentB(ctx context.Context, opts options, out outputWriter) error {
+	if opts.bindingProfile == bindingProfileDraft06V2 {
+		return runAgentBV2(ctx, opts, out)
+	}
+	if opts.bindingProfile != bindingProfileV1 {
+		return fmt.Errorf("unsupported binding profile %q", opts.bindingProfile)
+	}
 	if opts.replayURL == "" {
 		return fmt.Errorf("replay URL is required")
 	}

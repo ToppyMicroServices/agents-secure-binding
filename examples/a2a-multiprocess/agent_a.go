@@ -42,6 +42,12 @@ type a2aResult struct {
 var demoMessageSequence atomic.Uint64
 
 func runAgentA(ctx context.Context, opts options, out outputWriter) error {
+	if opts.bindingProfile == bindingProfileDraft06V2 {
+		return runAgentAV2(ctx, opts, out)
+	}
+	if opts.bindingProfile != bindingProfileV1 {
+		return fmt.Errorf("unsupported binding profile %q", opts.bindingProfile)
+	}
 	for name, value := range map[string]string{
 		"manager": opts.managerURL, "attester": opts.attesterURL,
 		"verifier": opts.verifierURL, "agent-b": opts.agentBURL,

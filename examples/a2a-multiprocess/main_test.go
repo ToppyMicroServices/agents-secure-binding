@@ -178,3 +178,31 @@ func TestMultiprocessSimulationEndToEnd(t *testing.T) {
 		}
 	}
 }
+
+func TestMultiprocessDraft06V2EndToEnd(t *testing.T) {
+	if testing.Short() {
+		t.Skip("multiprocess loopback test disabled in short mode")
+	}
+	binary := filepath.Join(t.TempDir(), "asb-a2a-v2")
+	build := exec.Command("go", "build", "-o", binary, ".")
+	build.Env = os.Environ()
+	if output, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build demo: %v\n%s", err, output)
+	}
+	run := exec.Command(binary, "--role", "orchestrator", "--binding-profile", bindingProfileDraft06V2)
+	output, err := run.CombinedOutput()
+	if err != nil {
+		t.Fatalf("run draft-06 demo: %v\n%s", err, output)
+	}
+	for _, expected := range []string{
+		"authorized Send Message v2", "nonce reuse on another task",
+		"borrowed challenge on TLS", "target substitution", "operation substitution",
+		"wrong endpoint role", "wrong interaction type", "missing exporter",
+		"reserialized grant hash", "missing attestation binder", "missing attestation result",
+		"summary: 11/11 expected draft06-v2 decisions observed",
+	} {
+		if !bytes.Contains(output, []byte(expected)) {
+			t.Fatalf("draft-06 demo output missing %q\n%s", expected, output)
+		}
+	}
+}
