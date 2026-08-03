@@ -572,26 +572,44 @@ func (x *GetTeeTypeResponse) GetTee() string {
 var File_internal_proto_attestation_agent_attestation_agent_proto protoreflect.FileDescriptor
 
 const file_internal_proto_attestation_agent_attestation_agent_proto_rawDesc = "" +
-	"\n8internal/proto/attestation-agent/attestation-agent.proto\x12\x11attestation_agent\"6\n" +
-	"\x12GetEvidenceRequest\x12 \n\vRuntimeData\x18\x01 \x01(\fR\vRuntimeData\"@\n\x1cGetAdditionalEvidenceRe" +
-	"quest\x12 \n\vRuntimeData\x18\x01 \x01(\fR\vRuntimeData\"1\n\x13GetEvidenceResponse\x12\x1a\n\bEvidence\x18\x01 \x01(\f" +
-	"R\bEvidence\"/\n\x0fGetTokenRequest\x12\x1c\n\tTokenType\x18\x01 \x01(\tR\tTokenType\"(\n\x10GetTokenResponse\x12" +
-	"\x14\n\x05Token\x18\x01 \x01(\fR\x05Token\"\xae\x01\n\x1fExtendRuntimeMeasurementRequest\x12\x16\n\x06Domain\x18\x01 \x01(\tR\x06Domai" +
-	"n\x12\x1c\n\tOperation\x18\x02 \x01(\tR\tOperation\x12\x18\n\aContent\x18\x03 \x01(\tR\aContent\x12)\n\rRegisterIndex\x18\x04 \x01(\x04" +
-	"H\x00R\rRegisterIndex\x88\x01\x01B\x10\n\x0e_RegisterIndex\"g\n ExtendRuntimeMeasurementResponse\x12C\n\x06Re" +
-	"sult\x18\x01 \x01(\x0e2+.attestation_agent.RuntimeMeasurementResultR\x06Result\"-\n\x13BindInitDataR" +
-	"equest\x12\x16\n\x06Digest\x18\x01 \x01(\fR\x06Digest\"\x16\n\x14BindInitDataResponse\"\x13\n\x11GetTeeTypeRequest\"&\n\x12G" +
-	"etTeeTypeResponse\x12\x10\n\x03tee\x18\x01 \x01(\tR\x03tee*F\n\x18RuntimeMeasurementResult\x12\x06\n\x02OK\x10\x00\x12\x11\n\rNOT_S" +
-	"UPPORTED\x10\x01\x12\x0f\n\vNOT_ENABLED\x10\x022\x8c\x05\n\x17AttestationAgentService\x12^\n\vGetEvidence\x12%.attesta" +
-	"tion_agent.GetEvidenceRequest\x1a&.attestation_agent.GetEvidenceResponse\"\x00\x12r\n\x15GetAd" +
-	"ditionalEvidence\x12/.attestation_agent.GetAdditionalEvidenceRequest\x1a&.attestation_" +
-	"agent.GetEvidenceResponse\"\x00\x12U\n\bGetToken\x12\".attestation_agent.GetTokenRequest\x1a#.at" +
-	"testation_agent.GetTokenResponse\"\x00\x12\x85\x01\n\x18ExtendRuntimeMeasurement\x122.attestation_ag" +
-	"ent.ExtendRuntimeMeasurementRequest\x1a3.attestation_agent.ExtendRuntimeMeasurement" +
-	"Response\"\x00\x12a\n\fBindInitData\x12&.attestation_agent.BindInitDataRequest\x1a'.attestation" +
-	"_agent.BindInitDataResponse\"\x00\x12[\n\nGetTeeType\x12$.attestation_agent.GetTeeTypeReques" +
-	"t\x1a%.attestation_agent.GetTeeTypeResponse\"\x00B`Z^github.com/thinksyncs/agents-se" +
-	"cure-binding/internal/proto/attestation-agent;attestation_agentb\x06proto3"
+	"\n" +
+	"8internal/proto/attestation-agent/attestation-agent.proto\x12\x11attestation_agent\"6\n" +
+	"\x12GetEvidenceRequest\x12 \n" +
+	"\vRuntimeData\x18\x01 \x01(\fR\vRuntimeData\"@\n" +
+	"\x1cGetAdditionalEvidenceRequest\x12 \n" +
+	"\vRuntimeData\x18\x01 \x01(\fR\vRuntimeData\"1\n" +
+	"\x13GetEvidenceResponse\x12\x1a\n" +
+	"\bEvidence\x18\x01 \x01(\fR\bEvidence\"/\n" +
+	"\x0fGetTokenRequest\x12\x1c\n" +
+	"\tTokenType\x18\x01 \x01(\tR\tTokenType\"(\n" +
+	"\x10GetTokenResponse\x12\x14\n" +
+	"\x05Token\x18\x01 \x01(\fR\x05Token\"\xae\x01\n" +
+	"\x1fExtendRuntimeMeasurementRequest\x12\x16\n" +
+	"\x06Domain\x18\x01 \x01(\tR\x06Domain\x12\x1c\n" +
+	"\tOperation\x18\x02 \x01(\tR\tOperation\x12\x18\n" +
+	"\aContent\x18\x03 \x01(\tR\aContent\x12)\n" +
+	"\rRegisterIndex\x18\x04 \x01(\x04H\x00R\rRegisterIndex\x88\x01\x01B\x10\n" +
+	"\x0e_RegisterIndex\"g\n" +
+	" ExtendRuntimeMeasurementResponse\x12C\n" +
+	"\x06Result\x18\x01 \x01(\x0e2+.attestation_agent.RuntimeMeasurementResultR\x06Result\"-\n" +
+	"\x13BindInitDataRequest\x12\x16\n" +
+	"\x06Digest\x18\x01 \x01(\fR\x06Digest\"\x16\n" +
+	"\x14BindInitDataResponse\"\x13\n" +
+	"\x11GetTeeTypeRequest\"&\n" +
+	"\x12GetTeeTypeResponse\x12\x10\n" +
+	"\x03tee\x18\x01 \x01(\tR\x03tee*F\n" +
+	"\x18RuntimeMeasurementResult\x12\x06\n" +
+	"\x02OK\x10\x00\x12\x11\n" +
+	"\rNOT_SUPPORTED\x10\x01\x12\x0f\n" +
+	"\vNOT_ENABLED\x10\x022\x8c\x05\n" +
+	"\x17AttestationAgentService\x12^\n" +
+	"\vGetEvidence\x12%.attestation_agent.GetEvidenceRequest\x1a&.attestation_agent.GetEvidenceResponse\"\x00\x12r\n" +
+	"\x15GetAdditionalEvidence\x12/.attestation_agent.GetAdditionalEvidenceRequest\x1a&.attestation_agent.GetEvidenceResponse\"\x00\x12U\n" +
+	"\bGetToken\x12\".attestation_agent.GetTokenRequest\x1a#.attestation_agent.GetTokenResponse\"\x00\x12\x85\x01\n" +
+	"\x18ExtendRuntimeMeasurement\x122.attestation_agent.ExtendRuntimeMeasurementRequest\x1a3.attestation_agent.ExtendRuntimeMeasurementResponse\"\x00\x12a\n" +
+	"\fBindInitData\x12&.attestation_agent.BindInitDataRequest\x1a'.attestation_agent.BindInitDataResponse\"\x00\x12[\n" +
+	"\n" +
+	"GetTeeType\x12$.attestation_agent.GetTeeTypeRequest\x1a%.attestation_agent.GetTeeTypeResponse\"\x00B`Z^github.com/thinksyncs/agents-secure-binding/internal/proto/attestation-agent;attestation_agentb\x06proto3"
 
 var (
 	file_internal_proto_attestation_agent_attestation_agent_proto_rawDescOnce sync.Once

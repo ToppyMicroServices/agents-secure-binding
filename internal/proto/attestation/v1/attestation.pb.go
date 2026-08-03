@@ -321,19 +321,33 @@ func (x *AzureTokenResponse) GetToken() []byte {
 var File_internal_proto_attestation_v1_attestation_proto protoreflect.FileDescriptor
 
 const file_internal_proto_attestation_v1_attestation_proto_rawDesc = "" +
-	"\n/internal/proto/attestation/v1/attestation.proto\x12\x0eattestation.v1\"\x8e\x01\n\x12Attestatio" +
-	"nRequest\x12\x1f\n\vreport_data\x18\x01 \x01(\fR\nreportData\x12\x14\n\x05nonce\x18\x02 \x01(\fR\x05nonce\x12A\n\rplatform_type" +
-	"\x18\x03 \x01(\x0e2\x1c.attestation.v1.PlatformTypeR\fplatformType\"2\n\x13AttestationResponse\x12\x1b\n\teat" +
-	"_token\x18\x01 \x01(\fR\beatToken\"1\n\x13RawEvidenceResponse\x12\x1a\n\bevidence\x18\x01 \x01(\fR\bevidence\")\n\x11Azu" +
-	"reTokenRequest\x12\x14\n\x05nonce\x18\x01 \x01(\fR\x05nonce\"*\n\x12AzureTokenResponse\x12\x14\n\x05token\x18\x01 \x01(\fR\x05token" +
-	"*\xc1\x01\n\fPlatformType\x12\x1d\n\x19PLATFORM_TYPE_UNSPECIFIED\x10\x00\x12\x15\n\x11PLATFORM_TYPE_SNP\x10\x01\x12\x15\n\x11PLATF" +
-	"ORM_TYPE_TDX\x10\x02\x12\x16\n\x12PLATFORM_TYPE_VTPM\x10\x03\x12\x1a\n\x16PLATFORM_TYPE_SNP_VTPM\x10\x04\x12\x17\n\x13PLATFORM_T" +
-	"YPE_AZURE\x10\x05\x12\x17\n\x13PLATFORM_TYPE_NO_CC\x10\x062\xa8\x02\n\x12AttestationService\x12[\n\x10FetchAttestation\x12" +
-	"\".attestation.v1.AttestationRequest\x1a#.attestation.v1.AttestationResponse\x12[\n\x10Fetc" +
-	"hRawEvidence\x12\".attestation.v1.AttestationRequest\x1a#.attestation.v1.RawEvidenceRes" +
-	"ponse\x12X\n\x0fFetchAzureToken\x12!.attestation.v1.AzureTokenRequest\x1a\".attestation.v1.Azu" +
-	"reTokenResponseBWZUgithub.com/thinksyncs/agents-secure-binding/internal/proto/attest" +
-	"ation/v1;attestationb\x06proto3"
+	"\n" +
+	"/internal/proto/attestation/v1/attestation.proto\x12\x0eattestation.v1\"\x8e\x01\n" +
+	"\x12AttestationRequest\x12\x1f\n" +
+	"\vreport_data\x18\x01 \x01(\fR\n" +
+	"reportData\x12\x14\n" +
+	"\x05nonce\x18\x02 \x01(\fR\x05nonce\x12A\n" +
+	"\rplatform_type\x18\x03 \x01(\x0e2\x1c.attestation.v1.PlatformTypeR\fplatformType\"2\n" +
+	"\x13AttestationResponse\x12\x1b\n" +
+	"\teat_token\x18\x01 \x01(\fR\beatToken\"1\n" +
+	"\x13RawEvidenceResponse\x12\x1a\n" +
+	"\bevidence\x18\x01 \x01(\fR\bevidence\")\n" +
+	"\x11AzureTokenRequest\x12\x14\n" +
+	"\x05nonce\x18\x01 \x01(\fR\x05nonce\"*\n" +
+	"\x12AzureTokenResponse\x12\x14\n" +
+	"\x05token\x18\x01 \x01(\fR\x05token*\xc1\x01\n" +
+	"\fPlatformType\x12\x1d\n" +
+	"\x19PLATFORM_TYPE_UNSPECIFIED\x10\x00\x12\x15\n" +
+	"\x11PLATFORM_TYPE_SNP\x10\x01\x12\x15\n" +
+	"\x11PLATFORM_TYPE_TDX\x10\x02\x12\x16\n" +
+	"\x12PLATFORM_TYPE_VTPM\x10\x03\x12\x1a\n" +
+	"\x16PLATFORM_TYPE_SNP_VTPM\x10\x04\x12\x17\n" +
+	"\x13PLATFORM_TYPE_AZURE\x10\x05\x12\x17\n" +
+	"\x13PLATFORM_TYPE_NO_CC\x10\x062\xa8\x02\n" +
+	"\x12AttestationService\x12[\n" +
+	"\x10FetchAttestation\x12\".attestation.v1.AttestationRequest\x1a#.attestation.v1.AttestationResponse\x12[\n" +
+	"\x10FetchRawEvidence\x12\".attestation.v1.AttestationRequest\x1a#.attestation.v1.RawEvidenceResponse\x12X\n" +
+	"\x0fFetchAzureToken\x12!.attestation.v1.AzureTokenRequest\x1a\".attestation.v1.AzureTokenResponseBWZUgithub.com/thinksyncs/agents-secure-binding/internal/proto/attestation/v1;attestationb\x06proto3"
 
 var (
 	file_internal_proto_attestation_v1_attestation_proto_rawDescOnce sync.Once
