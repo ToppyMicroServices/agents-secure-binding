@@ -15,8 +15,8 @@ verified):
 
 | Commit | Workflow | Run | Result | Date |
 | --- | --- | --- | --- | --- |
-| `9684c3d08785bad344cf32cdd812eefd892caccf` | `CI` | `30782322021` | Success | 2026-08-03 UTC |
-| `9684c3d08785bad344cf32cdd812eefd892caccf` | `Security Red Team` | `30782322016` | Success | 2026-08-03 UTC |
+| `0b71a0fb7c6a3bd06fd54ad3961b641acde59dce` | `CI` | `30783798316` | Success | 2026-08-03 UTC |
+| `0b71a0fb7c6a3bd06fd54ad3961b641acde59dce` | `Security Red Team` | `30783798330` | Success | 2026-08-03 UTC |
 | `9684c3d08785bad344cf32cdd812eefd892caccf` | `Proto Consistency` | `30782322014` | Success | 2026-08-03 UTC |
 
 Local pre-publication gate after the README/module-path/runtime hardening work:

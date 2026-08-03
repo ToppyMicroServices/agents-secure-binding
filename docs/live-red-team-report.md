@@ -54,8 +54,8 @@ GitHub Actions:
 
 | Workflow | Run | Result | Notes |
 | --- | --- | --- | --- |
-| `Security Red Team` | `30782322016` | Success | Dedicated red-team workflow, including the production profile and independent protected-change consumer, on signed commit `9684c3d08785bad344cf32cdd812eefd892caccf` |
-| `CI` | `30782322021` | Success | `lint`, `Build`, all Go test matrix jobs, product-security, protected-change integration, and coverage upload passed on signed commit `9684c3d08785bad344cf32cdd812eefd892caccf` |
+| `Security Red Team` | `30783798330` | Success | Dedicated red-team workflow, including the production profile and independent protected-change consumer, on signed commit `0b71a0fb7c6a3bd06fd54ad3961b641acde59dce` |
+| `CI` | `30783798316` | Success | `lint`, `Build`, all Go test matrix jobs, product-security, protected-change integration, and coverage upload passed on signed commit `0b71a0fb7c6a3bd06fd54ad3961b641acde59dce` |
 | `Proto Consistency` | `30782322014` | Success | Generated protobuf sources matched the pinned CI toolchain on signed commit `9684c3d08785bad344cf32cdd812eefd892caccf` |
 
 Local verification:
