@@ -54,8 +54,9 @@ GitHub Actions:
 
 | Workflow | Run | Result | Notes |
 | --- | --- | --- | --- |
-| `Security Red Team` | `28434430103` | Success | Dedicated red-team workflow for Direct-Agent and reference-adapter security packages on commit `444b81d2484214b2247b31013b372f73937808c7` |
-| `CI` | `28434430030` | Success | `lint`, `Build`, all Go test matrix jobs, product-security, and coverage upload passed on commit `444b81d2484214b2247b31013b372f73937808c7` |
+| `Security Red Team` | `30782322016` | Success | Dedicated red-team workflow, including the production profile and independent protected-change consumer, on signed commit `9684c3d08785bad344cf32cdd812eefd892caccf` |
+| `CI` | `30782322021` | Success | `lint`, `Build`, all Go test matrix jobs, product-security, protected-change integration, and coverage upload passed on signed commit `9684c3d08785bad344cf32cdd812eefd892caccf` |
+| `Proto Consistency` | `30782322014` | Success | Generated protobuf sources matched the pinned CI toolchain on signed commit `9684c3d08785bad344cf32cdd812eefd892caccf` |
 
 Local verification:
 

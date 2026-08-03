@@ -124,10 +124,11 @@ For accepted TLS sessions, the AGTP observed-identity path derives
 `tls_exporter_sha256` from the accepted `tls.ConnectionState`. Fixed exporter
 bytes are used only in synthetic unit fixtures.
 
-The latest recorded remote implementation checkpoint is commit
-`444b81d2484214b2247b31013b372f73937808c7`. GitHub Actions `CI` run
-`28434430030` and `Security Red Team` run `28434430103` both completed
-successfully on 2026-06-30 UTC.
+The latest recorded signed implementation checkpoint is commit
+`9684c3d08785bad344cf32cdd812eefd892caccf`; GitHub reports its signature as
+verified. GitHub Actions `CI` run `30782322021`, `Security Red Team` run
+`30782322016`, and `Proto Consistency` run `30782322014` completed successfully
+on 2026-08-03 UTC.
 
 See `docs/live-red-team-report.md` for the evidence matrix.
 

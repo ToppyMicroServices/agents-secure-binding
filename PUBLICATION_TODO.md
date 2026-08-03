@@ -10,12 +10,14 @@ protobuf `go_package` options, examples, and local documentation use
 
 ## Recorded CI and Red-Team Status
 
-Latest recorded remote implementation checkpoint:
+Latest recorded signed implementation checkpoint (GitHub signature status:
+verified):
 
 | Commit | Workflow | Run | Result | Date |
 | --- | --- | --- | --- | --- |
-| `444b81d2484214b2247b31013b372f73937808c7` | `CI` | `28434430030` | Success | 2026-06-30 UTC |
-| `444b81d2484214b2247b31013b372f73937808c7` | `Security Red Team` | `28434430103` | Success | 2026-06-30 UTC |
+| `9684c3d08785bad344cf32cdd812eefd892caccf` | `CI` | `30782322021` | Success | 2026-08-03 UTC |
+| `9684c3d08785bad344cf32cdd812eefd892caccf` | `Security Red Team` | `30782322016` | Success | 2026-08-03 UTC |
+| `9684c3d08785bad344cf32cdd812eefd892caccf` | `Proto Consistency` | `30782322014` | Success | 2026-08-03 UTC |
 
 Local pre-publication gate after the README/module-path/runtime hardening work:
 
@@ -45,7 +47,7 @@ reported during the publication-prep push are fixed as of 2026-06-28 13:49 UTC.
 
 Current dependency graph checks:
 
-- `google.golang.org/grpc` resolves to `v1.80.0`;
+- `google.golang.org/grpc` resolves to `v1.82.1`;
 - `github.com/go-jose/go-jose/v4` resolves to `v4.1.4`;
 - `go.opentelemetry.io/otel/sdk` resolves to `v1.43.0`;
 - `go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp` resolves to
