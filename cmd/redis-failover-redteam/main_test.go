@@ -36,12 +36,12 @@ func TestRunPhaseRejectsReplayAfterFailover(t *testing.T) {
 	t.Parallel()
 	stateFile := t.TempDir() + "/state.json"
 	now := time.Date(2026, time.August, 3, 12, 0, 0, 0, time.UTC)
-	opts := options{Phase: "seed", StateFile: stateFile, TTL: time.Hour}
+	opts := options{Phase: phaseSeed, StateFile: stateFile, TTL: time.Hour}
 	store := &memorySetNXStore{seen: make(map[string]struct{})}
 	if err := runPhase(context.Background(), opts, store, now, bytes.NewReader(make([]byte, 32))); err != nil {
 		t.Fatalf("seed error = %v", err)
 	}
-	opts.Phase = "verify"
+	opts.Phase = phaseVerify
 	if err := runPhase(context.Background(), opts, store, now.Add(time.Minute), bytes.NewReader(make([]byte, 32))); err != nil {
 		t.Fatalf("verify error = %v", err)
 	}
@@ -51,13 +51,13 @@ func TestRunPhaseDetectsLostReplayWrite(t *testing.T) {
 	t.Parallel()
 	stateFile := t.TempDir() + "/state.json"
 	now := time.Date(2026, time.August, 3, 12, 0, 0, 0, time.UTC)
-	opts := options{Phase: "seed", StateFile: stateFile, TTL: time.Hour}
+	opts := options{Phase: phaseSeed, StateFile: stateFile, TTL: time.Hour}
 	beforeFailover := &memorySetNXStore{seen: make(map[string]struct{})}
 	if err := runPhase(context.Background(), opts, beforeFailover, now, bytes.NewReader(make([]byte, 32))); err != nil {
 		t.Fatalf("seed error = %v", err)
 	}
 
-	opts.Phase = "verify"
+	opts.Phase = phaseVerify
 	afterFailover := &memorySetNXStore{seen: make(map[string]struct{})}
 	err := runPhase(context.Background(), opts, afterFailover, now.Add(time.Minute), bytes.NewReader(make([]byte, 32)))
 	if !errors.Is(err, errReplayAcceptedAfterFailover) {
@@ -69,18 +69,18 @@ func TestRunPhaseRejectsExpiredEvidenceAndStoreOutage(t *testing.T) {
 	t.Parallel()
 	stateFile := t.TempDir() + "/state.json"
 	now := time.Date(2026, time.August, 3, 12, 0, 0, 0, time.UTC)
-	opts := options{Phase: "seed", StateFile: stateFile, TTL: time.Minute}
+	opts := options{Phase: phaseSeed, StateFile: stateFile, TTL: time.Minute}
 	store := &memorySetNXStore{seen: make(map[string]struct{})}
 	if err := runPhase(context.Background(), opts, store, now, bytes.NewReader(make([]byte, 32))); err != nil {
 		t.Fatalf("seed error = %v", err)
 	}
-	opts.Phase = "verify"
+	opts.Phase = phaseVerify
 	if err := runPhase(context.Background(), opts, store, now.Add(time.Minute), bytes.NewReader(make([]byte, 32))); !errors.Is(err, errEvidenceExpired) {
 		t.Fatalf("expired verify error = %v, want %v", err, errEvidenceExpired)
 	}
 
 	outage := errors.New("replay service unavailable")
-	opts = options{Phase: "seed", StateFile: t.TempDir() + "/state.json", TTL: time.Hour}
+	opts = options{Phase: phaseSeed, StateFile: t.TempDir() + "/state.json", TTL: time.Hour}
 	store = &memorySetNXStore{seen: make(map[string]struct{}), err: outage}
 	if err := runPhase(context.Background(), opts, store, now, bytes.NewReader(make([]byte, 32))); !errors.Is(err, outage) {
 		t.Fatalf("outage error = %v, want %v", err, outage)

@@ -23,7 +23,11 @@ import (
 	"github.com/thinksyncs/agents-secure-binding/pkg/production"
 )
 
-const stateVersion = "asb.redis-failover-evidence/v1"
+const (
+	stateVersion = "asb.redis-failover-evidence/v1"
+	phaseSeed    = "seed"
+	phaseVerify  = "verify"
+)
 
 var (
 	errReplayAcceptedAfterFailover = errors.New("replay key was accepted after failover")
@@ -106,7 +110,7 @@ func runPhase(ctx context.Context, opts options, store setNXStore, now time.Time
 		return errors.New("invalid failover test configuration")
 	}
 	switch opts.Phase {
-	case "seed":
+	case phaseSeed:
 		rawKey := make([]byte, 32)
 		if _, err := io.ReadFull(randomness, rawKey); err != nil {
 			return fmt.Errorf("generate replay key: %w", err)
@@ -133,7 +137,7 @@ func runPhase(ctx context.Context, opts options, store setNXStore, now time.Time
 		fmt.Printf("seed passed: replay_key_sha256=%s expires_at=%s\n", state.ReplayKeySHA256, state.ExpiresAt.Format(time.RFC3339))
 		return nil
 
-	case "verify":
+	case phaseVerify:
 		state, err := readState(opts.StateFile)
 		if err != nil {
 			return err
