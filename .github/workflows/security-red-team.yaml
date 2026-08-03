@@ -14,8 +14,12 @@ on:
       - "pkg/agtp/**"
       - "pkg/atls/**"
       - "pkg/clients/**"
+      - "pkg/production/**"
       - "examples/a2a-multiprocess/**"
+      - "examples/protected-change-consumer/**"
       - "docs/draft06-a2a-profile.md"
+      - "docs/API_COMPATIBILITY.md"
+      - "docs/production-deployment-profile.md"
       - "docs/security-red-team-tests.md"
       - "docs/live-red-team-report.md"
   push:
@@ -30,8 +34,12 @@ on:
       - "pkg/agtp/**"
       - "pkg/atls/**"
       - "pkg/clients/**"
+      - "pkg/production/**"
       - "examples/a2a-multiprocess/**"
+      - "examples/protected-change-consumer/**"
       - "docs/draft06-a2a-profile.md"
+      - "docs/API_COMPATIBILITY.md"
+      - "docs/production-deployment-profile.md"
       - "docs/security-red-team-tests.md"
       - "docs/live-red-team-report.md"
 
@@ -59,4 +67,6 @@ jobs:
             ./pkg/atls/identitypolicy \
             ./pkg/atls/sbaipv2 \
             ./pkg/clients \
+            ./pkg/production \
+            ./examples/protected-change-consumer \
             ./examples/a2a-multiprocess

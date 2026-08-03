@@ -11,12 +11,15 @@ session-bound agent identity profile. The normative profile source is
 
 ## Status
 
-Current mainline coverage is synchronized with `docs/SSOT.md` draft v0.4
-as of 2026-06-21. The profile now includes direct-Agent JWT/JWS and CWT/COSE
+The v1.0 production extension retains the Direct-Agent v1 behavior in
+`docs/SSOT.md` and adds the fixed deployment composition in
+`docs/production-deployment-profile.md`. Coverage includes Direct-Agent JWT/JWS and CWT/COSE
 verification, dependency-free live-style relay, HTTP/2 reuse, QUIC/TLS
 early-data, route-assertion HTTP harnesses, deterministic malformed-token
 corpus tests, a deterministic JWT acceptance invariant matrix, and local
-Gateway Route Assertion validation.
+Gateway Route Assertion validation. It now also includes a concrete HTTPS
+consumer, signed attestation-result appraisal, current trust/revocation
+snapshots, and a TLS Redis/Valkey SETNX adapter race harness.
 
 Earlier branch-scoped implementation and verification completed on
 2026-06-13. Additional local regressions were run on 2026-06-16 for
@@ -36,7 +39,7 @@ across a request boundary. Runtime client/server gateway wiring remains
 separate work.
 
 The current evaluation is not a formal proof and is not a broad deployment
-security claim. It is v0.4 evidence for checked fail-closed verifier behavior,
+security claim. It is release evidence for checked fail-closed verifier behavior,
 built from focused local checks, negative vectors, unit-level tests,
 dependency-free live-style harnesses, and deterministic invariant checks. Claims
 such as "this grant is accepted only for this session" still need real 0-RTT
@@ -109,6 +112,7 @@ All checks passed. `docs/SSOT.pdf` rendered as a 24-page PDF.
 | HTTP/2 or gRPC connection reuse | The HTTP/2 and gRPC harnesses verify connection reuse, accepted same-context bindings, and rejected cross-context bindings. | Add deployment-specific gRPC pooling coverage when a product API is fixed. |
 | TLS resumption and 0-RTT | `TestVerifySessionIdentityJWTLiveRedTeamRejectsTLSResumptionReplayAndPreBinding` establishes an initial TLS 1.3 session and a resumed TLS 1.3 session, derives exporter hashes from each, accepts fresh per-session binding material, rejects the initial Session Binding Statement on the resumed session, and rejects a pre-binding statement without `tls_exporter_sha256`. `TestVerifySessionIdentityJWTLiveRedTeamRejectsQUICEarlyDataAuthentication` exercises Go's QUIC/TLS early-data secrets, rejects authentication before `tls_exporter_sha256` is available, and accepts only after the finished-handshake exporter is bound. | End-to-end application 0-RTT payload behavior remains future work if a QUIC application profile is introduced. |
 | Distributed replay race | Local goroutine race and local multi-process SETNX-style service are covered. | LRTT03b: repeat against real multi-node Redis or Valkey, including failover and timeout behavior. |
+| Production consumer action binding | `examples/protected-change-consumer` uses mTLS 1.3 and the supported production verifier to accept the exact change and reject changed-action, wrong-session, replay, revoked-grant, attestation-mismatch, and replay-store-outage cases. | The reference store is in-memory; production outcome durability and reconciliation remain consumer responsibilities. |
 | Gateway route confusion | SSOT defines gateway route-assertion requirements, `docs/gateway-routed-profile.md` fixes the Gateway Route Assertion claim map and holder-of-key proof, `pkg/agtp/gatewayroute` rejects route, tenant, policy, task, target-Agent, nonce, audit-hash, replay, and missing-proof confusion, and `pkg/agtp` verifies JWT/JWS and CWT/COSE route-assertion wire tokens. `TestVerifyGatewayRouteJWTLiveRedTeamNetworkHarness` exercises route assertion verification across an HTTP request boundary and rejects route diversion and replay. | Add runtime gateway client/server wiring if gateway-routed mode becomes a product surface. |
 | JWT/JWS parser robustness | Deterministic negative tests cover supported claim and signature paths. `TestVerifySessionIdentityJWTRedTeamRejectsMalformedCorpus` rejects malformed compact JWS, duplicate protected-header or payload JSON members, and unsafe control-character claims. `FuzzVerifySessionIdentityJWTRejectsMalformedCompactTokens` provides bounded fuzz smoke for malformed compact JWT/JWS inputs and passed a 60-second local fuzz run with 1,252,457 executions on 2026-06-30. | Add longer corpus jobs for Unicode, duplicate JSON keys, malformed base64url, malformed protected headers, and malformed JWS structure if broad parser-hardening evidence is needed. |
 | Grant, binding, session, and expected-policy invariants | `TestVerifySessionIdentityJWTInvariantMatrix` enumerates grant hash, request context, TLS exporter, attestation binder, audience, role-separated context, task, replay, and local-policy invariants through the same JWT acceptance gate. | Add long-running property or fuzz generation if the project wants randomized invariant exploration. |
@@ -157,6 +161,9 @@ All checks passed. `docs/SSOT.pdf` rendered as a 24-page PDF.
 | `TestVerifyGatewayRouteCWTRedTeamRejectsAttacks` | CWT/COSE Gateway Route Assertion adapter rejects route diversion, grant-hash substitution, gateway-session substitution, holder-proof hash substitution, unprotected COSE `kid`, and replay. | Passed locally |
 | `TestVerifySessionIdentityJWTInvariantMatrix` | The JWT acceptance invariant rejects mismatched grant hash, request context, TLS exporter, attestation binder, audience, role-separated context, task, replay, and local policy. | Passed locally |
 | `TestSEVSNPAppraisalContractValidateAcceptsRequiredEvidence` and companion negative tests | SEV-SNP HostData and `kernel-hashes=on` appraisal contract accepts matching evidence and rejects missing expected HostData, mismatched HostData, or missing kernel-hash evidence. | Passed locally |
+| `TestProfileVerifyAcceptsProductionComposition` and negative gates | Role-separated trust, revocation, signed attestation, exact policy/binding, and shared replay commit are enforced in one acceptance path; failures do not commit replay state. | Passed locally |
+| `TestRedisSetNXStoreCommitsOneWinnerOverTLS` | Twenty concurrent TLS clients race one hashed replay key against the Redis/Valkey wire adapter; exactly one SETNX succeeds. | Passed locally |
+| `TestProtectedChangeE2EAcceptsExactBoundAction` and companion negative tests | A concrete mTLS HTTPS consumer applies the exact protected change and rejects action mutation, wrong TLS session, replay, revoked grant, attestation mismatch, and replay-store outage. | Passed locally |
 
 ## LRTT Status
 
@@ -227,8 +234,10 @@ boundaries that need separate work if the project chooses to support them.
   here yet.
 - CWT/COSE verification exists in `pkg/agtp`, but client configuration is still
   wired for the JWT/JWS runtime path.
-- Replay race coverage uses a local HTTP SETNX-style service, not a real
-  multi-node Redis or Valkey deployment.
+- Replay coverage includes the TLS Redis/Valkey `SET NX PX` wire adapter and a
+  20-client one-winner race against a local protocol server. Real multi-node
+  failover, persistence, and operational timeout behavior remain deployment
+  validation.
 - Gateway-routed deployments now have a fixed route-assertion claim map,
   holder-of-key proof rules, a local policy gate, and JWT/CWT route-assertion
   adapters plus a local HTTP route-assertion harness. Runtime client/server

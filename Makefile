@@ -1,6 +1,7 @@
 BUILD_DIR = build
 SERVICES = manager agent cli attestation-service log-forwarder computation-runner egress-proxy ingress-proxy
-DIRECT_AGENT_CORE_PKGS = ./pkg/atls/... ./pkg/clients/... ./pkg/agtp/...
+DIRECT_AGENT_CORE_PKGS = ./pkg/atls/... ./pkg/clients/... ./pkg/agtp/... ./pkg/production
+PRODUCTION_CONSUMER_PKGS = ./examples/protected-change-consumer
 CGO_ENABLED ?= 0
 GOARCH ?= amd64
 VERSION ?= $(shell git describe --abbrev=0 --tags --always)
@@ -70,7 +71,7 @@ build-igvm:
 product-security-gate:
 	go mod verify
 	GOTOOLCHAIN=go1.26.0+auto go test $(DIRECT_AGENT_CORE_PKGS)
-	GOTOOLCHAIN=go1.26.0+auto go test -v -race -count=1 ./pkg/atls/identitypolicy ./pkg/clients
+	GOTOOLCHAIN=go1.26.0+auto go test -v -race -count=1 ./pkg/atls/identitypolicy ./pkg/clients ./pkg/production $(PRODUCTION_CONSUMER_PKGS)
 	$(MAKE) fuzz-smoke
 	$(GOVULNCHECK) ./...
 
