@@ -48,6 +48,10 @@ CWT/COSE, and gateway-route policy experiments.
 - `docs/API_COMPATIBILITY.md`: supported v1 API and compatibility policy.
 - `docs/production-deployment-profile.md`: fixed production choices for trust,
   revocation, attestation, distributed replay, and exact action binding.
+- `docs/azure-sev-snp-attestation-bridge.md`: unreleased Azure Attestation
+  token-to-ASB bridge boundary and live confidential-VM qualification.
+- `docs/redis-failover-runbook.md`: private multi-node replay topology,
+  replication acknowledgement, and real failover gate.
 - `formal/`: ProVerif and TLA+ models, recorded results, and
   model-to-implementation traceability.
 - `pkg/clients`, `pkg/atls`, and `pkg/atls/identitypolicy`: Direct-Agent
@@ -113,12 +117,15 @@ The release evidence covers:
   for compact JWT/JWS parsing, and deterministic acceptance invariants;
 - route-assertion policy tests and a local HTTP route-assertion harness for the
   documented gateway boundary.
-- a production composition with current trust/revocation snapshots, signed
-  attestation-result policy, and TLS-only Redis/Valkey SETNX replay;
+- a production composition with current trust/revocation snapshots and
+  TLS-only Redis/Valkey SETNX replay, plus an unreleased Azure SEV-SNP
+  token-to-result bridge tested with signed synthetic tokens and optional
+  same-connection Redis replica acknowledgement;
 - an independent protected-change HTTPS consumer that rejects a changed
   action, wrong TLS session, replay, revoked grant, attestation mismatch, and
   replay-store outage; and
-- a 20-client TLS replay-store race that requires exactly one SETNX winner.
+- a 20-client TLS replay-store race that requires exactly one SETNX winner and
+  a replica acknowledgement for that accepted write.
 
 For accepted TLS sessions, the AGTP observed-identity path derives
 `tls_exporter_sha256` from the accepted `tls.ConnectionState`. Fixed exporter

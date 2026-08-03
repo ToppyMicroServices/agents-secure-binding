@@ -71,7 +71,7 @@ build-igvm:
 product-security-gate:
 	go mod verify
 	GOTOOLCHAIN=go1.26.0+auto go test $(DIRECT_AGENT_CORE_PKGS)
-	GOTOOLCHAIN=go1.26.0+auto go test -v -race -count=1 ./pkg/atls/identitypolicy ./pkg/clients ./pkg/production $(PRODUCTION_CONSUMER_PKGS)
+	GOTOOLCHAIN=go1.26.0+auto go test -v -race -count=1 ./pkg/atls/identitypolicy ./pkg/clients ./pkg/production ./cmd/redis-failover-redteam $(PRODUCTION_CONSUMER_PKGS)
 	$(MAKE) fuzz-smoke
 	$(GOVULNCHECK) ./...
 

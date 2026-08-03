@@ -163,7 +163,9 @@ All checks passed. `docs/SSOT.pdf` rendered as a 24-page PDF.
 | `TestVerifySessionIdentityJWTInvariantMatrix` | The JWT acceptance invariant rejects mismatched grant hash, request context, TLS exporter, attestation binder, audience, role-separated context, task, replay, and local policy. | Passed locally |
 | `TestSEVSNPAppraisalContractValidateAcceptsRequiredEvidence` and companion negative tests | SEV-SNP HostData and `kernel-hashes=on` appraisal contract accepts matching evidence and rejects missing expected HostData, mismatched HostData, or missing kernel-hash evidence. | Passed locally |
 | `TestProfileVerifyAcceptsProductionComposition` and negative gates | Role-separated trust, revocation, signed attestation, exact policy/binding, and shared replay commit are enforced in one acceptance path; failures do not commit replay state. | Passed locally |
-| `TestRedisSetNXStoreCommitsOneWinnerOverTLS` | Twenty concurrent TLS clients race one hashed replay key against the Redis/Valkey wire adapter; exactly one SETNX succeeds. | Passed locally |
+| `TestAzureSNPAttestationBridgeIssuesVerifiableResult` and companion negative tests | A pinned-issuer RS256 Azure Attestation claim set is converted into a short-lived Ed25519 ASB result only for the exact binder challenge, policy hash, launch measurement, SVN, debug, migration, key, and lifetime. | Passed locally; token is synthetic, not live hardware evidence |
+| `TestRedisSetNXStoreCommitsOneWinnerOverTLS` | Twenty concurrent TLS clients race one hashed replay key against the Redis/Valkey wire adapter; exactly one SETNX succeeds after one replica acknowledgement. | Passed locally |
+| `TestRunPhaseRejectsReplayAfterFailover` and companion negative tests | The two-phase failover gate rejects a replay retained across a modeled failover and detects a lost replay write, expired evidence, and store outage. | Passed locally; real multi-node failover is not recorded |
 | `TestProtectedChangeE2EAcceptsExactBoundAction` and companion negative tests | A concrete mTLS HTTPS consumer applies the exact protected change and rejects action mutation, wrong TLS session, replay, revoked grant, attestation mismatch, and replay-store outage. | Passed locally |
 
 ## LRTT Status
@@ -172,7 +174,7 @@ All checks passed. `docs/SSOT.pdf` rendered as a 24-page PDF.
 | --- | --- | --- | --- |
 | LRTT01 | Completed for the dependency-free CI harness | `TestAGTPObservedIdentityRedTeamRealTLSAttestationBinding` covers real TLS 1.3 exporter binding, certificate material, accepted attestation payload, AGTP hook acceptance, and borrowed-session rejection | Hardware-generated confidential-VM evidence is not exercised in this local CI profile |
 | LRTT02 | Completed | `TestVerifySessionIdentityCWTAcceptsManagerGrantAndLocalPolicy` and `TestVerifySessionIdentityCWTRedTeamRejectsCOSEProfileAttacks` | Runtime client configuration remains JWT/JWS-wired unless callers use the CWT verifier directly |
-| LRTT03 | Completed | `TestAGTPObservedIdentityRedTeamRejectsReplayRaceMultiProcess` | Real multi-node Redis / Valkey deployment is outside the local harness |
+| LRTT03 | Gate implemented; real failover run not recorded | `TestAGTPObservedIdentityRedTeamRejectsReplayRaceMultiProcess`, replica-acknowledged `RedisSetNXStore`, and `cmd/redis-failover-redteam` cover local race and seed/verify behavior | Counts as deployment evidence only after the selected private multi-node service is failed over successfully |
 | LRTT04 | Completed | `TestAGTPObservedIdentityRedTeamRejectsKeyAndRevocationFailures` | None for the modeled HTTP key and revocation failure modes |
 | LRTT05 | Completed | `TestAGTPObservedIdentityRedTeamRejectsAttestationBinderMismatch` | None for binder mismatch comparison |
 | LRTT06 | Completed | `TestVerifySessionIdentityJWTEnvelopeRedTeamRejectsSubstitution` | Runtime client configuration remains two-token JWT/JWS-wired unless callers use the envelope verifier directly |
@@ -180,7 +182,7 @@ All checks passed. `docs/SSOT.pdf` rendered as a 24-page PDF.
 | LRTT08 | Superseded by LRTT15 gateway work | SSOT separates gateway mode from the direct-Agent trust model; `docs/gateway-routed-profile.md` now defines the companion profile | Full gateway-routed runtime harness remains future work |
 | LRTT09 | Completed locally | `TestValidateResponseCachePolicyRedTeamRejectsCallerDependentPublicCache`; `TestValidateResponseCachePolicyRedTeamPartitionsPrivateCache` | This is a dependency-free policy and cache-key harness, not a live AGTP daemon response-cache implementation |
 | LRTT10 | Not implemented | Tracked from the evaluation matrix | Real network relay with live endpoints and an active relay |
-| LRTT11 | Workflow added; hardware run not recorded | `Hardware Attestation Red Team` runs `cmd/hardware-attestation-redteam` on a confidential self-hosted runner and rejects stale evidence across two verifier challenges | Counts as completed only after a successful confidential-hardware run is recorded |
+| LRTT11 | Bridge and workflow added; hardware run not recorded | `Hardware Attestation Red Team` exercises direct hardware challenge binding, while `AzureMAATokenVerifier` and `AzureSNPAttestationBridge` enforce the selected Azure token-to-ASB contract in local tests | Counts as completed only after a successful Azure confidential-VM token and protected-change run is recorded |
 | LRTT12 | Completed for the dependency-free loopback harness | `TestVerifySessionIdentityJWTLiveRedTeamRejectsNetworkRelayAcrossEndpoints` | Uses two live local TLS endpoints and relayed profile material; it is not a full malicious forwarding proxy |
 | LRTT13 | Completed for local HTTP/2 and gRPC reuse | `TestVerifySessionIdentityJWTLiveRedTeamHTTP2ConnectionReuse`; `TestVerifySessionIdentityJWTLiveRedTeamGRPCConnectionReuse` | Broader deployment gRPC pooling coverage remains future work |
 | LRTT14 | Completed for local TLS resumption, pre-binding rejection, and QUIC/TLS early-data authentication gating | `TestVerifySessionIdentityJWTLiveRedTeamRejectsTLSResumptionReplayAndPreBinding`; `TestVerifySessionIdentityJWTLiveRedTeamRejectsQUICEarlyDataAuthentication` | End-to-end application 0-RTT payload behavior remains future work if a QUIC application profile is introduced |
@@ -223,6 +225,10 @@ All checks passed. `docs/SSOT.pdf` rendered as a 24-page PDF.
   workflow for confidential self-hosted runner attestation replay evidence.
 - Added a SEV-SNP HostData and `kernel-hashes=on` appraisal contract with
   fail-closed tests.
+- Added a pinned-issuer Azure SEV-SNP Attestation token bridge and exact
+  binder-challenge negative tests.
+- Added same-connection Redis/Valkey replica acknowledgement and a two-phase
+  real-service failover qualification command.
 
 ## Residual Boundaries
 
@@ -230,15 +236,14 @@ These are not blockers for the completed branch; they are profile or deployment
 boundaries that need separate work if the project chooses to support them.
 
 - Hardware-generated confidential-VM attestation evidence is not produced by the
-  default GitHub-hosted CI runners. The manual hardware workflow requires a
-  confidential self-hosted runner, and no successful hardware run is recorded
-  here yet.
+  default GitHub-hosted CI runners. The Azure bridge tests use signed synthetic
+  tokens; no successful Azure confidential-VM token run is recorded here yet.
 - CWT/COSE verification exists in `pkg/agtp`, but client configuration is still
   wired for the JWT/JWS runtime path.
-- Replay coverage includes the TLS Redis/Valkey `SET NX PX` wire adapter and a
-  20-client one-winner race against a local protocol server. Real multi-node
-  failover, persistence, and operational timeout behavior remain deployment
-  validation.
+- Replay coverage includes the TLS Redis/Valkey `SET NX PX` wire adapter,
+  same-connection `WAIT`, a 20-client one-winner race, and the failover
+  seed/verify command. No successful real multi-node failover, persistence, or
+  operational timeout run is recorded here yet.
 - Gateway-routed deployments now have a fixed route-assertion claim map,
   holder-of-key proof rules, a local policy gate, and JWT/CWT route-assertion
   adapters plus a local HTTP route-assertion harness. Runtime client/server

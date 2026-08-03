@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- Add a pinned-issuer Azure SEV-SNP Attestation token bridge with exact ASB
+  binder challenge, measurement, policy, SVN, debug, migration, key, and
+  freshness checks.
+- Add optional same-connection Redis/Valkey `WAIT` acknowledgement after a
+  successful replay insert.
+- Add a two-phase real Redis/Valkey failover qualification command and
+  deployment runbooks for Azure hardware attestation and replay HA.
+
 ## v1.0.0
 
 - Add the supported Direct-Agent v1 production composition.
