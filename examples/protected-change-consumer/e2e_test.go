@@ -289,7 +289,7 @@ func newE2EFixture(t *testing.T) *e2eFixture {
 		ReplayCache: identitypolicy.NewSetNXReplayCacheWithClock(context.Background(), replayStore, func() time.Time { return now }),
 		Now:         func() time.Time { return now },
 	}
-	clientCertificate, clientLeaf, clientCAPool := e2eClientCertificate(t, now)
+	clientCertificate, clientLeaf, clientCAPool := e2eClientCertificate(t, time.Now().UTC())
 	app := Application{
 		Profile:       profile,
 		Nonces:        fixedNonceSource{"change-0001": e2eExpectedNonce},
