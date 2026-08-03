@@ -1,6 +1,8 @@
 # Production deployment profile: protected-change-v1
 
-Status: supported beginning with `v1.0.0`.
+Status: the baseline is supported beginning with `v1.0.0`. The Azure SEV-SNP
+bridge and Redis replica-acknowledgement additions documented below are
+unreleased candidates pending live qualification and a minor release.
 
 This is one concrete Direct-Agent v1 deployment profile. Its reference
 consumer is a tenant-configuration change service, not Split-Knowledge. The
@@ -21,8 +23,8 @@ policy, and shared replay state all agree.
 | Exporter context | `asb.direct-agent.production.v1 NUL nonce NUL canonical_action` |
 | Action digest | SHA-256 of canonical protected-change JSON |
 | Trust and revocation | fresh role-specific `production.TrustSource` snapshot on every acceptance |
-| Attestation | Ed25519-signed `asb-attestation-result/v1` with exact policy, measurement, binder, issue time, and expiry |
-| Replay | Redis/Valkey `SET NX PX` over certificate-verified TLS; fail closed on error |
+| Attestation | v1.0 baseline: Ed25519-signed `asb-attestation-result/v1`; unreleased extension: pinned-issuer Azure SEV-SNP MAA bridge |
+| Replay | v1.0 baseline: Redis/Valkey `SET NX PX`; unreleased extension: same-connection `WAIT`; certificate-verified TLS and fail closed |
 | Outcome | consumer-owned durable, idempotent store keyed by `change_id` |
 
 Manager, Agent, and attestation-verifier keys are separate trust domains. A key
@@ -88,6 +90,15 @@ future skew, and expiry. Missing or stale results fail closed. This profile
 authenticates an appraisal result; evidence acquisition and hardware-specific
 appraisal remain deployment responsibilities.
 
+For the selected Azure SEV-SNP deployment,
+`production.AzureMAATokenVerifier` authenticates an RS256 Azure Attestation JWT
+against a pinned issuer and deployment-managed key snapshot. It does not follow
+token-provided key URLs during acceptance. `production.AzureSNPAttestationBridge`
+then enforces exact policy hash, launch measurement, guest SVN, debug and
+migration policy, and a signed nonce derived from the exact ASB binder before
+issuing the short-lived result. See
+[`azure-sev-snp-attestation-bridge.md`](azure-sev-snp-attestation-bridge.md).
+
 ## Distributed replay
 
 Configure the shared replay cache with a bounded, certificate-verified TLS
@@ -95,10 +106,12 @@ connection:
 
 ```go
 redisStore := production.RedisSetNXStore{
-    Address:          "replay.internal.example:6379",
-    KeyPrefix:        "asb:protected-change:v1:",
-    TLSConfig:        redisTLSConfig,
-    OperationTimeout: 2 * time.Second,
+    Address:                         "replay.internal.example:6379",
+    KeyPrefix:                       "asb:protected-change:v1:",
+    TLSConfig:                       redisTLSConfig,
+    OperationTimeout:                2 * time.Second,
+    RequiredReplicaAcknowledgements: 1,
+    ReplicationTimeout:              500 * time.Millisecond,
 }
 replay := identitypolicy.NewSetNXReplayCache(ctx, redisStore)
 ```
@@ -109,7 +122,15 @@ certificate may be used. Replay input is hashed before becoming a Redis key.
 The atomic key covers the grant hash, audience, exact action context, and
 verifier nonce; the TTL is the earliest grant, proof, or attestation expiry.
 Connection, TLS, authentication, protocol, timeout, and store errors all reject
-the action. No local replay fallback is used.
+the action. An insufficient `WAIT` acknowledgement also rejects the action. The
+write may already exist after that rejection. No local replay fallback is used.
+
+`WAIT` reduces the acknowledged-write loss window but does not make Redis a
+strongly consistent store. Real failover qualification is required for the
+selected managed or self-operated topology; see
+[`redis-failover-runbook.md`](redis-failover-runbook.md). A deployment that
+requires zero replay after every possible failover must use a strongly
+consistent conditional-insert backend instead of relying on Redis replication.
 
 ## Consumer transaction
 
@@ -142,8 +163,15 @@ The negative suite covers trust-source outage, unknown or disabled keys,
 revoked grant, changed action, wrong local task, wrong TLS session, replay,
 attestation binder mismatch, stale attestation, unapproved measurement, and
 shared replay-store outage. The Redis/Valkey adapter test races 20 TLS clients
-against one key and requires exactly one winner.
+against one key, requires exactly one winner, and requires a replica
+acknowledgement for the successful write. The failover command provides a
+two-phase seed/verify gate for the selected real service:
 
-These tests are implementation evidence for the documented profile. They are
-not evidence that a particular external key registry, Redis/Valkey cluster, or
-hardware attestation service is correctly operated.
+```sh
+go test -race -count=1 ./cmd/redis-failover-redteam
+```
+
+These tests are implementation evidence for the documented profile. A
+successful Azure confidential-VM run and a successful multi-node Redis/Valkey
+failover run must be recorded separately before claiming those deployment
+properties.

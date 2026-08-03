@@ -21,6 +21,7 @@ import (
 var (
 	ErrInvalidRedisConfig = errors.New("production: invalid redis replay configuration")
 	ErrRedisProtocol      = errors.New("production: redis replay protocol error")
+	ErrRedisReplication   = errors.New("production: redis replay replication acknowledgement failed")
 )
 
 // RedisSetNXStore implements identitypolicy.SetNXStore with Redis or Valkey
@@ -34,6 +35,13 @@ type RedisSetNXStore struct {
 	TLSConfig        *tls.Config
 	Dialer           *net.Dialer
 	OperationTimeout time.Duration
+
+	// RequiredReplicaAcknowledgements enables a same-connection WAIT after a
+	// successful SET. Zero preserves SET NX PX-only behavior. WAIT reduces the
+	// acknowledged-write loss window, but Redis replication is not strongly
+	// consistent and this is not a zero-loss failover guarantee.
+	RequiredReplicaAcknowledgements int
+	ReplicationTimeout              time.Duration
 }
 
 // SetNX atomically records a SHA-256-derived replay key until its TTL expires.
@@ -106,6 +114,40 @@ func (s RedisSetNXStore) SetNX(ctx context.Context, key string, ttl time.Duratio
 	}
 	switch {
 	case kind == '+' && value == "OK":
+		if s.RequiredReplicaAcknowledgements == 0 {
+			return true, nil
+		}
+		waitMillis := s.ReplicationTimeout.Milliseconds()
+		if waitMillis < 1 {
+			waitMillis = 1
+		}
+		wait := []string{
+			"WAIT",
+			strconv.Itoa(s.RequiredReplicaAcknowledgements),
+			strconv.FormatInt(waitMillis, 10),
+		}
+		if err := writeRESPArray(conn, wait); err != nil {
+			return false, fmt.Errorf("redis replay WAIT: %w", err)
+		}
+		kind, value, err = readRESP(reader)
+		if err != nil {
+			return false, fmt.Errorf("redis replay WAIT: %w", err)
+		}
+		if kind != ':' {
+			return false, fmt.Errorf("%w: unexpected WAIT response", ErrRedisProtocol)
+		}
+		acknowledged, err := strconv.Atoi(value)
+		if err != nil || acknowledged < 0 {
+			return false, fmt.Errorf("%w: invalid WAIT acknowledgement", ErrRedisProtocol)
+		}
+		if acknowledged < s.RequiredReplicaAcknowledgements {
+			return false, fmt.Errorf(
+				"%w: got %d, require %d",
+				ErrRedisReplication,
+				acknowledged,
+				s.RequiredReplicaAcknowledgements,
+			)
+		}
 		return true, nil
 	case kind == '$' && value == "":
 		return false, nil
@@ -125,6 +167,16 @@ func (s RedisSetNXStore) validate() error {
 		return ErrInvalidRedisConfig
 	}
 	if s.TLSConfig.MinVersion < tls.VersionTLS13 {
+		return ErrInvalidRedisConfig
+	}
+	if s.RequiredReplicaAcknowledgements < 0 || s.ReplicationTimeout < 0 {
+		return ErrInvalidRedisConfig
+	}
+	if s.RequiredReplicaAcknowledgements == 0 && s.ReplicationTimeout != 0 {
+		return ErrInvalidRedisConfig
+	}
+	if s.RequiredReplicaAcknowledgements > 0 &&
+		(s.ReplicationTimeout <= 0 || s.ReplicationTimeout >= s.OperationTimeout) {
 		return ErrInvalidRedisConfig
 	}
 	return nil
@@ -160,6 +212,11 @@ func readRESP(r *bufio.Reader) (byte, string, error) {
 	}
 	switch prefix {
 	case '+':
+		return prefix, line, nil
+	case ':':
+		if _, err := strconv.ParseInt(line, 10, 64); err != nil {
+			return 0, "", ErrRedisProtocol
+		}
 		return prefix, line, nil
 	case '-':
 		return 0, "", fmt.Errorf("%w: server error", ErrRedisProtocol)

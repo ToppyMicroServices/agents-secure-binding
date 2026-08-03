@@ -24,6 +24,8 @@ The following remain experimental or outside the supported product API:
 
 - draft-06-inspired v2 entrypoints and types;
 - `pkg/agtp`, gateway-route, cache, and diversion-policy adapters;
+- the unreleased Azure Attestation bridge and Redis failover command, until a
+  minor release explicitly adds them to the supported surface;
 - the inherited Manager, Agent, CVM, HAL, proxy, and CLI runtime surfaces;
 - examples, test harnesses, formal models, and document structure; and
 - hardware-specific evidence acquisition and appraisal implementations.
@@ -63,4 +65,7 @@ depend on it to fail.
 
 Replay storage is compatible with Redis or Valkey servers that implement
 `SET key value NX PX ttl` over TLS. Store unavailability is an authentication
-failure; there is no in-memory fallback in the production profile.
+failure; there is no in-memory fallback in the production profile. The
+unreleased replica-acknowledgement option additionally requires
+`WAIT numreplicas timeout` on the same connection. `WAIT` compatibility does
+not imply strong consistency or zero-loss failover behavior.

@@ -15,11 +15,14 @@ on:
       - "pkg/atls/**"
       - "pkg/clients/**"
       - "pkg/production/**"
+      - "cmd/redis-failover-redteam/**"
       - "examples/a2a-multiprocess/**"
       - "examples/protected-change-consumer/**"
       - "docs/draft06-a2a-profile.md"
       - "docs/API_COMPATIBILITY.md"
       - "docs/production-deployment-profile.md"
+      - "docs/azure-sev-snp-attestation-bridge.md"
+      - "docs/redis-failover-runbook.md"
       - "docs/security-red-team-tests.md"
       - "docs/live-red-team-report.md"
   push:
@@ -35,11 +38,14 @@ on:
       - "pkg/atls/**"
       - "pkg/clients/**"
       - "pkg/production/**"
+      - "cmd/redis-failover-redteam/**"
       - "examples/a2a-multiprocess/**"
       - "examples/protected-change-consumer/**"
       - "docs/draft06-a2a-profile.md"
       - "docs/API_COMPATIBILITY.md"
       - "docs/production-deployment-profile.md"
+      - "docs/azure-sev-snp-attestation-bridge.md"
+      - "docs/redis-failover-runbook.md"
       - "docs/security-red-team-tests.md"
       - "docs/live-red-team-report.md"
 
@@ -68,5 +74,6 @@ jobs:
             ./pkg/atls/sbaipv2 \
             ./pkg/clients \
             ./pkg/production \
+            ./cmd/redis-failover-redteam \
             ./examples/protected-change-consumer \
             ./examples/a2a-multiprocess

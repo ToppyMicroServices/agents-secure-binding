@@ -31,10 +31,12 @@ func TestRedisSetNXStoreCommitsOneWinnerOverTLS(t *testing.T) {
 	t.Cleanup(stop)
 
 	store := RedisSetNXStore{
-		Address:          address,
-		KeyPrefix:        "asb:replay:v1:",
-		TLSConfig:        clientTLS,
-		OperationTimeout: 5 * time.Second,
+		Address:                         address,
+		KeyPrefix:                       "asb:replay:v1:",
+		TLSConfig:                       clientTLS,
+		OperationTimeout:                5 * time.Second,
+		RequiredReplicaAcknowledgements: 1,
+		ReplicationTimeout:              time.Second,
 	}
 
 	const workers = 20
@@ -65,6 +67,25 @@ func TestRedisSetNXStoreCommitsOneWinnerOverTLS(t *testing.T) {
 	}
 }
 
+func TestRedisSetNXStoreRejectsInsufficientReplication(t *testing.T) {
+	t.Parallel()
+	address, clientTLS, stop := startTestRedisTLSWithAcknowledgements(t, 0)
+	t.Cleanup(stop)
+
+	store := RedisSetNXStore{
+		Address:                         address,
+		KeyPrefix:                       "asb:replay:v1:",
+		TLSConfig:                       clientTLS,
+		OperationTimeout:                5 * time.Second,
+		RequiredReplicaAcknowledgements: 1,
+		ReplicationTimeout:              time.Second,
+	}
+	ok, err := store.SetNX(context.Background(), "replication-required", time.Minute)
+	if ok || !errors.Is(err, ErrRedisReplication) {
+		t.Fatalf("SetNX() = (%v, %v), want (false, %v)", ok, err, ErrRedisReplication)
+	}
+}
+
 func TestRedisSetNXStoreRejectsUnsafeConfiguration(t *testing.T) {
 	t.Parallel()
 	if _, err := (RedisSetNXStore{}).SetNX(nil, "key", time.Minute); !errors.Is(err, ErrMissingContext) {
@@ -75,6 +96,10 @@ func TestRedisSetNXStoreRejectsUnsafeConfiguration(t *testing.T) {
 		{Address: "redis.test:6379", KeyPrefix: "asb:", OperationTimeout: time.Second, TLSConfig: &tls.Config{InsecureSkipVerify: true, MinVersion: tls.VersionTLS13}}, //nolint:gosec // verifies rejection
 		{Address: "redis.test:6379", KeyPrefix: "asb:", OperationTimeout: time.Second, TLSConfig: &tls.Config{ServerName: "redis.test", MinVersion: tls.VersionTLS12}},
 		{Address: "redis.test:6379", KeyPrefix: "asb:", OperationTimeout: time.Second, Username: "user", TLSConfig: &tls.Config{ServerName: "redis.test", MinVersion: tls.VersionTLS13}},
+		{Address: "redis.test:6379", KeyPrefix: "asb:", OperationTimeout: time.Second, TLSConfig: &tls.Config{ServerName: "redis.test", MinVersion: tls.VersionTLS13}, RequiredReplicaAcknowledgements: -1},
+		{Address: "redis.test:6379", KeyPrefix: "asb:", OperationTimeout: time.Second, TLSConfig: &tls.Config{ServerName: "redis.test", MinVersion: tls.VersionTLS13}, ReplicationTimeout: time.Millisecond},
+		{Address: "redis.test:6379", KeyPrefix: "asb:", OperationTimeout: time.Second, TLSConfig: &tls.Config{ServerName: "redis.test", MinVersion: tls.VersionTLS13}, RequiredReplicaAcknowledgements: 1},
+		{Address: "redis.test:6379", KeyPrefix: "asb:", OperationTimeout: time.Second, TLSConfig: &tls.Config{ServerName: "redis.test", MinVersion: tls.VersionTLS13}, RequiredReplicaAcknowledgements: 1, ReplicationTimeout: time.Second},
 	}
 	for i, store := range tests {
 		if _, err := store.SetNX(context.Background(), "key", time.Minute); !errors.Is(err, ErrInvalidRedisConfig) {
@@ -84,6 +109,11 @@ func TestRedisSetNXStoreRejectsUnsafeConfiguration(t *testing.T) {
 }
 
 func startTestRedisTLS(t *testing.T) (string, *tls.Config, func()) {
+	t.Helper()
+	return startTestRedisTLSWithAcknowledgements(t, 1)
+}
+
+func startTestRedisTLSWithAcknowledgements(t *testing.T, acknowledgements int) (string, *tls.Config, func()) {
 	t.Helper()
 	certificate, roots := testRedisCertificate(t)
 	listener, err := tls.Listen("tcp", "127.0.0.1:0", &tls.Config{
@@ -95,9 +125,10 @@ func startTestRedisTLS(t *testing.T) (string, *tls.Config, func()) {
 	}
 
 	server := &testRedisServer{
-		listener: listener,
-		seen:     make(map[string]struct{}),
-		done:     make(chan struct{}),
+		listener:         listener,
+		seen:             make(map[string]struct{}),
+		done:             make(chan struct{}),
+		acknowledgements: acknowledgements,
 	}
 	go server.serve()
 	stop := func() {
@@ -117,12 +148,13 @@ func startTestRedisTLS(t *testing.T) (string, *tls.Config, func()) {
 }
 
 type testRedisServer struct {
-	listener net.Listener
-	done     chan struct{}
-	mu       sync.Mutex
-	seen     map[string]struct{}
-	err      error
-	wg       sync.WaitGroup
+	listener         net.Listener
+	done             chan struct{}
+	mu               sync.Mutex
+	seen             map[string]struct{}
+	err              error
+	wg               sync.WaitGroup
+	acknowledgements int
 }
 
 func (s *testRedisServer) serve() {
@@ -149,7 +181,8 @@ func (s *testRedisServer) serve() {
 }
 
 func (s *testRedisServer) handle(conn net.Conn) error {
-	command, err := readTestRESPArray(bufio.NewReader(conn))
+	reader := bufio.NewReader(conn)
+	command, err := readTestRESPArray(reader)
 	if err != nil {
 		return err
 	}
@@ -171,9 +204,23 @@ func (s *testRedisServer) handle(conn net.Conn) error {
 	s.mu.Unlock()
 	if exists {
 		_, err = io.WriteString(conn, "$-1\r\n")
-	} else {
-		_, err = io.WriteString(conn, "+OK\r\n")
+		return err
 	}
+	if _, err = io.WriteString(conn, "+OK\r\n"); err != nil {
+		return err
+	}
+
+	wait, err := readTestRESPArray(reader)
+	if err != nil {
+		return err
+	}
+	if len(wait) != 3 || wait[0] != "WAIT" || wait[1] != "1" {
+		return fmt.Errorf("unexpected replication command: %q", wait)
+	}
+	if _, err := strconv.ParseInt(wait[2], 10, 64); err != nil {
+		return fmt.Errorf("invalid WAIT timeout: %w", err)
+	}
+	_, err = fmt.Fprintf(conn, ":%d\r\n", s.acknowledgements)
 	return err
 }
 
