@@ -12,9 +12,11 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
+	"strconv"
 	"strings"
 	"time"
 
@@ -91,6 +93,7 @@ func (v AzureMAATokenVerifier) Verify(ctx context.Context, token string, now tim
 	claims := jwt.MapClaims{}
 	parser := jwt.NewParser(
 		jwt.WithValidMethods([]string{jwt.SigningMethodRS256.Alg()}),
+		jwt.WithJSONNumber(),
 		jwt.WithIssuer(v.Issuer),
 		jwt.WithExpirationRequired(),
 		jwt.WithIssuedAt(),
@@ -285,8 +288,12 @@ func normalizeAzureSNPClaims(claims jwt.MapClaims) (AzureSNPTokenClaims, error) 
 
 func exactUint64(value any) (uint64, bool) {
 	switch typed := value.(type) {
+	case json.Number:
+		parsed, err := strconv.ParseUint(typed.String(), 10, 64)
+		return parsed, err == nil
 	case float64:
-		if typed < 0 || typed > math.MaxUint64 || math.Trunc(typed) != typed {
+		const maxSafeJSONInteger = float64(1<<53 - 1)
+		if typed < 0 || typed > maxSafeJSONInteger || math.Trunc(typed) != typed {
 			return 0, false
 		}
 		return uint64(typed), true

@@ -9,6 +9,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/rsa"
+	"encoding/json"
 	"errors"
 	"io"
 	"testing"
@@ -103,6 +104,21 @@ func TestAzureSNPAttestationBridgeRejectsPolicyAndBindingFailures(t *testing.T) 
 				t.Fatalf("Issue() error = %v, want %v", err, tt.want)
 			}
 		})
+	}
+}
+
+func TestExactUint64PreservesJSONIntegerSemantics(t *testing.T) {
+	t.Parallel()
+	if _, ok := exactUint64(float64(1 << 53)); ok {
+		t.Fatal("exactUint64() accepted a float64 outside the safe JSON integer range")
+	}
+	const maxUint64 = "18446744073709551615"
+	got, ok := exactUint64(json.Number(maxUint64))
+	if !ok || got != ^uint64(0) {
+		t.Fatalf("exactUint64(%s) = (%d, %t)", maxUint64, got, ok)
+	}
+	if _, ok := exactUint64(json.Number("18446744073709551616")); ok {
+		t.Fatal("exactUint64() accepted a JSON integer larger than uint64")
 	}
 }
 
