@@ -88,6 +88,30 @@ Do not describe this repository as implementing every binding profile from the
 draft. Product claims should say that it implements an experimental
 Direct-Agent binding profile based on the core acceptance rules.
 
+## Supported v1 Product Surface
+
+Release `v1.0.0` fixes the supported surface and compatibility rules in
+`docs/API_COMPATIBILITY.md`. The supported product API is the Direct-Agent v1
+subset of `pkg/clients` and `pkg/atls/identitypolicy`, composed through
+`pkg/production`. Draft-06-inspired v2, `pkg/agtp`, gateway runtime, inherited
+Cocos runtime services, and hardware evidence acquisition remain experimental
+or outside the supported API.
+
+The concrete `protected-change-v1` deployment profile is recorded in
+`docs/production-deployment-profile.md`. It includes:
+
+- separate Manager, Agent, and attestation-verifier Ed25519 key roles;
+- fresh trust and revocation snapshots with fail-closed source errors;
+- a signed attestation result bound to the accepted TLS session, exact action,
+  verifier nonce, appraisal policy, and measurement;
+- a TLS 1.3 Redis/Valkey `SET NX PX` replay adapter with bounded operations;
+- a concrete non-Split-Knowledge HTTPS consumer; and
+- positive and negative unit, replay-race, and E2E integration tests.
+
+The profile authenticates signed appraisal results. Hardware-specific evidence
+acquisition and appraisal remain deployment responsibilities and are not
+implied by the default GitHub-hosted test environment.
+
 ## Inherited Runtime Risk Classification
 
 These items come from inherited Cocos runtime code paths. Profile text does not

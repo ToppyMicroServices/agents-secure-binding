@@ -1271,10 +1271,16 @@ The implemented production profile covers:
 - local QUIC/TLS early-data authentication gating coverage for pre-binding
   rejection.
 
-Deployment still chooses trusted keys, expected policy values, revocation data,
-and distributed replay storage. Those sources can be Manager configuration,
-Agent metadata, computation state, an authorization policy engine, or a
-fail-closed registry integration. They must not be raw peer-controlled metadata.
+`pkg/production` composes the Direct-Agent v1 checks with role-separated trust
+and revocation snapshots, signed attestation-result appraisal, and a
+TLS-protected Redis/Valkey SETNX adapter. The concrete supported choices and
+consumer boundary are fixed in `docs/production-deployment-profile.md`.
+
+Each deployment still supplies its own trusted keys, expected policy values,
+revocation data, Redis/Valkey service, and attestation verifier output. Those
+sources can be Manager configuration, Agent metadata, computation state, an
+authorization policy engine, or a fail-closed registry integration. They must
+not be raw peer-controlled metadata.
 
 ## 26. Evaluation boundary
 

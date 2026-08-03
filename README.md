@@ -13,6 +13,13 @@ The primary failure class is context diversion: accepting cryptographically
 valid material for a different service, tenant, Agent, task, delegation, or
 authority boundary than the verifier intended.
 
+Release `v1.0.0` defines a supported verifier product surface for the
+Direct-Agent v1 profile. It adds one complete deployment composition covering
+role-separated trust keys, revocation, signed attestation results, TLS-protected
+distributed replay, and a concrete protected-change consumer. See
+[`docs/API_COMPATIBILITY.md`](docs/API_COMPATIBILITY.md) and
+[`docs/production-deployment-profile.md`](docs/production-deployment-profile.md).
+
 ## Acceptance Contract
 
 The verifier evaluates one ordered contract:
@@ -38,10 +45,17 @@ CWT/COSE, and gateway-route policy experiments.
   v2 profile for the multiprocess A2A demonstration.
 - `docs/live-red-team-report.md`: current live-style red-team evidence and
   evaluation boundaries.
+- `docs/API_COMPATIBILITY.md`: supported v1 API and compatibility policy.
+- `docs/production-deployment-profile.md`: fixed production choices for trust,
+  revocation, attestation, distributed replay, and exact action binding.
 - `formal/`: ProVerif and TLA+ models, recorded results, and
   model-to-implementation traceability.
 - `pkg/clients`, `pkg/atls`, and `pkg/atls/identitypolicy`: Direct-Agent
   acceptance implementation.
+- `pkg/production`: supported fail-closed composition and Redis/Valkey replay
+  adapter.
+- `examples/protected-change-consumer`: independent HTTPS application consumer
+  and E2E negative tests; it is not Split-Knowledge.
 - `PUBLICATION_TODO.md`: publication blockers, inherited runtime risk
   classification, module identity choice, and CI/red-team checkpoint status.
 
@@ -87,7 +101,7 @@ acceptance path.
 
 ## Evaluation Evidence
 
-The current v0.4 evidence covers:
+The release evidence covers:
 
 - focused local checks and unit-level coverage;
 - positive and negative profile vectors;
@@ -99,6 +113,12 @@ The current v0.4 evidence covers:
   for compact JWT/JWS parsing, and deterministic acceptance invariants;
 - route-assertion policy tests and a local HTTP route-assertion harness for the
   documented gateway boundary.
+- a production composition with current trust/revocation snapshots, signed
+  attestation-result policy, and TLS-only Redis/Valkey SETNX replay;
+- an independent protected-change HTTPS consumer that rejects a changed
+  action, wrong TLS session, replay, revoked grant, attestation mismatch, and
+  replay-store outage; and
+- a 20-client TLS replay-store race that requires exactly one SETNX winner.
 
 For accepted TLS sessions, the AGTP observed-identity path derives
 `tls_exporter_sha256` from the accepted `tls.ConnectionState`. Fixed exporter
@@ -205,6 +225,14 @@ Product security gate:
 make product-security-gate
 ```
 
+Focused production profile and consumer integration:
+
+```sh
+go test -race -count=1 \
+  ./pkg/production \
+  ./examples/protected-change-consumer
+```
+
 ## Security Reporting
 
 Report suspected vulnerabilities through GitHub private vulnerability reporting
@@ -240,16 +268,17 @@ upstream notices. See `ATTRIBUTION.md`.
 - Gateway-routed runtime wiring is outside the current Direct-Agent
   implementation. Wallets can provide presentation or signing functions, but
   are not trust roots or sources of verifier-local expected policy.
-- The v0.4 evaluation is evidence for the tested fail-closed verifier behavior,
+- The release evaluation is evidence for the tested fail-closed verifier behavior,
   not a formal proof or validation of every deployment. Broader application
   0-RTT behavior, production gRPC pooling, runtime gateway wiring, longer
   fuzz/property campaigns, and hardware-backed confidential-VM attestation
   replay remain outside the recorded evaluation.
 - The ProVerif model uses symbolic cryptography and does not prove TLS, X.509,
   JWT parsing, certificate handling, or equivalence with compiled Go code. The
-  TLA+ result is bounded evidence for a generic target state machine; the
-  current Go tree does not implement its complete durable snapshot, revocation,
-  lease, audit-outbox, or logical-time contract.
+  TLA+ result is bounded evidence for a generic target state machine. The
+  production profile implements trust/revocation snapshots, signed attestation
+  results, and shared replay commits, but not the model's complete lease,
+  audit-outbox, application outcome, or logical-time contract.
 - `pkg/atls` and `pkg/agtp` are legacy compatibility names and do not define the
   protocol trust model. Cocos is implementation provenance rather than the
   normative scope of the profile.
