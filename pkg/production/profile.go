@@ -162,64 +162,100 @@ func (p Profile) Verify(ctx context.Context, req VerifyRequest) (AcceptedIdentit
 		now = p.Now()
 	}
 
-	grantOpts, err := p.jwtOptions(ctx, p.GrantAuthority, now)
+	verified, err := verifyIdentity(
+		ctx,
+		p.GrantAuthority,
+		p.BindingAuthority,
+		p.IdentityPolicy,
+		req.GrantJWT,
+		req.SessionBindingJWT,
+		req.ExpectedBinding,
+		now,
+	)
 	if err != nil {
-		return AcceptedIdentity{}, fmt.Errorf("grant authority: %w", err)
-	}
-	grant, err := clients.VerifyIdentityGrantJWT(req.GrantJWT, grantOpts)
-	if err != nil {
-		return AcceptedIdentity{}, fmt.Errorf("verify grant: %w", err)
-	}
-
-	bindingOpts, err := p.jwtOptions(ctx, p.BindingAuthority, now)
-	if err != nil {
-		return AcceptedIdentity{}, fmt.Errorf("binding authority: %w", err)
-	}
-	statement, err := clients.VerifySessionBindingJWT(req.SessionBindingJWT, bindingOpts)
-	if err != nil {
-		return AcceptedIdentity{}, fmt.Errorf("verify session binding: %w", err)
-	}
-
-	assertion, err := identitypolicy.NewAssertionFromSessionBinding(grant, statement, now)
-	if err != nil {
-		return AcceptedIdentity{}, fmt.Errorf("bind grant to session: %w", err)
-	}
-	if err := p.IdentityPolicy.ValidateAssertion(assertion, req.ExpectedBinding, now); err != nil {
-		return AcceptedIdentity{}, fmt.Errorf("verify expected identity: %w", err)
+		return AcceptedIdentity{}, err
 	}
 	if err := p.Attestation.Verify(ctx, req.Attestation, req.ExpectedBinding.AttestationBinderSHA256, now); err != nil {
 		return AcceptedIdentity{}, fmt.Errorf("verify attestation: %w", err)
 	}
 
-	replayExpiry := earliestTime(statement.Binding.ExpiresAt, req.Attestation.ExpiresAt, grant.ExpiresAt)
+	replayExpiry := earliestTime(verified.statement.Binding.ExpiresAt, req.Attestation.ExpiresAt, verified.grant.ExpiresAt)
 	replayKey := strings.Join([]string{
 		"asb.production.v1",
-		grant.GrantHash,
-		grant.Audience,
-		statement.Binding.RequestContextSHA256,
-		statement.Binding.Nonce,
+		verified.grant.GrantHash,
+		verified.grant.Audience,
+		verified.statement.Binding.RequestContextSHA256,
+		verified.statement.Binding.Nonce,
 	}, "\x00")
 	if err := p.ReplayCache.MarkUsed(replayKey, replayExpiry); err != nil {
 		return AcceptedIdentity{}, fmt.Errorf("commit replay state: %w", err)
 	}
 
 	return AcceptedIdentity{
-		Issuer:                  assertion.Issuer,
-		Agent:                   assertion.Values.Agent,
-		TaskID:                  assertion.Values.TaskID,
-		DelegationID:            assertion.Values.DelegationID,
-		IntentRef:               assertion.Values.IntentRef,
-		CapabilityRef:           assertion.Values.CapabilityRef,
-		Scopes:                  append([]string(nil), assertion.Values.Scopes...),
-		Resources:               append([]string(nil), assertion.Values.Resources...),
-		AuthorizationDetails:    append([]string(nil), assertion.Values.AuthorizationDetails...),
-		GrantExpiresAt:          grant.ExpiresAt,
-		SessionBindingExpiresAt: statement.Binding.ExpiresAt,
+		Issuer:                  verified.assertion.Issuer,
+		Agent:                   verified.assertion.Values.Agent,
+		TaskID:                  verified.assertion.Values.TaskID,
+		DelegationID:            verified.assertion.Values.DelegationID,
+		IntentRef:               verified.assertion.Values.IntentRef,
+		CapabilityRef:           verified.assertion.Values.CapabilityRef,
+		Scopes:                  append([]string(nil), verified.assertion.Values.Scopes...),
+		Resources:               append([]string(nil), verified.assertion.Values.Resources...),
+		AuthorizationDetails:    append([]string(nil), verified.assertion.Values.AuthorizationDetails...),
+		GrantExpiresAt:          verified.grant.ExpiresAt,
+		SessionBindingExpiresAt: verified.statement.Binding.ExpiresAt,
 		AttestationExpiresAt:    req.Attestation.ExpiresAt,
 	}, nil
 }
 
+type verifiedIdentity struct {
+	grant     identitypolicy.VerifiedGrant
+	statement identitypolicy.VerifiedSessionBindingStatement
+	assertion identitypolicy.Assertion
+}
+
+func verifyIdentity(
+	ctx context.Context,
+	grantAuthority AuthorityPolicy,
+	bindingAuthority AuthorityPolicy,
+	policy identitypolicy.Policy,
+	grantJWT string,
+	bindingJWT string,
+	expectedBinding identitypolicy.Binding,
+	now time.Time,
+) (verifiedIdentity, error) {
+	grantOpts, err := jwtOptions(ctx, grantAuthority, now)
+	if err != nil {
+		return verifiedIdentity{}, fmt.Errorf("grant authority: %w", err)
+	}
+	grant, err := clients.VerifyIdentityGrantJWT(grantJWT, grantOpts)
+	if err != nil {
+		return verifiedIdentity{}, fmt.Errorf("verify grant: %w", err)
+	}
+
+	bindingOpts, err := jwtOptions(ctx, bindingAuthority, now)
+	if err != nil {
+		return verifiedIdentity{}, fmt.Errorf("binding authority: %w", err)
+	}
+	statement, err := clients.VerifySessionBindingJWT(bindingJWT, bindingOpts)
+	if err != nil {
+		return verifiedIdentity{}, fmt.Errorf("verify session binding: %w", err)
+	}
+
+	assertion, err := identitypolicy.NewAssertionFromSessionBinding(grant, statement, now)
+	if err != nil {
+		return verifiedIdentity{}, fmt.Errorf("bind grant to session: %w", err)
+	}
+	if err := policy.ValidateAssertion(assertion, expectedBinding, now); err != nil {
+		return verifiedIdentity{}, fmt.Errorf("verify expected identity: %w", err)
+	}
+	return verifiedIdentity{grant: grant, statement: statement, assertion: assertion}, nil
+}
+
 func (p Profile) jwtOptions(ctx context.Context, authority AuthorityPolicy, now time.Time) (clients.JWTVerifyOptions, error) {
+	return jwtOptions(ctx, authority, now)
+}
+
+func jwtOptions(ctx context.Context, authority AuthorityPolicy, now time.Time) (clients.JWTVerifyOptions, error) {
 	if authority.TrustSource == nil {
 		return clients.JWTVerifyOptions{}, ErrMissingTrustSource
 	}

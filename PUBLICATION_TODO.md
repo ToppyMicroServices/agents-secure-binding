@@ -92,12 +92,13 @@ Direct-Agent binding profile based on the core acceptance rules.
 
 ## Supported v1 Product Surface
 
-Release `v1.0.0` fixes the supported surface and compatibility rules in
+Release `v1.1.0` extends the supported surface and compatibility rules in
 `docs/API_COMPATIBILITY.md`. The supported product API is the Direct-Agent v1
-subset of `pkg/clients` and `pkg/atls/identitypolicy`, composed through
-`pkg/production`. Draft-06-inspired v2, `pkg/agtp`, gateway runtime, inherited
-Cocos runtime services, and hardware evidence acquisition remain experimental
-or outside the supported API.
+subset of `pkg/clients` and `pkg/atls/identitypolicy`, composed through the
+attested `production.Profile` or attestation-free
+`production.SoftwareOnlyProfile`. Draft-06-inspired v2, `pkg/agtp`, gateway
+runtime, inherited Cocos runtime services, the Azure bridge, and hardware
+evidence acquisition remain experimental or outside the supported API.
 
 The concrete `protected-change-v1` deployment profile is recorded in
 `docs/production-deployment-profile.md`. It includes:
@@ -106,13 +107,20 @@ The concrete `protected-change-v1` deployment profile is recorded in
 - fresh trust and revocation snapshots with fail-closed source errors;
 - a signed attestation result bound to the accepted TLS session, exact action,
   verifier nonce, appraisal policy, and measurement;
-- a TLS 1.3 Redis/Valkey `SET NX PX` replay adapter with bounded operations;
+- an explicit software-only alternative that retains all non-attestation gates
+  and rejects attestation binder material;
+- a TLS 1.3 Redis/Valkey `SET NX PX` replay adapter with bounded operations and
+  optional same-connection `WAIT` acknowledgement;
 - a concrete non-Split-Knowledge HTTPS consumer; and
 - positive and negative unit, replay-race, and E2E integration tests.
 
 The profile authenticates signed appraisal results. Hardware-specific evidence
 acquisition and appraisal remain deployment responsibilities and are not
 implied by the default GitHub-hosted test environment.
+
+The repository Sentinel workflow is real self-operated Redis process evidence,
+but does not qualify a managed provider's stable endpoint, persistence
+contract, partitions, or SLA. Those remain deployment-specific release gates.
 
 ## Inherited Runtime Risk Classification
 

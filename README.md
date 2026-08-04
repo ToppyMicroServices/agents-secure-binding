@@ -13,10 +13,11 @@ The primary failure class is context diversion: accepting cryptographically
 valid material for a different service, tenant, Agent, task, delegation, or
 authority boundary than the verifier intended.
 
-Release `v1.0.0` defines a supported verifier product surface for the
-Direct-Agent v1 profile. It adds one complete deployment composition covering
-role-separated trust keys, revocation, signed attestation results, TLS-protected
-distributed replay, and a concrete protected-change consumer. See
+Release `v1.1.0` defines the supported verifier product surface for the
+Direct-Agent v1 profile. It provides distinct attested and software-only
+production compositions covering role-separated trust keys, revocation, exact
+TLS/action binding, TLS-protected distributed replay, and a concrete
+non-Split-Knowledge protected-change consumer. See
 [`docs/API_COMPATIBILITY.md`](docs/API_COMPATIBILITY.md) and
 [`docs/production-deployment-profile.md`](docs/production-deployment-profile.md).
 
@@ -48,7 +49,7 @@ CWT/COSE, and gateway-route policy experiments.
 - `docs/API_COMPATIBILITY.md`: supported v1 API and compatibility policy.
 - `docs/production-deployment-profile.md`: fixed production choices for trust,
   revocation, attestation, distributed replay, and exact action binding.
-- `docs/azure-sev-snp-attestation-bridge.md`: unreleased Azure Attestation
+- `docs/azure-sev-snp-attestation-bridge.md`: experimental Azure Attestation
   token-to-ASB bridge boundary and live confidential-VM qualification.
 - `docs/redis-failover-runbook.md`: private multi-node replay topology,
   replication acknowledgement, and real failover gate.
@@ -56,8 +57,8 @@ CWT/COSE, and gateway-route policy experiments.
   model-to-implementation traceability.
 - `pkg/clients`, `pkg/atls`, and `pkg/atls/identitypolicy`: Direct-Agent
   acceptance implementation.
-- `pkg/production`: supported fail-closed composition and Redis/Valkey replay
-  adapter.
+- `pkg/production`: supported attested and software-only fail-closed
+  compositions and Redis/Valkey replay adapter.
 - `examples/protected-change-consumer`: independent HTTPS application consumer
   and E2E negative tests; it is not Split-Knowledge.
 - `PUBLICATION_TODO.md`: publication blockers, inherited runtime risk
@@ -117,15 +118,18 @@ The release evidence covers:
   for compact JWT/JWS parsing, and deterministic acceptance invariants;
 - route-assertion policy tests and a local HTTP route-assertion harness for the
   documented gateway boundary.
-- a production composition with current trust/revocation snapshots and
-  TLS-only Redis/Valkey SETNX replay, plus an unreleased Azure SEV-SNP
-  token-to-result bridge tested with signed synthetic tokens and optional
-  same-connection Redis replica acknowledgement;
-- an independent protected-change HTTPS consumer that rejects a changed
-  action, wrong TLS session, replay, revoked grant, attestation mismatch, and
-  replay-store outage; and
+- attested and software-only production compositions with current
+  trust/revocation snapshots, exact TLS/action binding, and TLS-only
+  Redis/Valkey SETNX replay, plus an experimental Azure SEV-SNP token-to-result
+  bridge tested with signed synthetic tokens;
+- an independent protected-change HTTPS consumer that exercises both
+  production compositions and rejects changed action, wrong TLS session,
+  replay, revoked grant, unexpected or mismatched attestation, and replay-store
+  outage;
 - a 20-client TLS replay-store race that requires exactly one SETNX winner and
-  a replica acknowledgement for that accepted write.
+  a replica acknowledgement for that accepted write; and
+- a TLS 1.3 Redis Sentinel gate that stops the primary, observes replica
+  promotion, and verifies replay-record survival after ASB process restart.
 
 For accepted TLS sessions, the AGTP observed-identity path derives
 `tls_exporter_sha256` from the accepted `tls.ConnectionState`. Fixed exporter
