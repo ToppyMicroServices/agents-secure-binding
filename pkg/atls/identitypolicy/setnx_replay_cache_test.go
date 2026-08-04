@@ -98,6 +98,14 @@ func TestSetNXReplayCacheRejectsMissingInputs(t *testing.T) {
 	}
 }
 
+func TestSetNXReplayCacheNilReceiverFailsClosed(t *testing.T) {
+	t.Parallel()
+	var cache *SetNXReplayCache
+	if err := cache.MarkUsed("binding-key", time.Now().Add(time.Minute)); !errors.Is(err, ErrReplayUnavailable) {
+		t.Fatalf("MarkUsed() error = %v, want %v", err, ErrReplayUnavailable)
+	}
+}
+
 type testSetNXStore struct {
 	fail    bool
 	entries map[string]time.Time

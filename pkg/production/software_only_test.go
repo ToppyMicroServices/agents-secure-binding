@@ -52,6 +52,82 @@ func TestSoftwareOnlyProfileRejectsReplay(t *testing.T) {
 	}
 }
 
+func TestSoftwareOnlyProfileRejectsTypedNilReplayCache(t *testing.T) {
+	t.Parallel()
+	fixture := newSoftwareOnlyFixture(t)
+	var replay *identitypolicy.SetNXReplayCache
+	fixture.profile.ReplayCache = replay
+
+	if err := fixture.profile.Validate(context.Background()); !errors.Is(err, ErrMissingReplayCache) {
+		t.Fatalf("Validate() error = %v, want %v", err, ErrMissingReplayCache)
+	}
+	if _, err := fixture.profile.Verify(context.Background(), fixture.request); !errors.Is(err, ErrMissingReplayCache) {
+		t.Fatalf("Verify() error = %v, want %v", err, ErrMissingReplayCache)
+	}
+}
+
+func TestSoftwareOnlyProfileRejectsUnsafeTokenLifetime(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		binding bool
+		mutate  func(jwt.MapClaims, time.Time)
+	}{
+		{
+			name: "grant missing issued at",
+			mutate: func(claims jwt.MapClaims, _ time.Time) {
+				delete(claims, "iat")
+			},
+		},
+		{
+			name: "grant lifetime too long",
+			mutate: func(claims jwt.MapClaims, now time.Time) {
+				claims["exp"] = now.Add(24 * time.Hour).Unix()
+			},
+		},
+		{
+			name:    "session proof missing issued at",
+			binding: true,
+			mutate: func(claims jwt.MapClaims, _ time.Time) {
+				delete(claims, "iat")
+			},
+		},
+		{
+			name:    "session proof lifetime too long",
+			binding: true,
+			mutate: func(claims jwt.MapClaims, now time.Time) {
+				claims["exp"] = now.Add(24 * time.Hour).Unix()
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			fixture := newSoftwareOnlyFixture(t)
+			if tt.binding {
+				fixture.request.SessionBindingJWT = resignJWT(t, fixture.request.SessionBindingJWT, fixture.base.agentPrivate, testAgentKeyID, func(claims jwt.MapClaims) {
+					tt.mutate(claims, fixture.base.now)
+				})
+			} else {
+				fixture.request.GrantJWT = resignJWT(t, fixture.request.GrantJWT, fixture.base.managerPrivate, testManagerKeyID, func(claims jwt.MapClaims) {
+					tt.mutate(claims, fixture.base.now)
+				})
+				fixture.request.SessionBindingJWT = resignJWT(t, fixture.request.SessionBindingJWT, fixture.base.agentPrivate, testAgentKeyID, func(claims jwt.MapClaims) {
+					claims["grant_hash"] = clients.IdentityGrantHash(fixture.request.GrantJWT)
+				})
+			}
+
+			if _, err := fixture.profile.Verify(context.Background(), fixture.request); !errors.Is(err, ErrInvalidTokenLifetime) {
+				t.Fatalf("Verify() error = %v, want %v", err, ErrInvalidTokenLifetime)
+			}
+			if fixture.base.replay.count() != 0 {
+				t.Fatalf("replay commits = %d, want 0", fixture.base.replay.count())
+			}
+		})
+	}
+}
+
 func TestSoftwareOnlyProfileRejectsAttestationBinding(t *testing.T) {
 	t.Parallel()
 	fixture := newSoftwareOnlyFixture(t)
@@ -183,6 +259,7 @@ func TestSoftwareOnlyProfileValidateRejectsIncompleteDeployment(t *testing.T) {
 		{"missing trust", func(p *SoftwareOnlyProfile) { p.GrantAuthority.TrustSource = nil }, ErrMissingTrustSource},
 		{"missing replay", func(p *SoftwareOnlyProfile) { p.ReplayCache = nil }, ErrMissingReplayCache},
 		{"missing policy", func(p *SoftwareOnlyProfile) { p.IdentityPolicy = identitypolicy.Policy{} }, ErrMissingPolicy},
+		{"missing binding lifetime bound", func(p *SoftwareOnlyProfile) { p.BindingAuthority.MaxTokenLifetime = 0 }, ErrInvalidAuthority},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

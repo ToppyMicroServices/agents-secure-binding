@@ -56,7 +56,7 @@ func NewSetNXReplayCacheWithClock(ctx context.Context, store SetNXStore, now fun
 // MarkUsed records a one-shot binding key until its expiration time.
 func (c *SetNXReplayCache) MarkUsed(key string, expiresAt time.Time) error {
 	if c == nil {
-		return nil
+		return ErrReplayUnavailable
 	}
 	if c.store == nil {
 		return validationError(LayerSessionBinding, FieldNonce, ErrMissingSetNXStore)

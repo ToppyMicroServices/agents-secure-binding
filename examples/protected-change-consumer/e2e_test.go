@@ -146,6 +146,55 @@ func TestProtectedChangeE2EAcceptsExactBoundAction(t *testing.T) {
 	if !ok || stored != change {
 		t.Fatalf("stored change = %+v, %v", stored, ok)
 	}
+	record, ok := fixture.store.LookupApplied(change.ChangeID)
+	if !ok || record.Identity.Agent != e2eExpectedAgent || record.Identity.TaskID != change.ChangeID {
+		t.Fatalf("stored outcome = %+v, %v", record, ok)
+	}
+}
+
+func TestProtectedChangeRejectsUnverifiedPeerCertificate(t *testing.T) {
+	t.Parallel()
+	body := strings.NewReader(`{"change_id":"change-0001","tenant":"tenant-01","setting":"feature-x","enabled":true}`)
+	request := httptest.NewRequest(http.MethodPost, ChangePath, body)
+	request.Header.Set("Content-Type", "application/json")
+	request.TLS = &tls.ConnectionState{PeerCertificates: []*x509.Certificate{{}}}
+	response := httptest.NewRecorder()
+
+	Application{}.ServeHTTP(response, request)
+	if response.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusUnauthorized)
+	}
+}
+
+func TestMemoryChangeStoreBindsOutcomeToAcceptedIdentity(t *testing.T) {
+	t.Parallel()
+	store := NewMemoryChangeStore()
+	change := e2eChange(true)
+	accepted := production.AcceptedIdentity{
+		Issuer:    e2eManagerIssuer,
+		Agent:     e2eExpectedAgent,
+		TaskID:    change.ChangeID,
+		Scopes:    []string{"change.write"},
+		Resources: []string{"config://tenant-01/feature-x"},
+	}
+	if err := store.Apply(context.Background(), change, accepted); err != nil {
+		t.Fatalf("Apply() error = %v", err)
+	}
+	renewed := accepted
+	renewed.GrantExpiresAt = time.Now().Add(time.Hour)
+	if err := store.Apply(context.Background(), change, renewed); err != nil {
+		t.Fatalf("Apply() renewed proof error = %v", err)
+	}
+
+	different := accepted
+	different.Agent = "different-agent"
+	if err := store.Apply(context.Background(), change, different); !errors.Is(err, ErrChangeConflict) {
+		t.Fatalf("Apply() changed identity error = %v, want %v", err, ErrChangeConflict)
+	}
+	record, ok := store.LookupApplied(change.ChangeID)
+	if !ok || !acceptedIdentityEqual(record.Identity, accepted) {
+		t.Fatalf("stored outcome = %+v, %v", record, ok)
+	}
 }
 
 func TestSoftwareOnlyProtectedChangeE2EAcceptsExactBoundAction(t *testing.T) {
@@ -332,12 +381,16 @@ func newE2EFixtureForMode(t *testing.T, softwareOnly bool) *e2eFixture {
 			ExpectedAudience: e2eAudience,
 			ValidMethods:     []string{jwt.SigningMethodEdDSA.Alg()},
 			TrustSource:      managerTrust,
+			MaxTokenLifetime: 10 * time.Minute,
+			ClockSkew:        5 * time.Second,
 		},
 		BindingAuthority: production.AuthorityPolicy{
 			ExpectedIssuer:   e2eAgentIssuer,
 			ExpectedAudience: e2eAudience,
 			ValidMethods:     []string{jwt.SigningMethodEdDSA.Alg()},
 			TrustSource:      agentTrust,
+			MaxTokenLifetime: 5 * time.Minute,
+			ClockSkew:        5 * time.Second,
 		},
 		Attestation: production.SignedAttestationPolicy{
 			TrustedKeys:         map[string]ed25519.PublicKey{e2eAttesterKeyID: attesterPublic},

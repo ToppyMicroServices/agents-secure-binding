@@ -37,7 +37,7 @@ func NewMemoryReplayCacheWithClock(now func() time.Time) *MemoryReplayCache {
 // MarkUsed records a one-shot binding key until its expiration time.
 func (c *MemoryReplayCache) MarkUsed(key string, expiresAt time.Time) error {
 	if c == nil {
-		return nil
+		return ErrReplayUnavailable
 	}
 	if isEmpty(key) {
 		return validationError(LayerSessionBinding, FieldNonce, ErrMissingBinding)

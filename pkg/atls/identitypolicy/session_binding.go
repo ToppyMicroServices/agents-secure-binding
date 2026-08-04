@@ -11,6 +11,7 @@ import (
 var (
 	ErrUnauthorizedBindingKey = errors.New("identitypolicy: unauthorized session binding key")
 	ErrReplayDetected         = errors.New("identitypolicy: replay detected")
+	ErrReplayUnavailable      = errors.New("identitypolicy: replay state unavailable")
 )
 
 const (

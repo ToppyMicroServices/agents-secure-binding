@@ -5,6 +5,7 @@ accepts one tenant-configuration change over mutually authenticated TLS 1.3 and
 applies it only after the `pkg/production` verifier accepts:
 
 - separate Manager and Agent trust keys plus current revocation state;
+- required issue times and verifier-local maximum token lifetimes;
 - the exact action context and accepted TLS exporter binding;
 - a signed, fresh, policy-approved attestation result;
 - a verifier-issued one-shot nonce; and
@@ -18,5 +19,11 @@ failures:
 go test -race -count=1 ./examples/protected-change-consumer
 ```
 
-`MemoryChangeStore` is only the consumer's test/reference outcome store. A
-deployment should replace it with its own durable idempotent application store.
+The HTTP application also requires a verified client-certificate chain, rather
+than accepting the presence of an unverified peer certificate.
+
+`MemoryChangeStore` is only the consumer's test/reference outcome store. It
+binds an applied action to the minimal accepted identity projection and rejects
+conflicting identity reuse. A deployment must replace it with a durable,
+idempotent application store and reconcile post-acceptance failures without a
+blind retry.

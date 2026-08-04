@@ -49,7 +49,7 @@ func (p SoftwareOnlyProfile) Validate(ctx context.Context) error {
 	if err := p.IdentityPolicy.ValidateMode(); err != nil {
 		return fmt.Errorf("%w: identity policy: %v", ErrInvalidAuthority, err)
 	}
-	if p.ReplayCache == nil {
+	if isNilInterface(p.ReplayCache) {
 		return ErrMissingReplayCache
 	}
 	if _, err := jwtOptions(ctx, p.GrantAuthority, time.Time{}); err != nil {
@@ -71,7 +71,7 @@ func (p SoftwareOnlyProfile) Verify(ctx context.Context, req SoftwareOnlyVerifyR
 	if !p.IdentityPolicy.Enabled() {
 		return AcceptedIdentity{}, ErrMissingPolicy
 	}
-	if p.ReplayCache == nil {
+	if isNilInterface(p.ReplayCache) {
 		return AcceptedIdentity{}, ErrMissingReplayCache
 	}
 	if strings.TrimSpace(req.ExpectedBinding.AttestationBinderSHA256) != "" {

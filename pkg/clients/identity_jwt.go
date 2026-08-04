@@ -43,6 +43,7 @@ var (
 	ErrUnsupportedVersion      = errors.New("binding jwt: unsupported profile version")
 	ErrUnsafeSigningMethod     = errors.New("binding jwt: unsafe signing method")
 	ErrDuplicateJWTMember      = errors.New("binding jwt: duplicate json member")
+	ErrInvalidClockSkew        = errors.New("binding jwt: invalid clock skew")
 )
 
 var (
@@ -93,7 +94,9 @@ type LocalKey struct {
 	Disabled bool
 }
 
-// JWTVerifyOptions contains local verification policy for Direct-Agent binding JWTs.
+// JWTVerifyOptions contains local verification policy for Direct-Agent binding
+// JWTs. ClockSkew is optional; production profiles set a bounded value through
+// AuthorityPolicy.
 type JWTVerifyOptions struct {
 	ExpectedIssuer   string
 	ExpectedAudience string
@@ -103,6 +106,7 @@ type JWTVerifyOptions struct {
 	DisabledKeyIDs   []string
 	RevokedJWTIDs    []string
 	Now              time.Time
+	ClockSkew        time.Duration
 }
 
 // SessionIdentityJWTOptions contains the local policy needed to accept a
@@ -968,6 +972,9 @@ func jwtParserOptions(opts JWTVerifyOptions) ([]jwt.ParserOption, error) {
 	if strings.TrimSpace(opts.ExpectedAudience) == "" {
 		return nil, ErrMissingExpectedAudience
 	}
+	if opts.ClockSkew < 0 {
+		return nil, ErrInvalidClockSkew
+	}
 
 	out := []jwt.ParserOption{
 		jwt.WithValidMethods(opts.ValidMethods),
@@ -975,6 +982,9 @@ func jwtParserOptions(opts JWTVerifyOptions) ([]jwt.ParserOption, error) {
 		jwt.WithAudience(opts.ExpectedAudience),
 		jwt.WithExpirationRequired(),
 		jwt.WithIssuedAt(),
+	}
+	if opts.ClockSkew > 0 {
+		out = append(out, jwt.WithLeeway(opts.ClockSkew))
 	}
 	if !opts.Now.IsZero() {
 		out = append(out, jwt.WithTimeFunc(func() time.Time {

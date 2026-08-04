@@ -19,7 +19,6 @@ import (
 var (
 	ErrInvalidLifetimeV2     = errors.New("identitypolicy: invalid v2 assertion lifetime")
 	ErrMissingCurrentTimeV2  = errors.New("identitypolicy: current time unavailable for v2 validation")
-	ErrReplayUnavailable     = errors.New("identitypolicy: replay state unavailable")
 	ErrMissingReplayCacheV2  = ErrReplayUnavailable
 	ErrReplayKeyInputTooLong = errors.New("identitypolicy: v2 replay key input too long")
 )

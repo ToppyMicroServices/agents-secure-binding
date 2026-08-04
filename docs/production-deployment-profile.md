@@ -38,10 +38,24 @@ expectedBinding, err := production.SoftwareBindingFromTLS(
 )
 ```
 
+Both authority policies must set a positive `MaxTokenLifetime` and a
+non-negative `ClockSkew`. Production verification requires `iat`, requires
+`exp` to be later than `iat`, and rejects a token whose `exp - iat` exceeds the
+role-specific maximum. A typical bounded deployment uses a longer grant limit
+and a shorter session-proof limit:
+
+```go
+managerAuthority.MaxTokenLifetime = 10 * time.Minute
+managerAuthority.ClockSkew = 5 * time.Second
+agentAuthority.MaxTokenLifetime = 2 * time.Minute
+agentAuthority.ClockSkew = 5 * time.Second
+```
+
 The profile retains all of these mandatory gates:
 
 - role-separated Manager and Agent trust sources, exact issuer, audience,
-  algorithm, key ID, lifetime, and revocation checks;
+  algorithm, key ID, required issue time, bounded lifetime, and revocation
+  checks;
 - the authenticated peer public key, accepted TLS 1.3 exporter, exact
   canonical action digest, and verifier nonce;
 - verifier-local D3-D6 identity and authorization policy; and
@@ -76,6 +90,7 @@ actions and unexpected attestation material.
 | Session proof signing | Ed25519 / JWT `EdDSA`; Agent key named by grant `cnf.kid` |
 | Audience | exact protected-change endpoint configured by the verifier |
 | Token profile | Direct-Agent v1: `sbaip.identity-grant` and `sbaip.session-binding` |
+| Token freshness | `iat` required; verifier-local maximum lifetime and clock skew per authority role |
 | Exporter label | fixed `Attestation` label |
 | Exporter context | `asb.direct-agent.production.v1 NUL nonce NUL canonical_action` |
 | Action digest | SHA-256 of canonical protected-change JSON |
@@ -206,7 +221,10 @@ The acceptance order is:
 
 The ASB replay commit is an identity-acceptance boundary, not an application
 database transaction. A production consumer must use an idempotent durable
-outcome record and reconcile failures that occur after identity acceptance.
+outcome record, bind that record to the accepted identity projection, and
+reconcile failures that occur after identity acceptance. A post-acceptance
+timeout must remain `INDETERMINATE` until an authenticated outcome lookup proves
+execution or no effect; it must not trigger a blind retry.
 
 ## Verification
 

@@ -11,6 +11,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"time"
 
@@ -26,6 +27,7 @@ var (
 	ErrMissingReplayCache       = errors.New("production: missing distributed replay cache")
 	ErrMissingPolicy            = errors.New("production: missing identity policy")
 	ErrInvalidAuthority         = errors.New("production: invalid authority policy")
+	ErrInvalidTokenLifetime     = errors.New("production: invalid token lifetime")
 	ErrMissingContext           = errors.New("production: missing context")
 )
 
@@ -59,13 +61,15 @@ func (s StaticTrustSource) Snapshot(context.Context) (TrustSnapshot, error) {
 	return cloneTrustSnapshot(s.Trust), nil
 }
 
-// AuthorityPolicy fixes the issuer, audience, signing algorithms, and trust
-// source used for one token role.
+// AuthorityPolicy fixes the issuer, audience, signing algorithms, trust source,
+// and verifier-local freshness bounds used for one token role.
 type AuthorityPolicy struct {
 	ExpectedIssuer   string
 	ExpectedAudience string
 	ValidMethods     []string
 	TrustSource      TrustSource
+	MaxTokenLifetime time.Duration
+	ClockSkew        time.Duration
 }
 
 // AttestationPolicy authenticates and appraises an attestation result against
@@ -122,10 +126,10 @@ func (p Profile) Validate(ctx context.Context) error {
 	if err := p.IdentityPolicy.ValidateMode(); err != nil {
 		return fmt.Errorf("%w: identity policy: %v", ErrInvalidAuthority, err)
 	}
-	if p.Attestation == nil {
+	if isNilInterface(p.Attestation) {
 		return ErrMissingAttestationPolicy
 	}
-	if p.ReplayCache == nil {
+	if isNilInterface(p.ReplayCache) {
 		return ErrMissingReplayCache
 	}
 	if _, err := p.jwtOptions(ctx, p.GrantAuthority, time.Time{}); err != nil {
@@ -147,10 +151,10 @@ func (p Profile) Verify(ctx context.Context, req VerifyRequest) (AcceptedIdentit
 	if !p.IdentityPolicy.Enabled() {
 		return AcceptedIdentity{}, ErrMissingPolicy
 	}
-	if p.Attestation == nil {
+	if isNilInterface(p.Attestation) {
 		return AcceptedIdentity{}, ErrMissingAttestationPolicy
 	}
-	if p.ReplayCache == nil {
+	if isNilInterface(p.ReplayCache) {
 		return AcceptedIdentity{}, ErrMissingReplayCache
 	}
 	if strings.TrimSpace(req.Attestation.ResultID) == "" {
@@ -231,6 +235,9 @@ func verifyIdentity(
 	if err != nil {
 		return verifiedIdentity{}, fmt.Errorf("verify grant: %w", err)
 	}
+	if err := validateTokenLifetime(grant.IssuedAt, grant.ExpiresAt, grantAuthority.MaxTokenLifetime); err != nil {
+		return verifiedIdentity{}, fmt.Errorf("verify grant: %w", err)
+	}
 
 	bindingOpts, err := jwtOptions(ctx, bindingAuthority, now)
 	if err != nil {
@@ -238,6 +245,9 @@ func verifyIdentity(
 	}
 	statement, err := clients.VerifySessionBindingJWT(bindingJWT, bindingOpts)
 	if err != nil {
+		return verifiedIdentity{}, fmt.Errorf("verify session binding: %w", err)
+	}
+	if err := validateTokenLifetime(statement.Binding.IssuedAt, statement.Binding.ExpiresAt, bindingAuthority.MaxTokenLifetime); err != nil {
 		return verifiedIdentity{}, fmt.Errorf("verify session binding: %w", err)
 	}
 
@@ -256,11 +266,12 @@ func (p Profile) jwtOptions(ctx context.Context, authority AuthorityPolicy, now 
 }
 
 func jwtOptions(ctx context.Context, authority AuthorityPolicy, now time.Time) (clients.JWTVerifyOptions, error) {
-	if authority.TrustSource == nil {
+	if isNilInterface(authority.TrustSource) {
 		return clients.JWTVerifyOptions{}, ErrMissingTrustSource
 	}
 	if strings.TrimSpace(authority.ExpectedIssuer) == "" ||
-		strings.TrimSpace(authority.ExpectedAudience) == "" || len(authority.ValidMethods) == 0 {
+		strings.TrimSpace(authority.ExpectedAudience) == "" || len(authority.ValidMethods) == 0 ||
+		authority.MaxTokenLifetime <= 0 || authority.ClockSkew < 0 {
 		return clients.JWTVerifyOptions{}, ErrInvalidAuthority
 	}
 	snapshot, err := authority.TrustSource.Snapshot(ctx)
@@ -278,11 +289,33 @@ func jwtOptions(ctx context.Context, authority AuthorityPolicy, now time.Time) (
 		DisabledKeyIDs:   append([]string(nil), snapshot.DisabledKeyIDs...),
 		RevokedJWTIDs:    append([]string(nil), snapshot.RevokedTokenIDs...),
 		Now:              now,
+		ClockSkew:        authority.ClockSkew,
 	}
 	if err := clients.ValidateJWTVerifyOptions(opts); err != nil {
 		return clients.JWTVerifyOptions{}, fmt.Errorf("%w: %v", ErrInvalidAuthority, err)
 	}
 	return opts, nil
+}
+
+func validateTokenLifetime(issuedAt, expiresAt time.Time, maxLifetime time.Duration) error {
+	if issuedAt.IsZero() || expiresAt.IsZero() || !expiresAt.After(issuedAt) ||
+		maxLifetime <= 0 || expiresAt.Sub(issuedAt) > maxLifetime {
+		return ErrInvalidTokenLifetime
+	}
+	return nil
+}
+
+func isNilInterface(value interface{}) bool {
+	if value == nil {
+		return true
+	}
+	reflected := reflect.ValueOf(value)
+	switch reflected.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Ptr, reflect.Slice:
+		return reflected.IsNil()
+	default:
+		return false
+	}
 }
 
 func cloneTrustSnapshot(in TrustSnapshot) TrustSnapshot {
