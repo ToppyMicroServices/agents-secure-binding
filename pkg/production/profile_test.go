@@ -101,6 +101,20 @@ func TestProfileVerifyRejectsReplay(t *testing.T) {
 	}
 }
 
+func TestProfileRejectsTypedNilReplayCache(t *testing.T) {
+	t.Parallel()
+	fixture := newProfileFixture(t)
+	var replay *identitypolicy.SetNXReplayCache
+	fixture.profile.ReplayCache = replay
+
+	if err := fixture.profile.Validate(context.Background()); !errors.Is(err, ErrMissingReplayCache) {
+		t.Fatalf("Validate() error = %v, want %v", err, ErrMissingReplayCache)
+	}
+	if _, err := fixture.profile.Verify(context.Background(), fixture.request); !errors.Is(err, ErrMissingReplayCache) {
+		t.Fatalf("Verify() error = %v, want %v", err, ErrMissingReplayCache)
+	}
+}
+
 func TestProfileVerifyNegativeGatesDoNotCommitReplay(t *testing.T) {
 	t.Parallel()
 
@@ -234,6 +248,8 @@ func TestProfileValidateRejectsIncompleteDeployment(t *testing.T) {
 		{"missing attestation", func(p *Profile) { p.Attestation = nil }, ErrMissingAttestationPolicy},
 		{"missing replay", func(p *Profile) { p.ReplayCache = nil }, ErrMissingReplayCache},
 		{"missing policy", func(p *Profile) { p.IdentityPolicy = identitypolicy.Policy{} }, ErrMissingPolicy},
+		{"missing grant lifetime bound", func(p *Profile) { p.GrantAuthority.MaxTokenLifetime = 0 }, ErrInvalidAuthority},
+		{"negative clock skew", func(p *Profile) { p.BindingAuthority.ClockSkew = -time.Second }, ErrInvalidAuthority},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -334,6 +350,8 @@ func newProfileFixture(t *testing.T) *profileFixture {
 			TrustSource: StaticTrustSource{Trust: TrustSnapshot{Keys: []clients.LocalKey{
 				{KeyID: testManagerKeyID, Key: managerPublic},
 			}}},
+			MaxTokenLifetime: 10 * time.Minute,
+			ClockSkew:        5 * time.Second,
 		},
 		BindingAuthority: AuthorityPolicy{
 			ExpectedIssuer:   testAgentIssuer,
@@ -342,6 +360,8 @@ func newProfileFixture(t *testing.T) *profileFixture {
 			TrustSource: StaticTrustSource{Trust: TrustSnapshot{Keys: []clients.LocalKey{
 				{KeyID: testAgentKeyID, Key: agentPublic},
 			}}},
+			MaxTokenLifetime: 5 * time.Minute,
+			ClockSkew:        5 * time.Second,
 		},
 		IdentityPolicy: identitypolicy.Policy{
 			Mode:     identitypolicy.ModeRequired,
@@ -379,6 +399,20 @@ func signJWT(t *testing.T, key ed25519.PrivateKey, keyID string, claims jwt.MapC
 		t.Fatalf("sign JWT: %v", err)
 	}
 	return value
+}
+
+func resignJWT(t *testing.T, tokenString string, key ed25519.PrivateKey, keyID string, mutate func(jwt.MapClaims)) string {
+	t.Helper()
+	token, _, err := jwt.NewParser().ParseUnverified(tokenString, jwt.MapClaims{})
+	if err != nil {
+		t.Fatalf("parse JWT without verification: %v", err)
+	}
+	claims, ok := token.Claims.(jwt.MapClaims)
+	if !ok {
+		t.Fatalf("JWT claims type = %T, want jwt.MapClaims", token.Claims)
+	}
+	mutate(claims)
+	return signJWT(t, key, keyID, claims)
 }
 
 func signAttestation(t *testing.T, result *AttestationResult, key ed25519.PrivateKey) {

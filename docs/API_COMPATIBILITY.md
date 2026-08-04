@@ -75,6 +75,14 @@ the locally accepted trust snapshot for the intended migration window.
 Disabling a key ID or revoking a token ID intentionally causes requests that
 depend on it to fail.
 
+Both production compositions require a positive verifier-local
+`AuthorityPolicy.MaxTokenLifetime` for each Manager and Agent role. Production
+tokens must carry `iat`, must expire after issuance, and must not exceed that
+role-specific lifetime; `ClockSkew` must be non-negative. This production
+hardening does not change the Direct-Agent v1 claim names or the lower-level
+`pkg/clients` wire parser. Typed-nil trust, attestation, and replay interfaces
+are treated as missing configuration and fail closed.
+
 Replay storage is compatible with Redis or Valkey servers that implement
 `SET key value NX PX ttl` over TLS. Store unavailability is an authentication
 failure; there is no in-memory fallback in either production profile. The

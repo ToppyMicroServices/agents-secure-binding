@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Reject typed-nil replay, trust-source, and attestation implementations as
+  missing configuration; built-in replay caches now fail closed on nil
+  receivers.
+- Require `iat` and verifier-local maximum token lifetimes in both production
+  compositions, with bounded clock-skew policy.
+- Require a verified mTLS client chain in the protected-change consumer and
+  bind its reference outcome record to the accepted identity projection.
+- Document `INDETERMINATE` post-acceptance outcomes and authenticated
+  reconciliation without blind retry.
+
 ## v1.1.0
 
 - Add an explicit attestation-free `SoftwareOnlyProfile` with a separate

@@ -16,6 +16,7 @@ import (
 	"io"
 	"mime"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 
@@ -91,7 +92,7 @@ func (a Application) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid request", http.StatusBadRequest)
 		return
 	}
-	if r.TLS == nil || len(r.TLS.PeerCertificates) == 0 {
+	if r.TLS == nil || len(r.TLS.PeerCertificates) == 0 || len(r.TLS.VerifiedChains) == 0 {
 		http.Error(w, "authentication failed", http.StatusUnauthorized)
 		return
 	}
@@ -209,28 +210,36 @@ func ExpectedPolicy(change ChangeRequest, agent string) identitypolicy.Policy {
 // reference consumer and its integration tests.
 type MemoryChangeStore struct {
 	mu      sync.Mutex
-	changes map[string]ChangeRequest
+	records map[string]AppliedChange
+}
+
+// AppliedChange is the durable outcome projection for one accepted change.
+// Production stores should persist this identity projection with the action so
+// retries cannot silently change the actor attributed to an existing outcome.
+type AppliedChange struct {
+	Change   ChangeRequest
+	Identity production.AcceptedIdentity
 }
 
 // NewMemoryChangeStore returns an empty change store.
 func NewMemoryChangeStore() *MemoryChangeStore {
-	return &MemoryChangeStore{changes: make(map[string]ChangeRequest)}
+	return &MemoryChangeStore{records: make(map[string]AppliedChange)}
 }
 
 // Apply records an accepted change exactly once.
-func (s *MemoryChangeStore) Apply(_ context.Context, change ChangeRequest, _ production.AcceptedIdentity) error {
+func (s *MemoryChangeStore) Apply(_ context.Context, change ChangeRequest, identity production.AcceptedIdentity) error {
 	if s == nil {
 		return ErrChangeConflict
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if existing, ok := s.changes[change.ChangeID]; ok {
-		if existing == change {
+	if existing, ok := s.records[change.ChangeID]; ok {
+		if existing.Change == change && acceptedIdentityEqual(existing.Identity, identity) {
 			return nil
 		}
 		return ErrChangeConflict
 	}
-	s.changes[change.ChangeID] = change
+	s.records[change.ChangeID] = AppliedChange{Change: change, Identity: cloneAcceptedIdentity(identity)}
 	return nil
 }
 
@@ -238,8 +247,36 @@ func (s *MemoryChangeStore) Apply(_ context.Context, change ChangeRequest, _ pro
 func (s *MemoryChangeStore) Lookup(changeID string) (ChangeRequest, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	change, ok := s.changes[changeID]
-	return change, ok
+	record, ok := s.records[changeID]
+	return record.Change, ok
+}
+
+// LookupApplied returns the action and accepted identity stored for one outcome.
+func (s *MemoryChangeStore) LookupApplied(changeID string) (AppliedChange, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	record, ok := s.records[changeID]
+	record.Identity = cloneAcceptedIdentity(record.Identity)
+	return record, ok
+}
+
+func acceptedIdentityEqual(left, right production.AcceptedIdentity) bool {
+	return left.Issuer == right.Issuer &&
+		left.Agent == right.Agent &&
+		left.TaskID == right.TaskID &&
+		left.DelegationID == right.DelegationID &&
+		left.IntentRef == right.IntentRef &&
+		left.CapabilityRef == right.CapabilityRef &&
+		slices.Equal(left.Scopes, right.Scopes) &&
+		slices.Equal(left.Resources, right.Resources) &&
+		slices.Equal(left.AuthorizationDetails, right.AuthorizationDetails)
+}
+
+func cloneAcceptedIdentity(identity production.AcceptedIdentity) production.AcceptedIdentity {
+	identity.Scopes = append([]string(nil), identity.Scopes...)
+	identity.Resources = append([]string(nil), identity.Resources...)
+	identity.AuthorizationDetails = append([]string(nil), identity.AuthorizationDetails...)
+	return identity
 }
 
 func decodeChange(body io.ReadCloser) (ChangeRequest, error) {

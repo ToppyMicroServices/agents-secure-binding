@@ -56,3 +56,11 @@ func TestMemoryReplayCacheRejectsMissingKeyOrExpiry(t *testing.T) {
 		t.Fatalf("MarkUsed() missing expiry error = %v, want %v", err, ErrMissingBinding)
 	}
 }
+
+func TestMemoryReplayCacheNilReceiverFailsClosed(t *testing.T) {
+	t.Parallel()
+	var cache *MemoryReplayCache
+	if err := cache.MarkUsed("binding-key", time.Now().Add(time.Minute)); !errors.Is(err, ErrReplayUnavailable) {
+		t.Fatalf("MarkUsed() error = %v, want %v", err, ErrReplayUnavailable)
+	}
+}
