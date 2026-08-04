@@ -54,8 +54,9 @@ GitHub Actions:
 
 | Workflow | Run | Result | Notes |
 | --- | --- | --- | --- |
-| `Security Red Team` | `30783798330` | Success | Dedicated red-team workflow, including the production profile and independent protected-change consumer, on signed commit `0b71a0fb7c6a3bd06fd54ad3961b641acde59dce` |
-| `CI` | `30783798316` | Success | `lint`, `Build`, all Go test matrix jobs, product-security, protected-change integration, and coverage upload passed on signed commit `0b71a0fb7c6a3bd06fd54ad3961b641acde59dce` |
+| `Security Red Team` | `30875915843` | Success | Dedicated red-team workflow, including the production profiles and independent protected-change consumer, on signed commit `0fe710afd3e50848864f84b64cd45f9064c5a37d` |
+| `CI` | `30875915840` | Success | `lint`, `Build`, all Go test matrix jobs, product-security, protected-change integration, bounded fuzz smoke, `govulncheck`, and coverage upload passed on signed commit `0fe710afd3e50848864f84b64cd45f9064c5a37d` |
+| `Redis Sentinel Failover` | `30875915839` | Success | TLS 1.3 topology with one primary, two replicas, and three Sentinels retained the replay record across automatic promotion and ASB process restart; a fresh post-promotion write received replica acknowledgement |
 | `Proto Consistency` | `30782322014` | Success | Generated protobuf sources matched the pinned CI toolchain on signed commit `9684c3d08785bad344cf32cdd812eefd892caccf` |
 
 Local verification:
@@ -166,7 +167,7 @@ All checks passed. `docs/SSOT.pdf` rendered as a 24-page PDF.
 | `TestSoftwareOnlyProfileVerifyAcceptsWithoutAttestation` and companion negative tests | The distinct software-only composition retains trust, revocation, TLS/action binding, local policy, and replay while rejecting any attestation binder. | Passed locally |
 | `TestAzureSNPAttestationBridgeIssuesVerifiableResult` and companion negative tests | A pinned-issuer RS256 Azure Attestation claim set is converted into a short-lived Ed25519 ASB result only for the exact binder challenge, policy hash, launch measurement, SVN, debug, migration, key, and lifetime. | Passed locally; token is synthetic, not live hardware evidence |
 | `TestRedisSetNXStoreCommitsOneWinnerOverTLS` | Twenty concurrent TLS clients race one hashed replay key against the Redis/Valkey wire adapter; exactly one SETNX succeeds after one replica acknowledgement. | Passed locally |
-| `TestRunPhaseRejectsReplayAfterFailover` and companion negative tests | The two-phase failover gate rejects a replay retained across a modeled failover and detects a lost replay write, expired evidence, and store outage. | Passed locally; real Redis Sentinel workflow added, remote result pending |
+| `TestRunPhaseRejectsReplayAfterFailover` and companion negative tests | The two-phase failover gate rejects a replay retained across a modeled failover and detects a lost replay write, expired evidence, and store outage. | Passed locally; real Redis Sentinel workflow passed in run `30875915839` |
 | `TestProtectedChangeE2EAcceptsExactBoundAction`, `TestSoftwareOnlyProtectedChangeE2EAcceptsExactBoundAction`, and companion negative tests | A concrete mTLS HTTPS consumer applies the exact protected change through both production profiles and rejects action mutation, wrong TLS session, replay, revoked grant, unexpected or mismatched attestation, and replay-store outage. | Passed locally |
 
 ## LRTT Status
@@ -175,7 +176,7 @@ All checks passed. `docs/SSOT.pdf` rendered as a 24-page PDF.
 | --- | --- | --- | --- |
 | LRTT01 | Completed for the dependency-free CI harness | `TestAGTPObservedIdentityRedTeamRealTLSAttestationBinding` covers real TLS 1.3 exporter binding, certificate material, accepted attestation payload, AGTP hook acceptance, and borrowed-session rejection | Hardware-generated confidential-VM evidence is not exercised in this local CI profile |
 | LRTT02 | Completed | `TestVerifySessionIdentityCWTAcceptsManagerGrantAndLocalPolicy` and `TestVerifySessionIdentityCWTRedTeamRejectsCOSEProfileAttacks` | Runtime client configuration remains JWT/JWS-wired unless callers use the CWT verifier directly |
-| LRTT03 | Automated self-operated failover gate added; remote result pending | `Redis Sentinel Failover` starts one primary, two replicas, and three Sentinels over TLS 1.3, then stops the primary and runs seed/verify across promotion | A passing repository run qualifies that topology only; selected managed-service endpoint and SLA qualification remain separate |
+| LRTT03 | Completed for the self-operated CI topology | `Redis Sentinel Failover` run `30875915839` started one primary, two replicas, and three Sentinels over TLS 1.3, stopped the primary, observed automatic promotion, rejected the retained replay after ASB process restart, and acknowledged a fresh post-promotion write | This qualifies only the tested topology; selected managed-service endpoint, persistence configuration, partition behavior, and SLA qualification remain separate |
 | LRTT04 | Completed | `TestAGTPObservedIdentityRedTeamRejectsKeyAndRevocationFailures` | None for the modeled HTTP key and revocation failure modes |
 | LRTT05 | Completed | `TestAGTPObservedIdentityRedTeamRejectsAttestationBinderMismatch` | None for binder mismatch comparison |
 | LRTT06 | Completed | `TestVerifySessionIdentityJWTEnvelopeRedTeamRejectsSubstitution` | Runtime client configuration remains two-token JWT/JWS-wired unless callers use the envelope verifier directly |
@@ -247,10 +248,10 @@ boundaries that need separate work if the project chooses to support them.
   wired for the JWT/JWS runtime path.
 - Replay coverage includes the TLS Redis/Valkey `SET NX PX` wire adapter,
   same-connection `WAIT`, a 20-client one-winner race, the failover seed/verify
-  command, and an automated real-process Redis Sentinel gate. A passing remote
-  result is not recorded here yet, and managed-provider endpoint convergence,
-  persistence guarantees, network partitions, and operational SLAs remain
-  deployment-specific evidence.
+  command, and an automated real-process Redis Sentinel gate. Repository run
+  `30875915839` passed for the tested self-operated topology. Managed-provider
+  endpoint convergence, persistence guarantees, network partitions, and
+  operational SLAs remain deployment-specific evidence.
 - Gateway-routed deployments now have a fixed route-assertion claim map,
   holder-of-key proof rules, a local policy gate, and JWT/CWT route-assertion
   adapters plus a local HTTP route-assertion harness. Runtime client/server
