@@ -136,12 +136,14 @@ For accepted TLS sessions, the AGTP observed-identity path derives
 bytes are used only in synthetic unit fixtures.
 
 The latest recorded signed implementation checkpoint is commit
-`0b71a0fb7c6a3bd06fd54ad3961b641acde59dce`; GitHub reports its signature as
-verified. GitHub Actions `CI` run `30783798316` and `Security Red Team` run
-`30783798330` completed successfully on that commit on 2026-08-03 UTC. `Proto
-Consistency` run `30782322014` completed successfully on the preceding product
-merge `9684c3d08785bad344cf32cdd812eefd892caccf`; subsequent commits did not
-change generated protobuf sources.
+`0fe710afd3e50848864f84b64cd45f9064c5a37d`; GitHub reports its signature as
+verified. GitHub Actions `CI` run `30875915840`, `Security Red Team` run
+`30875915843`, and `Redis Sentinel Failover` run `30875915839` completed
+successfully on that commit on 2026-08-04 UTC. The Redis result qualifies the
+tested self-operated Sentinel topology, not a managed-provider service or SLA.
+`Proto Consistency` run `30782322014` completed successfully on the preceding
+product merge `9684c3d08785bad344cf32cdd812eefd892caccf`; subsequent commits did
+not change generated protobuf sources.
 
 See `docs/live-red-team-report.md` for the evidence matrix.
 
