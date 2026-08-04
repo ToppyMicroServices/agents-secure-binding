@@ -1,0 +1,64 @@
+name: Redis Sentinel Failover
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/redis-sentinel-failover.yaml"
+      - "go.mod"
+      - "go.sum"
+      - "pkg/production/**"
+      - "cmd/redis-failover-redteam/**"
+      - "scripts/redis-sentinel-failover.sh"
+      - "docs/API_COMPATIBILITY.md"
+      - "docs/production-deployment-profile.md"
+      - "docs/redis-failover-runbook.md"
+      - "docs/live-red-team-report.md"
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/redis-sentinel-failover.yaml"
+      - "go.mod"
+      - "go.sum"
+      - "pkg/production/**"
+      - "cmd/redis-failover-redteam/**"
+      - "scripts/redis-sentinel-failover.sh"
+      - "docs/API_COMPATIBILITY.md"
+      - "docs/production-deployment-profile.md"
+      - "docs/redis-failover-runbook.md"
+      - "docs/live-red-team-report.md"
+
+permissions:
+  contents: read
+
+jobs:
+  sentinel-failover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: 1.26.x
+          cache-dependency-path: go.sum
+
+      - name: Run real Redis Sentinel failover gate
+        env:
+          ASB_REDIS_IMAGE: redis:7.4.10-alpine3.21
+          ASB_FAILOVER_ARTIFACT_DIR: ${{ runner.temp }}/asb-redis-failover-evidence
+        run: ./scripts/redis-sentinel-failover.sh
+
+      - name: Upload failover evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: redis-sentinel-failover-evidence
+          path: ${{ runner.temp }}/asb-redis-failover-evidence
+          if-no-files-found: error
+          retention-days: 30

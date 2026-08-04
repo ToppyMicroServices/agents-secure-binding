@@ -56,6 +56,7 @@ type e2eFixture struct {
 	store           *MemoryChangeStore
 	audit           *e2eAudit
 	now             time.Time
+	softwareOnly    bool
 }
 
 type e2eSession struct {
@@ -144,6 +145,57 @@ func TestProtectedChangeE2EAcceptsExactBoundAction(t *testing.T) {
 	stored, ok := fixture.store.Lookup(change.ChangeID)
 	if !ok || stored != change {
 		t.Fatalf("stored change = %+v, %v", stored, ok)
+	}
+}
+
+func TestSoftwareOnlyProtectedChangeE2EAcceptsExactBoundAction(t *testing.T) {
+	t.Parallel()
+	fixture := newSoftwareOnlyE2EFixture(t)
+	session := fixture.dial(t)
+	defer session.conn.Close()
+	change := e2eChange(true)
+	headers := fixture.headers(t, session, change, nil)
+
+	if status := sendChange(t, session, change, headers); status != http.StatusNoContent {
+		t.Fatalf("status = %d, want %d, audit = %v", status, http.StatusNoContent, fixture.audit.last())
+	}
+	stored, ok := fixture.store.Lookup(change.ChangeID)
+	if !ok || stored != change {
+		t.Fatalf("stored change = %+v, %v", stored, ok)
+	}
+}
+
+func TestSoftwareOnlyProtectedChangeE2ERejectsAttestationHeader(t *testing.T) {
+	t.Parallel()
+	fixture := newSoftwareOnlyE2EFixture(t)
+	session := fixture.dial(t)
+	defer session.conn.Close()
+	change := e2eChange(true)
+	headers := fixture.headers(t, session, change, nil)
+	headers.Set(AttestationHeader, "unexpected-attestation")
+
+	if status := sendChange(t, session, change, headers); status != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d", status, http.StatusUnauthorized)
+	}
+	if _, ok := fixture.store.Lookup(change.ChangeID); ok {
+		t.Fatal("software-only action with attestation header was applied")
+	}
+}
+
+func TestSoftwareOnlyProtectedChangeE2ERejectsChangedAction(t *testing.T) {
+	t.Parallel()
+	fixture := newSoftwareOnlyE2EFixture(t)
+	session := fixture.dial(t)
+	defer session.conn.Close()
+	signed := e2eChange(true)
+	sent := e2eChange(false)
+	headers := fixture.headers(t, session, signed, nil)
+
+	if status := sendChange(t, session, sent, headers); status != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d", status, http.StatusUnauthorized)
+	}
+	if _, ok := fixture.store.Lookup(sent.ChangeID); ok {
+		t.Fatal("changed software-only action was applied")
 	}
 }
 
@@ -250,6 +302,14 @@ func TestProtectedChangeE2ERejectsReplayStoreOutage(t *testing.T) {
 }
 
 func newE2EFixture(t *testing.T) *e2eFixture {
+	return newE2EFixtureForMode(t, false)
+}
+
+func newSoftwareOnlyE2EFixture(t *testing.T) *e2eFixture {
+	return newE2EFixtureForMode(t, true)
+}
+
+func newE2EFixtureForMode(t *testing.T, softwareOnly bool) *e2eFixture {
 	t.Helper()
 	now := time.Date(2026, time.August, 3, 3, 0, 0, 0, time.UTC)
 	managerPublic, managerPrivate := generateEd25519(t)
@@ -291,11 +351,20 @@ func newE2EFixture(t *testing.T) *e2eFixture {
 	}
 	clientCertificate, clientLeaf, clientCAPool := e2eClientCertificate(t, time.Now().UTC())
 	app := Application{
-		Profile:       profile,
 		Nonces:        fixedNonceSource{"change-0001": e2eExpectedNonce},
 		Store:         store,
 		ExpectedAgent: e2eExpectedAgent,
 		AuditFailure:  audit.record,
+	}
+	if softwareOnly {
+		app.SoftwareProfile = &production.SoftwareOnlyProfile{
+			GrantAuthority:   profile.GrantAuthority,
+			BindingAuthority: profile.BindingAuthority,
+			ReplayCache:      profile.ReplayCache,
+			Now:              profile.Now,
+		}
+	} else {
+		app.Profile = profile
 	}
 	server := httptest.NewUnstartedServer(app)
 	server.TLS = &tls.Config{
@@ -325,6 +394,7 @@ func newE2EFixture(t *testing.T) *e2eFixture {
 		store:           store,
 		audit:           audit,
 		now:             now,
+		softwareOnly:    softwareOnly,
 	}
 }
 
@@ -345,7 +415,12 @@ func (f *e2eFixture) headers(t *testing.T, session *e2eSession, change ChangeReq
 		t.Fatal(err)
 	}
 	state := session.conn.ConnectionState()
-	binding, err := production.BindingFromTLS(&state, f.clientLeaf, actionContext, e2eExpectedNonce)
+	var binding identitypolicy.Binding
+	if f.softwareOnly {
+		binding, err = production.SoftwareBindingFromTLS(&state, f.clientLeaf, actionContext, e2eExpectedNonce)
+	} else {
+		binding, err = production.BindingFromTLS(&state, f.clientLeaf, actionContext, e2eExpectedNonce)
+	}
 	if err != nil {
 		t.Fatalf("derive binding: %v", err)
 	}
@@ -371,21 +446,30 @@ func (f *e2eFixture) headers(t *testing.T, session *e2eSession, change ChangeReq
 		"resources":             []string{resource},
 		"authorization_details": []string{"change:set-enabled"},
 	})
-	sessionBinding := signE2EJWT(t, f.agentPrivate, e2eAgentKeyID, jwt.MapClaims{
-		"iss":                       e2eAgentIssuer,
-		"aud":                       e2eAudience,
-		"jti":                       "binding-change-0001",
-		"iat":                       binding.IssuedAt.Unix(),
-		"exp":                       binding.ExpiresAt.Unix(),
-		"profile_type":              clients.TokenTypeSessionBinding,
-		"profile_version":           clients.ProfileVersion,
-		"grant_hash":                clients.IdentityGrantHash(grant),
-		"leaf_public_key_sha256":    binding.LeafPublicKeySHA256,
-		"tls_exporter_sha256":       binding.TLSExporterSHA256,
-		"request_context_sha256":    binding.RequestContextSHA256,
-		"attestation_binder_sha256": binding.AttestationBinderSHA256,
-		"nonce":                     binding.Nonce,
-	})
+	sessionClaims := jwt.MapClaims{
+		"iss":                    e2eAgentIssuer,
+		"aud":                    e2eAudience,
+		"jti":                    "binding-change-0001",
+		"iat":                    binding.IssuedAt.Unix(),
+		"exp":                    binding.ExpiresAt.Unix(),
+		"profile_type":           clients.TokenTypeSessionBinding,
+		"profile_version":        clients.ProfileVersion,
+		"grant_hash":             clients.IdentityGrantHash(grant),
+		"leaf_public_key_sha256": binding.LeafPublicKeySHA256,
+		"tls_exporter_sha256":    binding.TLSExporterSHA256,
+		"request_context_sha256": binding.RequestContextSHA256,
+		"nonce":                  binding.Nonce,
+	}
+	if !f.softwareOnly {
+		sessionClaims["attestation_binder_sha256"] = binding.AttestationBinderSHA256
+	}
+	sessionBinding := signE2EJWT(t, f.agentPrivate, e2eAgentKeyID, sessionClaims)
+	headers := make(http.Header)
+	headers.Set(IdentityGrantHeader, grant)
+	headers.Set(SessionBindingHeader, sessionBinding)
+	if f.softwareOnly {
+		return headers
+	}
 	attestation := production.AttestationResult{
 		Version:                 production.AttestationResultVersion,
 		ResultID:                "attestation-change-0001",
@@ -404,9 +488,6 @@ func (f *e2eFixture) headers(t *testing.T, session *e2eSession, change ChangeReq
 	if err != nil {
 		t.Fatal(err)
 	}
-	headers := make(http.Header)
-	headers.Set(IdentityGrantHeader, grant)
-	headers.Set(SessionBindingHeader, sessionBinding)
 	headers.Set(AttestationHeader, base64.RawURLEncoding.EncodeToString(attestationJSON))
 	return headers
 }

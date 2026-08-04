@@ -112,7 +112,7 @@ All checks passed. `docs/SSOT.pdf` rendered as a 24-page PDF.
 | Same TLS connection with multiple tasks | `TestVerifySessionIdentityJWTLiveRedTeamHTTP2ConnectionReuse` runs task A and task B over one reused HTTP/2 TLS connection and rejects task A's binding in task B's request context. `TestVerifySessionIdentityJWTLiveRedTeamGRPCConnectionReuse` applies the same acceptance check over one reused gRPC `ClientConn`. | Add broader deployment gRPC pooling and cross-authority-scope cases. |
 | HTTP/2 or gRPC connection reuse | The HTTP/2 and gRPC harnesses verify connection reuse, accepted same-context bindings, and rejected cross-context bindings. | Add deployment-specific gRPC pooling coverage when a product API is fixed. |
 | TLS resumption and 0-RTT | `TestVerifySessionIdentityJWTLiveRedTeamRejectsTLSResumptionReplayAndPreBinding` establishes an initial TLS 1.3 session and a resumed TLS 1.3 session, derives exporter hashes from each, accepts fresh per-session binding material, rejects the initial Session Binding Statement on the resumed session, and rejects a pre-binding statement without `tls_exporter_sha256`. `TestVerifySessionIdentityJWTLiveRedTeamRejectsQUICEarlyDataAuthentication` exercises Go's QUIC/TLS early-data secrets, rejects authentication before `tls_exporter_sha256` is available, and accepts only after the finished-handshake exporter is bound. | End-to-end application 0-RTT payload behavior remains future work if a QUIC application profile is introduced. |
-| Distributed replay race | Local goroutine race and local multi-process SETNX-style service are covered. | LRTT03b: repeat against real multi-node Redis or Valkey, including failover and timeout behavior. |
+| Distributed replay race | Local goroutine and multi-process races are covered; the v1.1 workflow also starts real Redis processes and stops the primary under Sentinel. | Repeat against the selected managed or self-operated production endpoint before making provider-specific HA claims. |
 | Production consumer action binding | `examples/protected-change-consumer` uses mTLS 1.3 and the supported production verifier to accept the exact change and reject changed-action, wrong-session, replay, revoked-grant, attestation-mismatch, and replay-store-outage cases. | The reference store is in-memory; production outcome durability and reconciliation remain consumer responsibilities. |
 | Gateway route confusion | SSOT defines gateway route-assertion requirements, `docs/gateway-routed-profile.md` fixes the Gateway Route Assertion claim map and holder-of-key proof, `pkg/agtp/gatewayroute` rejects route, tenant, policy, task, target-Agent, nonce, audit-hash, replay, and missing-proof confusion, and `pkg/agtp` verifies JWT/JWS and CWT/COSE route-assertion wire tokens. `TestVerifyGatewayRouteJWTLiveRedTeamNetworkHarness` exercises route assertion verification across an HTTP request boundary and rejects route diversion and replay. | Add runtime gateway client/server wiring if gateway-routed mode becomes a product surface. |
 | JWT/JWS parser robustness | Deterministic negative tests cover supported claim and signature paths. `TestVerifySessionIdentityJWTRedTeamRejectsMalformedCorpus` rejects malformed compact JWS, duplicate protected-header or payload JSON members, and unsafe control-character claims. `FuzzVerifySessionIdentityJWTRejectsMalformedCompactTokens` provides bounded fuzz smoke for malformed compact JWT/JWS inputs and passed a 60-second local fuzz run with 1,252,457 executions on 2026-06-30. | Add longer corpus jobs for Unicode, duplicate JSON keys, malformed base64url, malformed protected headers, and malformed JWS structure if broad parser-hardening evidence is needed. |
@@ -163,10 +163,11 @@ All checks passed. `docs/SSOT.pdf` rendered as a 24-page PDF.
 | `TestVerifySessionIdentityJWTInvariantMatrix` | The JWT acceptance invariant rejects mismatched grant hash, request context, TLS exporter, attestation binder, audience, role-separated context, task, replay, and local policy. | Passed locally |
 | `TestSEVSNPAppraisalContractValidateAcceptsRequiredEvidence` and companion negative tests | SEV-SNP HostData and `kernel-hashes=on` appraisal contract accepts matching evidence and rejects missing expected HostData, mismatched HostData, or missing kernel-hash evidence. | Passed locally |
 | `TestProfileVerifyAcceptsProductionComposition` and negative gates | Role-separated trust, revocation, signed attestation, exact policy/binding, and shared replay commit are enforced in one acceptance path; failures do not commit replay state. | Passed locally |
+| `TestSoftwareOnlyProfileVerifyAcceptsWithoutAttestation` and companion negative tests | The distinct software-only composition retains trust, revocation, TLS/action binding, local policy, and replay while rejecting any attestation binder. | Passed locally |
 | `TestAzureSNPAttestationBridgeIssuesVerifiableResult` and companion negative tests | A pinned-issuer RS256 Azure Attestation claim set is converted into a short-lived Ed25519 ASB result only for the exact binder challenge, policy hash, launch measurement, SVN, debug, migration, key, and lifetime. | Passed locally; token is synthetic, not live hardware evidence |
 | `TestRedisSetNXStoreCommitsOneWinnerOverTLS` | Twenty concurrent TLS clients race one hashed replay key against the Redis/Valkey wire adapter; exactly one SETNX succeeds after one replica acknowledgement. | Passed locally |
-| `TestRunPhaseRejectsReplayAfterFailover` and companion negative tests | The two-phase failover gate rejects a replay retained across a modeled failover and detects a lost replay write, expired evidence, and store outage. | Passed locally; real multi-node failover is not recorded |
-| `TestProtectedChangeE2EAcceptsExactBoundAction` and companion negative tests | A concrete mTLS HTTPS consumer applies the exact protected change and rejects action mutation, wrong TLS session, replay, revoked grant, attestation mismatch, and replay-store outage. | Passed locally |
+| `TestRunPhaseRejectsReplayAfterFailover` and companion negative tests | The two-phase failover gate rejects a replay retained across a modeled failover and detects a lost replay write, expired evidence, and store outage. | Passed locally; real Redis Sentinel workflow added, remote result pending |
+| `TestProtectedChangeE2EAcceptsExactBoundAction`, `TestSoftwareOnlyProtectedChangeE2EAcceptsExactBoundAction`, and companion negative tests | A concrete mTLS HTTPS consumer applies the exact protected change through both production profiles and rejects action mutation, wrong TLS session, replay, revoked grant, unexpected or mismatched attestation, and replay-store outage. | Passed locally |
 
 ## LRTT Status
 
@@ -174,7 +175,7 @@ All checks passed. `docs/SSOT.pdf` rendered as a 24-page PDF.
 | --- | --- | --- | --- |
 | LRTT01 | Completed for the dependency-free CI harness | `TestAGTPObservedIdentityRedTeamRealTLSAttestationBinding` covers real TLS 1.3 exporter binding, certificate material, accepted attestation payload, AGTP hook acceptance, and borrowed-session rejection | Hardware-generated confidential-VM evidence is not exercised in this local CI profile |
 | LRTT02 | Completed | `TestVerifySessionIdentityCWTAcceptsManagerGrantAndLocalPolicy` and `TestVerifySessionIdentityCWTRedTeamRejectsCOSEProfileAttacks` | Runtime client configuration remains JWT/JWS-wired unless callers use the CWT verifier directly |
-| LRTT03 | Gate implemented; real failover run not recorded | `TestAGTPObservedIdentityRedTeamRejectsReplayRaceMultiProcess`, replica-acknowledged `RedisSetNXStore`, and `cmd/redis-failover-redteam` cover local race and seed/verify behavior | Counts as deployment evidence only after the selected private multi-node service is failed over successfully |
+| LRTT03 | Automated self-operated failover gate added; remote result pending | `Redis Sentinel Failover` starts one primary, two replicas, and three Sentinels over TLS 1.3, then stops the primary and runs seed/verify across promotion | A passing repository run qualifies that topology only; selected managed-service endpoint and SLA qualification remain separate |
 | LRTT04 | Completed | `TestAGTPObservedIdentityRedTeamRejectsKeyAndRevocationFailures` | None for the modeled HTTP key and revocation failure modes |
 | LRTT05 | Completed | `TestAGTPObservedIdentityRedTeamRejectsAttestationBinderMismatch` | None for binder mismatch comparison |
 | LRTT06 | Completed | `TestVerifySessionIdentityJWTEnvelopeRedTeamRejectsSubstitution` | Runtime client configuration remains two-token JWT/JWS-wired unless callers use the envelope verifier directly |
@@ -229,6 +230,10 @@ All checks passed. `docs/SSOT.pdf` rendered as a 24-page PDF.
   binder-challenge negative tests.
 - Added same-connection Redis/Valkey replica acknowledgement and a two-phase
   real-service failover qualification command.
+- Added an explicit attestation-free software-only production composition and
+  non-Split-Knowledge protected-change E2E coverage.
+- Added a reproducible TLS 1.3 Redis Sentinel primary-failure workflow with
+  sanitized evidence artifacts.
 
 ## Residual Boundaries
 
@@ -241,9 +246,11 @@ boundaries that need separate work if the project chooses to support them.
 - CWT/COSE verification exists in `pkg/agtp`, but client configuration is still
   wired for the JWT/JWS runtime path.
 - Replay coverage includes the TLS Redis/Valkey `SET NX PX` wire adapter,
-  same-connection `WAIT`, a 20-client one-winner race, and the failover
-  seed/verify command. No successful real multi-node failover, persistence, or
-  operational timeout run is recorded here yet.
+  same-connection `WAIT`, a 20-client one-winner race, the failover seed/verify
+  command, and an automated real-process Redis Sentinel gate. A passing remote
+  result is not recorded here yet, and managed-provider endpoint convergence,
+  persistence guarantees, network partitions, and operational SLAs remain
+  deployment-specific evidence.
 - Gateway-routed deployments now have a fixed route-assertion claim map,
   holder-of-key proof rules, a local policy gate, and JWT/CWT route-assertion
   adapters plus a local HTTP route-assertion harness. Runtime client/server

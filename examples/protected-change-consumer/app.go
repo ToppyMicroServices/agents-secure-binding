@@ -67,11 +67,12 @@ type ChangeStore interface {
 
 // Application is the protected-change HTTP consumer.
 type Application struct {
-	Profile       production.Profile
-	Nonces        NonceSource
-	Store         ChangeStore
-	ExpectedAgent string
-	AuditFailure  func(context.Context, error)
+	Profile         production.Profile
+	SoftwareProfile *production.SoftwareOnlyProfile
+	Nonces          NonceSource
+	Store           ChangeStore
+	ExpectedAgent   string
+	AuditFailure    func(context.Context, error)
 }
 
 // ServeHTTP accepts only the protected change endpoint.
@@ -108,33 +109,12 @@ func (a Application) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid request", http.StatusBadRequest)
 		return
 	}
-	expectedBinding, err := production.BindingFromTLS(r.TLS, r.TLS.PeerCertificates[0], actionContext, nonce)
-	if err != nil {
-		http.Error(w, "authentication failed", http.StatusUnauthorized)
-		return
-	}
-	attestation, err := decodeAttestation(r.Header.Get(AttestationHeader))
-	if err != nil {
-		http.Error(w, "authentication failed", http.StatusUnauthorized)
-		return
-	}
-
-	profile := a.Profile
 	if len(r.Header.Get(IdentityGrantHeader)) > maxRequestBytes || len(r.Header.Get(SessionBindingHeader)) > maxRequestBytes {
 		http.Error(w, "authentication failed", http.StatusUnauthorized)
 		return
 	}
-	if !usesProtectedChangeSigningProfile(profile) {
-		http.Error(w, "service unavailable", http.StatusServiceUnavailable)
-		return
-	}
-	profile.IdentityPolicy = ExpectedPolicy(change, a.ExpectedAgent)
-	accepted, err := profile.Verify(r.Context(), production.VerifyRequest{
-		GrantJWT:          r.Header.Get(IdentityGrantHeader),
-		SessionBindingJWT: r.Header.Get(SessionBindingHeader),
-		ExpectedBinding:   expectedBinding,
-		Attestation:       attestation,
-	})
+
+	accepted, err := a.verifyIdentity(r, change, actionContext, nonce)
 	if err != nil {
 		if a.AuditFailure != nil {
 			a.AuditFailure(r.Context(), err)
@@ -147,6 +127,48 @@ func (a Application) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (a Application) verifyIdentity(r *http.Request, change ChangeRequest, actionContext []byte, nonce string) (production.AcceptedIdentity, error) {
+	if a.SoftwareProfile != nil {
+		if hasAttestedProfileConfiguration(a.Profile) || r.Header.Get(AttestationHeader) != "" {
+			return production.AcceptedIdentity{}, production.ErrUnexpectedAttestationBinding
+		}
+		expectedBinding, err := production.SoftwareBindingFromTLS(r.TLS, r.TLS.PeerCertificates[0], actionContext, nonce)
+		if err != nil {
+			return production.AcceptedIdentity{}, err
+		}
+		profile := *a.SoftwareProfile
+		if !usesProtectedChangeSigningAuthorities(profile.GrantAuthority, profile.BindingAuthority) {
+			return production.AcceptedIdentity{}, production.ErrInvalidAuthority
+		}
+		profile.IdentityPolicy = ExpectedPolicy(change, a.ExpectedAgent)
+		return profile.Verify(r.Context(), production.SoftwareOnlyVerifyRequest{
+			GrantJWT:          r.Header.Get(IdentityGrantHeader),
+			SessionBindingJWT: r.Header.Get(SessionBindingHeader),
+			ExpectedBinding:   expectedBinding,
+		})
+	}
+
+	expectedBinding, err := production.BindingFromTLS(r.TLS, r.TLS.PeerCertificates[0], actionContext, nonce)
+	if err != nil {
+		return production.AcceptedIdentity{}, err
+	}
+	attestation, err := decodeAttestation(r.Header.Get(AttestationHeader))
+	if err != nil {
+		return production.AcceptedIdentity{}, err
+	}
+	profile := a.Profile
+	if !usesProtectedChangeSigningAuthorities(profile.GrantAuthority, profile.BindingAuthority) {
+		return production.AcceptedIdentity{}, production.ErrInvalidAuthority
+	}
+	profile.IdentityPolicy = ExpectedPolicy(change, a.ExpectedAgent)
+	return profile.Verify(r.Context(), production.VerifyRequest{
+		GrantJWT:          r.Header.Get(IdentityGrantHeader),
+		SessionBindingJWT: r.Header.Get(SessionBindingHeader),
+		ExpectedBinding:   expectedBinding,
+		Attestation:       attestation,
+	})
 }
 
 // CanonicalActionContext returns the exact bytes bound into the TLS exporter
@@ -279,9 +301,19 @@ func isIdentifierRune(r rune) bool {
 	return r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '.' || r == '_' || r == '-'
 }
 
-func usesProtectedChangeSigningProfile(profile production.Profile) bool {
-	return len(profile.GrantAuthority.ValidMethods) == 1 && profile.GrantAuthority.ValidMethods[0] == "EdDSA" &&
-		len(profile.BindingAuthority.ValidMethods) == 1 && profile.BindingAuthority.ValidMethods[0] == "EdDSA"
+func usesProtectedChangeSigningAuthorities(grant production.AuthorityPolicy, binding production.AuthorityPolicy) bool {
+	return len(grant.ValidMethods) == 1 && grant.ValidMethods[0] == "EdDSA" &&
+		len(binding.ValidMethods) == 1 && binding.ValidMethods[0] == "EdDSA"
+}
+
+func hasAttestedProfileConfiguration(profile production.Profile) bool {
+	return authorityConfigured(profile.GrantAuthority) || authorityConfigured(profile.BindingAuthority) ||
+		profile.IdentityPolicy.Enabled() || profile.Attestation != nil || profile.ReplayCache != nil || profile.Now != nil
+}
+
+func authorityConfigured(authority production.AuthorityPolicy) bool {
+	return authority.ExpectedIssuer != "" || authority.ExpectedAudience != "" ||
+		len(authority.ValidMethods) != 0 || authority.TrustSource != nil
 }
 
 func changeResource(change ChangeRequest) string {

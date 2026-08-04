@@ -1,7 +1,8 @@
 # Redis/Valkey replay failover runbook
 
-Status: deployment qualification for `protected-change-v1`; local protocol
-tests do not replace a run against the selected multi-node service.
+Status: the repository includes a reproducible self-operated Redis Sentinel
+qualification gate beginning with `v1.1.0`. That gate does not replace a run
+against the selected managed service or production discovery endpoint.
 
 ## Topology
 
@@ -49,6 +50,32 @@ replace the replay backend with a strongly consistent conditional-insert store.
 
 ## Real failover gate
 
+### Reproducible Sentinel gate
+
+Run the same gate used by GitHub Actions:
+
+```sh
+ASB_FAILOVER_ARTIFACT_DIR=/secure/asb-failover-evidence \
+  ./scripts/redis-sentinel-failover.sh
+```
+
+The script starts one TLS 1.3 primary, two TLS 1.3 replicas, and three Redis
+Sentinels. It writes a fresh replay record using `SET NX PX` and
+same-connection `WAIT 1`, stops the primary, waits for Sentinel to promote a
+replica, restarts the ASB test command against the promoted primary, and
+requires the original record to remain rejected as replay. It then requires a
+fresh post-promotion write to receive a replica acknowledgement. The evidence
+artifact contains the resolved container-image digest, timestamps, promoted
+node, and replay-key fingerprint; it contains no raw replay key or TLS private
+key.
+
+This is real Redis process and primary-failure evidence. The test command
+selects the promoted node explicitly after Sentinel election, so it does not
+qualify stable-endpoint convergence, Sentinel client discovery, network
+partitions, host loss, or a managed provider SLA.
+
+### Selected deployment gate
+
 Run both phases from a host that can reach the private endpoint. Supply ACL
 credentials through `ASB_REDIS_USERNAME` and `ASB_REDIS_PASSWORD`, never as
 command-line arguments.
@@ -87,7 +114,8 @@ The verify phase passes only when the seeded key still exists and is rejected
 as replay. It fails if the key was lost, the evidence TTL expired, replication
 acknowledgement is insufficient, or the service is unavailable.
 
-Repeat the gate at these cut points:
+Before a commercial HA or failure-tolerance claim, repeat the selected
+deployment gate at these cut points:
 
 1. immediately after the primary returns `SET OK`;
 2. while `WAIT` is outstanding;

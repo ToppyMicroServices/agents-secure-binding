@@ -2,13 +2,23 @@
 
 ## Unreleased
 
+## v1.1.0
+
+- Add an explicit attestation-free `SoftwareOnlyProfile` with a separate
+  request type, TLS/action binding helper, replay domain, and fail-closed
+  rejection of attestation binders.
+- Add live mutually authenticated TLS integration coverage through the
+  non-Split-Knowledge protected-change consumer.
 - Add a pinned-issuer Azure SEV-SNP Attestation token bridge with exact ASB
   binder challenge, measurement, policy, SVN, debug, migration, key, and
   freshness checks.
 - Add optional same-connection Redis/Valkey `WAIT` acknowledgement after a
   successful replay insert.
 - Add a two-phase real Redis/Valkey failover qualification command and
-  deployment runbooks for Azure hardware attestation and replay HA.
+  a TLS 1.3 Redis Sentinel primary-failure CI gate.
+- Add deployment runbooks for Azure hardware attestation and replay HA while
+  keeping live hardware and managed-provider qualification outside the stable
+  API claim.
 
 ## v1.0.0
 

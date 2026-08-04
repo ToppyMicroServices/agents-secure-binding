@@ -1,14 +1,71 @@
-# Production deployment profile: protected-change-v1
+# Production deployment profiles
 
-Status: the baseline is supported beginning with `v1.0.0`. The Azure SEV-SNP
-bridge and Redis replica-acknowledgement additions documented below are
-unreleased candidates pending live qualification and a minor release.
+Status: the attested `protected-change-v1` baseline is supported beginning with
+`v1.0.0`. Release `v1.1.0` adds the explicit
+`software-only-direct-agent-v1` composition and the optional Redis/Valkey
+replica-acknowledgement setting. The Azure SEV-SNP bridge remains outside the
+supported product API pending live hardware qualification.
 
 This is one concrete Direct-Agent v1 deployment profile. Its reference
 consumer is a tenant-configuration change service, not Split-Knowledge. The
 service applies a change only when the grant, Agent proof, accepted TLS 1.3
 session, exact change, fresh signed attestation result, verifier nonce, local
 policy, and shared replay state all agree.
+
+## Software-only Direct-Agent v1
+
+`software-only-direct-agent-v1` is the supported production choice when the
+operator accepts the software host, process isolation, and signing-key custody
+as its platform trust boundary. It does not claim that the verifier measured
+the boot chain, workload image, firmware SVN, debug state, or migration state.
+
+This is a separate fail-closed composition, not an optional-attestation switch
+on `production.Profile`:
+
+```go
+profile := production.SoftwareOnlyProfile{
+    GrantAuthority:   managerAuthority,
+    BindingAuthority: agentAuthority,
+    IdentityPolicy:   expectedPolicy,
+    ReplayCache:      distributedReplay,
+}
+
+expectedBinding, err := production.SoftwareBindingFromTLS(
+    acceptedTLSState,
+    authenticatedPeerLeaf,
+    canonicalAction,
+    verifierNonce,
+)
+```
+
+The profile retains all of these mandatory gates:
+
+- role-separated Manager and Agent trust sources, exact issuer, audience,
+  algorithm, key ID, lifetime, and revocation checks;
+- the authenticated peer public key, accepted TLS 1.3 exporter, exact
+  canonical action digest, and verifier nonce;
+- verifier-local D3-D6 identity and authorization policy; and
+- a fail-closed distributed replay commit before identity acceptance.
+
+The request type contains no attestation result. Both the locally derived
+binding and the Agent-signed session proof must omit
+`attestation_binder_sha256`; a non-empty value is rejected. Software-only
+replay keys use the domain `asb.production.software-only.v1`, separate from the
+attested profile. Replay expiry is bounded by the earlier grant or session
+proof expiry.
+
+Use the attested profile instead when the relying party must verify a platform
+or workload measurement across an administrative boundary, enforce firmware
+or guest SVN, prohibit debug or migration state using signed platform facts,
+or satisfy a contract or regulation requiring remote hardware evidence. Those
+conditions are deployment requirements; they are not requirements for a
+Split-Knowledge substrate whose accepted threat model trusts its service host.
+
+The non-Split-Knowledge `protected-change` consumer exercises this profile over
+live mutually authenticated TLS 1.3 and includes rejection tests for changed
+actions and unexpected attestation material.
+
+## Attested protected-change v1
 
 ## Fixed choices
 
@@ -23,8 +80,8 @@ policy, and shared replay state all agree.
 | Exporter context | `asb.direct-agent.production.v1 NUL nonce NUL canonical_action` |
 | Action digest | SHA-256 of canonical protected-change JSON |
 | Trust and revocation | fresh role-specific `production.TrustSource` snapshot on every acceptance |
-| Attestation | v1.0 baseline: Ed25519-signed `asb-attestation-result/v1`; unreleased extension: pinned-issuer Azure SEV-SNP MAA bridge |
-| Replay | v1.0 baseline: Redis/Valkey `SET NX PX`; unreleased extension: same-connection `WAIT`; certificate-verified TLS and fail closed |
+| Attestation | Ed25519-signed `asb-attestation-result/v1`; experimental pinned-issuer Azure SEV-SNP MAA bridge |
+| Replay | Redis/Valkey `SET NX PX`; v1.1 optional same-connection `WAIT`; certificate-verified TLS and fail closed |
 | Outcome | consumer-owned durable, idempotent store keyed by `change_id` |
 
 Manager, Agent, and attestation-verifier keys are separate trust domains. A key
@@ -171,7 +228,9 @@ two-phase seed/verify gate for the selected real service:
 go test -race -count=1 ./cmd/redis-failover-redteam
 ```
 
-These tests are implementation evidence for the documented profile. A
-successful Azure confidential-VM run and a successful multi-node Redis/Valkey
-failover run must be recorded separately before claiming those deployment
-properties.
+The repository's Redis Sentinel workflow performs a real multi-process
+primary-stop and replica-promotion run. This qualifies the self-operated test
+topology, not a managed service's endpoint convergence, persistence contract,
+or SLA. A successful Azure confidential-VM run and a successful failover run
+against any selected commercial deployment must be recorded separately before
+claiming those deployment-specific properties.

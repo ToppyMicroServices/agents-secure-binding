@@ -26,6 +26,17 @@ const DirectAgentV1ExporterLabel = eaattestation.ExporterLabelAttestation
 // TLS 1.3 session, the authenticated peer certificate, exact canonical action
 // bytes, and a verifier-issued nonce.
 func BindingFromTLS(state *tls.ConnectionState, peerLeaf *x509.Certificate, actionContext []byte, nonce string) (identitypolicy.Binding, error) {
+	return bindingFromTLS(state, peerLeaf, actionContext, nonce, true)
+}
+
+// SoftwareBindingFromTLS derives the verifier-local TLS and action binding for
+// SoftwareOnlyProfile. It intentionally omits attestation_binder_sha256 so an
+// attested proof cannot be reinterpreted as software-only acceptance.
+func SoftwareBindingFromTLS(state *tls.ConnectionState, peerLeaf *x509.Certificate, actionContext []byte, nonce string) (identitypolicy.Binding, error) {
+	return bindingFromTLS(state, peerLeaf, actionContext, nonce, false)
+}
+
+func bindingFromTLS(state *tls.ConnectionState, peerLeaf *x509.Certificate, actionContext []byte, nonce string, includeAttestation bool) (identitypolicy.Binding, error) {
 	if state == nil || peerLeaf == nil || len(actionContext) == 0 || strings.TrimSpace(nonce) == "" {
 		return identitypolicy.Binding{}, ErrInvalidAcceptedBinding
 	}
@@ -46,12 +57,15 @@ func BindingFromTLS(state *tls.ConnectionState, peerLeaf *x509.Certificate, acti
 	leafKey := sha256.Sum256(peerLeaf.RawSubjectPublicKeyInfo)
 	exporter := sha256.Sum256(exported)
 	requestContext := sha256.Sum256(actionContext)
-	attestationBinder := sha256.Sum256(attestationBinding)
-	return identitypolicy.Binding{
-		LeafPublicKeySHA256:     hex.EncodeToString(leafKey[:]),
-		TLSExporterSHA256:       hex.EncodeToString(exporter[:]),
-		RequestContextSHA256:    hex.EncodeToString(requestContext[:]),
-		AttestationBinderSHA256: hex.EncodeToString(attestationBinder[:]),
-		Nonce:                   nonce,
-	}, nil
+	binding := identitypolicy.Binding{
+		LeafPublicKeySHA256:  hex.EncodeToString(leafKey[:]),
+		TLSExporterSHA256:    hex.EncodeToString(exporter[:]),
+		RequestContextSHA256: hex.EncodeToString(requestContext[:]),
+		Nonce:                nonce,
+	}
+	if includeAttestation {
+		attestationBinder := sha256.Sum256(attestationBinding)
+		binding.AttestationBinderSHA256 = hex.EncodeToString(attestationBinder[:])
+	}
+	return binding, nil
 }
