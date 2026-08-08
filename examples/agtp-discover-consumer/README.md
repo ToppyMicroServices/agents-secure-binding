@@ -1,49 +1,25 @@
-# ASB-protected AGTP DISCOVER
+# ASB-authenticated DISCOVER
 
-This example places an ASB acceptance gate in front of an AGTP coordinator's
-`DISCOVER /population` operation.
+This example authenticates a caller with ASB before querying the local Go
+Presence store. It does not run or proxy the Python AGTP server.
 
-The caller reaches the gateway over mTLS and supplies a Manager-signed Identity
-Grant plus an Agent-signed Session Binding Statement. The gateway forwards the
-query only after the ASB software-only production profile verifies:
-
-- the Manager and Agent signatures under separate trust roots;
-- the caller Agent and the `agtp.discover` authorization;
-- the exact capability and result limit;
-- the accepted mTLS session and TLS exporter;
-- token lifetime and one-shot replay state.
-
-The forwarded AGTP response body is not rewritten, so the caller can still
-verify a coordinator-signed DISCOVER response.
-
-## Local tests
+The accepted Identity Grant fixes the Agent-ID, `agtp.discover` scope,
+capability, result limit, and `/population` resource. The Session Binding fixes
+the same request to the accepted mTLS session. Only then does the application
+pass the authenticated Agent-ID into Presence visibility filtering.
 
 ```bash
-go test ./examples/agtp-discover-consumer
+go test ./pkg/agtp/discovery ./examples/agtp-discover-consumer
 ```
 
-The default tests use loopback mTLS and a small AGTP wire fixture. They verify
-one accepted query and rejection of capability substitution, cross-session
-reuse, and replay.
+The tests cover the successful query plus capability substitution, wrong TLS
+session, replay, TTL update, selective visibility, partitioned withdrawal,
+three-node DHT lookup, and ANS registration and deletion.
 
-To use a running local AGTP coordinator with at least one matching Presence
-record:
+This is a software-only local profile. It uses ephemeral credentials and an
+in-memory replay cache. A real deployment still needs durable replay and
+Presence state, authenticated peer transport for DHT and anti-entropy, and
+configured Manager, Agent, client-CA, and server keys.
 
-```bash
-ASB_AGTP_UPSTREAM=127.0.0.1:9000 \
-ASB_AGTP_CAPABILITY=generate \
-go test ./examples/agtp-discover-consumer \
-  -run TestLiveASBDiscoverAgainstAGTP -v
-```
-
-`ASB_AGTP_CAPABILITY` defaults to `generate`.
-
-## Boundary
-
-This is a local software-only reference consumer, not an AGTP wire-specification
-change. Hardware attestation is not selected. The tests use an in-process replay
-cache and ephemeral credentials; a multi-instance deployment needs durable
-atomic replay storage and configured Manager, Agent, client-CA, and server keys.
-
-The AGTP coordinator should be reachable only by the gateway. If callers can
-connect directly to the upstream coordinator, they can bypass this ASB gate.
+See [the implementation boundary](../../docs/agtp-discovery-local.md) for the
+supported subset and the features intentionally left out.

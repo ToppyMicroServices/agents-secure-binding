@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/thinksyncs/agents-secure-binding/pkg/agtp/discovery"
 	"github.com/thinksyncs/agents-secure-binding/pkg/atls/identitypolicy"
 	"github.com/thinksyncs/agents-secure-binding/pkg/clients"
 	"github.com/thinksyncs/agents-secure-binding/pkg/production"
@@ -45,7 +46,7 @@ type testFixture struct {
 	clientLeaf     *x509.Certificate
 	managerPrivate ed25519.PrivateKey
 	agentPrivate   ed25519.PrivateKey
-	upstream       *recordingUpstream
+	catalog        *recordingCatalog
 	now            time.Time
 }
 
@@ -60,23 +61,25 @@ func (s fixedNonceSource) ExpectedNonce(context.Context, Query) (string, error) 
 	return s.nonce, nil
 }
 
-type recordingUpstream struct {
-	mu      sync.Mutex
-	queries []Query
+type recordingCatalog struct {
+	mu         sync.Mutex
+	queries    []Query
+	requesters []discovery.Requester
+	store      *discovery.PresenceStore
 }
 
-func (u *recordingUpstream) Discover(_ context.Context, query Query) (Result, error) {
-	u.mu.Lock()
-	defer u.mu.Unlock()
-	u.queries = append(u.queries, query)
-	body := []byte(`{"results":[{"agent_id":"result-agent-01","methods":["GENERATE"]}]}`)
-	return Result{StatusCode: http.StatusOK, StatusText: "OK", Body: body}, nil
+func (c *recordingCatalog) Discover(ctx context.Context, query Query, requester discovery.Requester) (discovery.Response, error) {
+	c.mu.Lock()
+	c.queries = append(c.queries, query)
+	c.requesters = append(c.requesters, requester)
+	c.mu.Unlock()
+	return c.store.Discover(ctx, query, requester)
 }
 
-func (u *recordingUpstream) callCount() int {
-	u.mu.Lock()
-	defer u.mu.Unlock()
-	return len(u.queries)
+func (c *recordingCatalog) callCount() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return len(c.queries)
 }
 
 func TestASBDiscoverAcceptsExactBoundQuery(t *testing.T) {
@@ -90,8 +93,8 @@ func TestASBDiscoverAcceptsExactBoundQuery(t *testing.T) {
 	if status != http.StatusOK {
 		t.Fatalf("status = %d, want %d; body = %s", status, http.StatusOK, body)
 	}
-	if fixture.upstream.callCount() != 1 {
-		t.Fatalf("upstream calls = %d, want 1", fixture.upstream.callCount())
+	if fixture.catalog.callCount() != 1 {
+		t.Fatalf("catalog calls = %d, want 1", fixture.catalog.callCount())
 	}
 	if !bytes.Contains(body, []byte("result-agent-01")) {
 		t.Fatalf("response body = %s", body)
@@ -108,8 +111,8 @@ func TestASBDiscoverRejectsChangedCapability(t *testing.T) {
 	if status != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want %d", status, http.StatusUnauthorized)
 	}
-	if fixture.upstream.callCount() != 0 {
-		t.Fatalf("upstream calls = %d, want 0", fixture.upstream.callCount())
+	if fixture.catalog.callCount() != 0 {
+		t.Fatalf("catalog calls = %d, want 0", fixture.catalog.callCount())
 	}
 }
 
@@ -126,8 +129,8 @@ func TestASBDiscoverRejectsReplay(t *testing.T) {
 	if status, _ := sendQuery(t, session, query, headers); status != http.StatusUnauthorized {
 		t.Fatalf("second status = %d, want %d", status, http.StatusUnauthorized)
 	}
-	if fixture.upstream.callCount() != 1 {
-		t.Fatalf("upstream calls = %d, want 1", fixture.upstream.callCount())
+	if fixture.catalog.callCount() != 1 {
+		t.Fatalf("catalog calls = %d, want 1", fixture.catalog.callCount())
 	}
 }
 
@@ -143,8 +146,8 @@ func TestASBDiscoverRejectsWrongTLSSession(t *testing.T) {
 	if status != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want %d", status, http.StatusUnauthorized)
 	}
-	if fixture.upstream.callCount() != 0 {
-		t.Fatalf("upstream calls = %d, want 0", fixture.upstream.callCount())
+	if fixture.catalog.callCount() != 0 {
+		t.Fatalf("catalog calls = %d, want 0", fixture.catalog.callCount())
 	}
 }
 
@@ -164,14 +167,20 @@ func TestCanonicalActionContextRejectsAliases(t *testing.T) {
 
 func newTestFixture(t *testing.T) *testFixture {
 	t.Helper()
-	upstream := &recordingUpstream{}
-	fixture := newTestFixtureForUpstream(t, upstream)
-	fixture.upstream = upstream
-	return fixture
-}
-
-func newTestFixtureForUpstream(t *testing.T, configuredUpstream Upstream) *testFixture {
-	t.Helper()
+	store := discovery.NewPresenceStore()
+	if _, err := store.Announce(discovery.Record{
+		AgentID:      "result-agent-01",
+		Name:         "generator.example",
+		Capabilities: []string{"generate"},
+		Visibility: discovery.Visibility{
+			Mode:          discovery.VisibilityExplicitOnly,
+			AllowedAgents: []string{testExpectedAgent},
+		},
+		Version: 1,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	catalog := &recordingCatalog{store: store}
 	now := time.Now().UTC().Truncate(time.Second)
 	managerPublic, managerPrivate := generateEd25519(t)
 	agentPublic, agentPrivate := generateEd25519(t)
@@ -201,7 +210,7 @@ func newTestFixtureForUpstream(t *testing.T, configuredUpstream Upstream) *testF
 	server := httptest.NewUnstartedServer(Application{
 		Profile:       profile,
 		Nonces:        fixedNonceSource{nonce: testNonce},
-		Upstream:      configuredUpstream,
+		Catalog:       catalog,
 		ExpectedAgent: testExpectedAgent,
 	})
 	server.TLS = &tls.Config{
@@ -225,6 +234,7 @@ func newTestFixtureForUpstream(t *testing.T, configuredUpstream Upstream) *testF
 		clientLeaf:     clientLeaf,
 		managerPrivate: managerPrivate,
 		agentPrivate:   agentPrivate,
+		catalog:        catalog,
 		now:            now,
 	}
 }

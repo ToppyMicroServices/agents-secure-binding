@@ -1,9 +1,9 @@
 // Copyright (c) 2026 ToppyMicroServices OÜ
 // SPDX-License-Identifier: Apache-2.0
 
-// Package agtpdiscover is an ASB-protected consumer for AGTP population
-// discovery. It verifies the caller before forwarding an exact DISCOVER query
-// to a locally configured AGTP coordinator.
+// Package agtpdiscover is an ASB-protected consumer for local AGTP-style
+// population discovery. It verifies the caller before evaluating an exact
+// DISCOVER query against the ASB-hosted Presence store.
 package agtpdiscover
 
 import (
@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/thinksyncs/agents-secure-binding/pkg/agtp/discovery"
 	"github.com/thinksyncs/agents-secure-binding/pkg/atls/identitypolicy"
 	"github.com/thinksyncs/agents-secure-binding/pkg/production"
 )
@@ -33,14 +34,10 @@ var (
 	ErrInvalidQuery       = errors.New("agtp discover: invalid query")
 	ErrMissingTLSIdentity = errors.New("agtp discover: missing authenticated TLS peer")
 	ErrMissingNonce       = errors.New("agtp discover: missing verifier nonce")
-	ErrUpstream           = errors.New("agtp discover: upstream failure")
 )
 
 // Query is the exact AGTP population query authorized by ASB.
-type Query struct {
-	Capability string `json:"capability"`
-	Limit      int    `json:"limit"`
-}
+type Query = discovery.Query
 
 type canonicalQuery struct {
 	Profile    string `json:"profile"`
@@ -50,17 +47,9 @@ type canonicalQuery struct {
 	Limit      int    `json:"limit"`
 }
 
-// Result is the upstream AGTP response. Body remains byte-identical so an
-// upstream response signature can still be checked by the caller.
-type Result struct {
-	StatusCode int
-	StatusText string
-	Body       []byte
-}
-
-// Upstream executes one already-authorized AGTP query.
-type Upstream interface {
-	Discover(context.Context, Query) (Result, error)
+// Catalog executes one already-authorized query against local Presence state.
+type Catalog interface {
+	Discover(context.Context, discovery.Query, discovery.Requester) (discovery.Response, error)
 }
 
 // NonceSource returns the verifier-issued nonce for the exact query.
@@ -68,15 +57,16 @@ type NonceSource interface {
 	ExpectedNonce(context.Context, Query) (string, error)
 }
 
-// Application verifies ASB identity and then forwards DISCOVER to Upstream.
+// Application verifies ASB identity and then evaluates DISCOVER locally.
 // This local reference consumer uses the ASB software-only profile: mTLS,
 // session/action binding, local policy, freshness, and replay are required,
 // while hardware attestation is deliberately outside this example.
 type Application struct {
 	Profile       production.SoftwareOnlyProfile
 	Nonces        NonceSource
-	Upstream      Upstream
+	Catalog       Catalog
 	ExpectedAgent string
+	Requester     func(production.AcceptedIdentity) discovery.Requester
 	AuditFailure  func(context.Context, error)
 }
 
@@ -101,7 +91,7 @@ func (a Application) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "authentication failed", http.StatusUnauthorized)
 		return
 	}
-	if a.Nonces == nil || a.Upstream == nil {
+	if a.Nonces == nil || a.Catalog == nil {
 		http.Error(w, "service unavailable", http.StatusServiceUnavailable)
 		return
 	}
@@ -136,23 +126,32 @@ func (a Application) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	profile.IdentityPolicy = ExpectedPolicy(query, a.ExpectedAgent)
-	if _, err := profile.Verify(r.Context(), production.SoftwareOnlyVerifyRequest{
+	accepted, err := profile.Verify(r.Context(), production.SoftwareOnlyVerifyRequest{
 		GrantJWT:          r.Header.Get(IdentityGrantHeader),
 		SessionBindingJWT: r.Header.Get(SessionBindingHeader),
 		ExpectedBinding:   expectedBinding,
-	}); err != nil {
+	})
+	if err != nil {
 		a.authenticationFailure(w, r, err)
 		return
 	}
 
-	result, err := a.Upstream.Discover(r.Context(), query)
+	requester := discovery.Requester{AgentID: accepted.Agent}
+	if a.Requester != nil {
+		requester = a.Requester(accepted)
+		// The resolver may add deployment-local attributes, but it cannot
+		// replace the Agent-ID authenticated by ASB.
+		requester.AgentID = accepted.Agent
+	}
+	result, err := a.Catalog.Discover(r.Context(), query, requester)
 	if err != nil {
-		http.Error(w, "upstream unavailable", http.StatusBadGateway)
+		http.Error(w, "discovery failed", http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(result.StatusCode)
-	_, _ = w.Write(result.Body)
+	if err := json.NewEncoder(w).Encode(result); err != nil {
+		return
+	}
 }
 
 func (a Application) authenticationFailure(w http.ResponseWriter, r *http.Request, err error) {
