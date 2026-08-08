@@ -22,6 +22,7 @@ var (
 	ErrInvalidAgentID    = errors.New("agtp discovery: invalid Agent-ID")
 	ErrInvalidCapability = errors.New("agtp discovery: invalid capability")
 	ErrInvalidName       = errors.New("agtp discovery: invalid ANS name")
+	ErrInvalidQuery      = errors.New("agtp discovery: invalid query")
 	ErrInvalidRecord     = errors.New("agtp discovery: invalid presence record")
 	ErrInvalidVersion    = errors.New("agtp discovery: invalid version")
 	ErrNameConflict      = errors.New("agtp discovery: ANS name is already bound")
@@ -139,7 +140,7 @@ func normalizedQuery(query Query) (Query, error) {
 		query.Limit = DefaultResultLimit
 	}
 	if query.Limit < 1 || query.Limit > MaxResultLimit {
-		return Query{}, ErrInvalidRecord
+		return Query{}, ErrInvalidQuery
 	}
 	return query, nil
 }

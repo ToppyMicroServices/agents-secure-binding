@@ -52,6 +52,17 @@ func TestPresenceDiscoverUpdateAndExpiry(t *testing.T) {
 	}
 }
 
+func TestPresenceRejectsInvalidQueryLimit(t *testing.T) {
+	store := NewPresenceStore()
+	_, err := store.Discover(context.Background(), Query{
+		Capability: "generate",
+		Limit:      MaxResultLimit + 1,
+	}, Requester{})
+	if err != ErrInvalidQuery {
+		t.Fatalf("invalid query error = %v", err)
+	}
+}
+
 func TestPresenceSelectiveVisibility(t *testing.T) {
 	store := NewPresenceStore()
 	records := []Record{

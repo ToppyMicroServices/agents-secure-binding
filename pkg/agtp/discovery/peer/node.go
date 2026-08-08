@@ -418,6 +418,11 @@ func (n *Node) handleNonce(writer http.ResponseWriter, request *http.Request) {
 		http.Error(writer, "authentication failed", http.StatusUnauthorized)
 		return
 	}
+	request.Body = http.MaxBytesReader(writer, request.Body, 0)
+	if _, err := io.Copy(io.Discard, request.Body); err != nil {
+		http.Error(writer, "request body not allowed", http.StatusRequestEntityTooLarge)
+		return
+	}
 	identity, _, err := requireTLSIdentity(request.TLS, n.config.Directory)
 	if err != nil {
 		n.metrics.AuthRejected.Add(1)

@@ -212,6 +212,21 @@ func TestPeerServiceRejectsUnknownTamperedReplayFakeAndHugeDelta(t *testing.T) {
 	if response.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("unknown peer status = %d", response.StatusCode)
 	}
+	authorizedClient := &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{
+		Certificates: []tls.Certificate{cluster.materials[0].tlsCert}, RootCAs: cluster.roots, ServerName: "localhost", MinVersion: tls.VersionTLS13,
+	}}}
+	request, err = http.NewRequest(http.MethodPost, "https://"+cluster.nodes[1].Info().Endpoint+NoncePath, strings.NewReader("not-empty"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, err = authorizedClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = response.Body.Close()
+	if response.StatusCode != http.StatusRequestEntityTooLarge {
+		t.Fatalf("nonce body status = %d", response.StatusCode)
+	}
 
 	fake := ReplicateRequest{Protocol: ProtocolVersion, Sender: discovery.NodeInfo{ID: testNodeID("ff"), Endpoint: cluster.nodes[0].Info().Endpoint}}
 	fakeBody, err := json.Marshal(fake)
