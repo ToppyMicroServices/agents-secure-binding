@@ -34,7 +34,8 @@ The verifier evaluates one ordered contract:
 
 The core implementation is centered on `pkg/clients`, `pkg/atls`, and
 `pkg/atls/identitypolicy`. `pkg/agtp` contains reference adapters for JWT/JWS,
-CWT/COSE, and gateway-route policy experiments.
+CWT/COSE, gateway-route policy experiments, and a narrow local discovery
+slice.
 
 ## Repository Map
 
@@ -61,6 +62,14 @@ CWT/COSE, and gateway-route policy experiments.
   compositions and Redis/Valkey replay adapter.
 - `examples/protected-change-consumer`: independent HTTPS application consumer
   and E2E negative tests; it is not Split-Knowledge.
+- `pkg/agtp/discovery`: local Go Presence, capability DISCOVER,
+  Kademlia-style peer lookup, and ANS subset; it is not a complete AGTP wire
+  implementation.
+- `pkg/agtp/discovery/peer`: bounded three-node loopback product profile with
+  persistent gossip, real-port DHT lookup, mTLS+ASB peer authentication,
+  limits, metrics, and audit.
+- `examples/agtp-discover-consumer`: software-only ASB gate for an exact local
+  `DISCOVER /population` query, with mTLS/session/replay negative tests.
 - `PUBLICATION_TODO.md`: publication blockers, inherited runtime risk
   classification, module identity choice, and CI/red-team checkpoint status.
 
@@ -248,6 +257,15 @@ go test -race -count=1 \
   ./pkg/production \
   ./examples/protected-change-consumer
 ```
+
+ASB-protected local AGTP discovery slice:
+
+```sh
+go test ./pkg/agtp/discovery/... ./examples/agtp-discover-consumer
+```
+
+See [`examples/agtp-discover-consumer/README.md`](examples/agtp-discover-consumer/README.md)
+for the local test boundary.
 
 ## Security Reporting
 
