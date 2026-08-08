@@ -101,6 +101,18 @@ func (r *RoutingTable) Closest(target string, count int) ([]NodeInfo, error) {
 	return peers, nil
 }
 
+// Peers returns a stable snapshot of every known peer.
+func (r *RoutingTable) Peers() []NodeInfo {
+	r.mu.Lock()
+	peers := make([]NodeInfo, 0)
+	for _, bucket := range r.buckets {
+		peers = append(peers, bucket...)
+	}
+	r.mu.Unlock()
+	sort.Slice(peers, func(i, j int) bool { return peers[i].ID < peers[j].ID })
+	return peers
+}
+
 // LocateRPC represents an authenticated FIND_NODE exchange.
 type LocateRPC func(context.Context, NodeInfo, string) ([]NodeInfo, error)
 

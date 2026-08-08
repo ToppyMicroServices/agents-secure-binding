@@ -65,6 +65,9 @@ slice.
 - `pkg/agtp/discovery`: local Go Presence, capability DISCOVER,
   Kademlia-style peer lookup, and ANS subset; it is not a complete AGTP wire
   implementation.
+- `pkg/agtp/discovery/peer`: bounded three-node loopback product profile with
+  persistent gossip, real-port DHT lookup, mTLS+ASB peer authentication,
+  limits, metrics, and audit.
 - `examples/agtp-discover-consumer`: software-only ASB gate for an exact local
   `DISCOVER /population` query, with mTLS/session/replay negative tests.
 - `PUBLICATION_TODO.md`: publication blockers, inherited runtime risk
@@ -258,7 +261,7 @@ go test -race -count=1 \
 ASB-protected local AGTP discovery slice:
 
 ```sh
-go test ./pkg/agtp/discovery ./examples/agtp-discover-consumer
+go test ./pkg/agtp/discovery/... ./examples/agtp-discover-consumer
 ```
 
 See [`examples/agtp-discover-consumer/README.md`](examples/agtp-discover-consumer/README.md)

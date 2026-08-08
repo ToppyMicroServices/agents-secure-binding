@@ -13,9 +13,9 @@ general AGTP deployment.
 | Function | Specification behavior represented | Go implementation in this repository | Not implemented here |
 | --- | --- | --- | --- |
 | DISCOVER | Query the live Presence population by capability and visibility | Exact canonical capability match, stable ordering, limit, AGTP-shaped result | Natural-language matching, trust/governance ranking, cross-scope query, signed AGTP response envelope |
-| Presence | Announce, update, expire, withdraw, and filter live records | Monotonic versions, finite leases, public/owner/explicit/invisible visibility, tombstones, digest/delta anti-entropy | AGTP wire messages, Agent Certificate verification, durable storage, automatic gossip transport |
-| DHT | Locate discovery peers with Kademlia-style XOR routing | 256 k-buckets, nearest-peer selection, iterative multi-peer `FIND_NODE` callback | On-wire RPC, S/Kademlia disjoint paths, peer authentication, persistence, background refresh |
-| ANS | Register and resolve name-to-Agent-ID bindings using Presence as live state | Register, refresh, resolve by name or Agent-ID, deregister with Presence withdrawal | Cross-authority federation, governance signatures, persistent registry, full Agent Manifest Documents |
+| Presence | Announce, update, expire, withdraw, and filter live records | Monotonic versions, finite leases, public/owner/explicit/invisible visibility, tombstones, digest/delta anti-entropy, persistent three-node gossip | General AGTP wire messages and individual Agent Certificate verification |
+| DHT | Locate discovery peers with Kademlia-style XOR routing | 256 k-buckets, nearest-peer selection, real-port authenticated multi-peer `FIND_NODE`, persistent bounded routing | S/Kademlia disjoint paths and cross-host routing |
+| ANS | Register and resolve name-to-Agent-ID bindings using Presence as live state | Register, refresh, resolve by name or Agent-ID, deregister with Presence withdrawal, persistent delta replication | Cross-authority federation, governance signatures, and full Agent Manifest Documents |
 
 ## Security boundary
 
@@ -25,8 +25,9 @@ visibility. A deployment-local resolver may add an owner domain, but cannot
 replace that Agent-ID.
 
 Presence and ANS mutation APIs are library APIs for an already-authorized local
-coordinator. `Merge` and DHT callbacks likewise assume authenticated peer
-transport. They must not be exposed directly to untrusted network clients.
+coordinator. The bounded peer service authenticates network `REPLICATE` and
+`FIND_NODE` actions with mTLS, certificate pinning, ASB action/session binding,
+durable replay state, and verifier-local peer policy.
 
 Withdrawal retention is receiver policy. A tombstone is retained for at least
 24 hours by default and at least through the known live-record lease. A record
@@ -40,4 +41,9 @@ survive process restart.
   and anti-entropy.
 - `pkg/agtp/discovery/dht.go`: XOR routing and iterative peer lookup.
 - `pkg/agtp/discovery/ans.go`: ANS bindings coupled to Presence.
+- `pkg/agtp/discovery/peer`: persistent three-port service, periodic gossip,
+  ASB peer authentication, limits, metrics, and audit.
 - `examples/agtp-discover-consumer`: ASB-authenticated HTTP entry point.
+
+The fixed product scope and release gate are documented in
+[`agtp-discovery-product-profile.md`](agtp-discovery-product-profile.md).

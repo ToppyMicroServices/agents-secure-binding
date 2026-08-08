@@ -15,6 +15,8 @@ const DefaultTombstoneRetention = 24 * time.Hour
 // PresenceOptions controls receiver-local expiry behavior.
 type PresenceOptions struct {
 	TombstoneRetention time.Duration
+	MaxRecords         int
+	MaxTombstones      int
 	Now                func() time.Time
 }
 
@@ -38,6 +40,8 @@ type PresenceStore struct {
 	records            map[string]Record
 	tombstones         map[string]Tombstone
 	tombstoneRetention time.Duration
+	maxRecords         int
+	maxTombstones      int
 	now                func() time.Time
 }
 
@@ -59,6 +63,8 @@ func NewPresenceStoreWithOptions(options PresenceOptions) *PresenceStore {
 		records:            make(map[string]Record),
 		tombstones:         make(map[string]Tombstone),
 		tombstoneRetention: options.TombstoneRetention,
+		maxRecords:         options.MaxRecords,
+		maxTombstones:      options.MaxTombstones,
 		now:                now,
 	}
 }
@@ -84,7 +90,12 @@ func (s *PresenceStore) Announce(record Record) (bool, error) {
 			s.tombstones[record.AgentID] = tombstone
 			return false, nil
 		}
+		if _, exists := s.records[record.AgentID]; !exists && s.maxRecords > 0 && len(s.records) >= s.maxRecords {
+			return false, ErrLimitExceeded
+		}
 		delete(s.tombstones, record.AgentID)
+	} else if _, exists := s.records[record.AgentID]; !exists && s.maxRecords > 0 && len(s.records) >= s.maxRecords {
+		return false, ErrLimitExceeded
 	}
 	if current, ok := s.records[record.AgentID]; ok && current.Version >= record.Version {
 		return false, nil
@@ -111,6 +122,9 @@ func (s *PresenceStore) Withdraw(agentID string, version uint64) (bool, error) {
 	}
 	if current, ok := s.tombstones[agentID]; ok && current.Version >= version {
 		return false, nil
+	}
+	if _, exists := s.tombstones[agentID]; !exists && s.maxTombstones > 0 && len(s.tombstones) >= s.maxTombstones {
+		return false, ErrLimitExceeded
 	}
 	tombstone := Tombstone{AgentID: agentID, Version: version}
 	if current, ok := s.records[agentID]; ok {
@@ -164,6 +178,9 @@ func (s *PresenceStore) mergeTombstone(tombstone Tombstone) (bool, error) {
 		if current.Version == tombstone.Version {
 			mergeSuppressionFloor(&tombstone, current)
 		}
+	}
+	if _, exists := s.tombstones[tombstone.AgentID]; !exists && s.maxTombstones > 0 && len(s.tombstones) >= s.maxTombstones {
+		return false, ErrLimitExceeded
 	}
 	s.installTombstoneLocked(tombstone, now)
 	delete(s.records, tombstone.AgentID)
@@ -227,6 +244,20 @@ func (s *PresenceStore) Digest() Digest {
 		digest.Tombstones[agentID] = tombstone.Version
 	}
 	return digest
+}
+
+// Snapshot returns a defensive copy of every live record and retained
+// tombstone for persistence or a trusted local backup.
+func (s *PresenceStore) Snapshot() Delta {
+	return s.Delta(Digest{})
+}
+
+// Counts reports bounded state after applying TTL and tombstone GC.
+func (s *PresenceStore) Counts() (records, tombstones int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.sweepLocked(s.now().UTC())
+	return len(s.records), len(s.tombstones)
 }
 
 // Delta returns states that are newer than the supplied peer digest.

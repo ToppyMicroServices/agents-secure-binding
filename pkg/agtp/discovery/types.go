@@ -25,6 +25,7 @@ var (
 	ErrInvalidRecord     = errors.New("agtp discovery: invalid presence record")
 	ErrInvalidVersion    = errors.New("agtp discovery: invalid version")
 	ErrNameConflict      = errors.New("agtp discovery: ANS name is already bound")
+	ErrLimitExceeded     = errors.New("agtp discovery: configured state limit exceeded")
 )
 
 // VisibilityMode controls which authenticated requester can see a record.

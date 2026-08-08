@@ -9,17 +9,17 @@ the same request to the accepted mTLS session. Only then does the application
 pass the authenticated Agent-ID into Presence visibility filtering.
 
 ```bash
-go test ./pkg/agtp/discovery ./examples/agtp-discover-consumer
+go test ./pkg/agtp/discovery/... ./examples/agtp-discover-consumer
 ```
 
 The tests cover the successful query plus capability substitution, wrong TLS
 session, replay, TTL update, selective visibility, partitioned withdrawal,
 three-node DHT lookup, and ANS registration and deletion.
 
-This is a software-only local profile. It uses ephemeral credentials and an
-in-memory replay cache. A real deployment still needs durable replay and
-Presence state, authenticated peer transport for DHT and anti-entropy, and
-configured Manager, Agent, client-CA, and server keys.
+The HTTP consumer test uses ephemeral credentials and an in-memory replay
+cache. The separate three-node peer profile uses durable replay and discovery
+state plus authenticated DHT and gossip transport. A deployment must still
+provide its own Manager, Agent, client-CA, and server keys.
 
 See [the implementation boundary](../../docs/agtp-discovery-local.md) for the
 supported subset and the features intentionally left out.

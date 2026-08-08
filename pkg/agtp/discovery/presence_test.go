@@ -159,3 +159,29 @@ func TestPresenceIndefiniteLeaseWithdrawalPropagates(t *testing.T) {
 		t.Fatalf("stale indefinite record = %v, %v", changed, err)
 	}
 }
+
+func TestPresenceConfiguredRecordLimitPreservesTombstone(t *testing.T) {
+	store := NewPresenceStoreWithOptions(PresenceOptions{
+		TombstoneRetention: time.Hour,
+		MaxRecords:         1,
+		MaxTombstones:      1,
+	})
+	if _, err := store.Announce(Record{AgentID: "agent-a", Capabilities: []string{"audit"}, Version: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Announce(Record{AgentID: "agent-b", Capabilities: []string{"audit"}, Version: 1}); err != ErrLimitExceeded {
+		t.Fatalf("limit error = %v", err)
+	}
+	if _, err := store.Withdraw("agent-a", 2); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Announce(Record{AgentID: "agent-b", Capabilities: []string{"audit"}, Version: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if changed, err := store.Announce(Record{AgentID: "agent-a", Capabilities: []string{"audit"}, Version: 1}); err != nil || changed {
+		t.Fatalf("stale full-store announce = %v, %v", changed, err)
+	}
+	if _, ok := store.Probe("agent-a"); ok {
+		t.Fatal("stale withdrawn record reappeared")
+	}
+}

@@ -4,6 +4,7 @@
 package discovery
 
 import (
+	"sort"
 	"sync"
 	"time"
 )
@@ -119,6 +120,53 @@ func (s *NameService) ResolveAgent(agentID string) (NameBinding, bool) {
 		return NameBinding{}, false
 	}
 	return cloneBinding(binding), true
+}
+
+// Bindings returns every currently live binding in stable name order.
+func (s *NameService) Bindings() []NameBinding {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	bindings := make([]NameBinding, 0, len(s.byName))
+	for _, binding := range s.byName {
+		if s.bindingIsLive(binding) {
+			bindings = append(bindings, cloneBinding(binding))
+		}
+	}
+	sort.Slice(bindings, func(i, j int) bool { return bindings[i].Name < bindings[j].Name })
+	return bindings
+}
+
+// Digest reports the current live version for every ANS name.
+func (s *NameService) Digest() map[string]uint64 {
+	bindings := s.Bindings()
+	digest := make(map[string]uint64, len(bindings))
+	for _, binding := range bindings {
+		digest[binding.Name] = binding.Version
+	}
+	return digest
+}
+
+// Delta returns live ANS bindings newer than the peer's digest.
+func (s *NameService) Delta(peer map[string]uint64) []NameBinding {
+	bindings := s.Bindings()
+	delta := make([]NameBinding, 0)
+	for _, binding := range bindings {
+		if peer[binding.Name] < binding.Version {
+			delta = append(delta, binding)
+		}
+	}
+	return delta
+}
+
+// Merge applies a trusted peer's live ANS bindings. Presence tombstones still
+// prevent an older binding from making a withdrawn agent live again.
+func (s *NameService) Merge(bindings []NameBinding) error {
+	for _, binding := range bindings {
+		if _, err := s.Register(binding); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // Deregister removes an ANS binding and creates the matching Presence
