@@ -214,7 +214,10 @@ func TestPeerServiceRejectsUnknownTamperedReplayFakeAndHugeDelta(t *testing.T) {
 	}
 
 	fake := ReplicateRequest{Protocol: ProtocolVersion, Sender: discovery.NodeInfo{ID: testNodeID("ff"), Endpoint: cluster.nodes[0].Info().Endpoint}}
-	fakeBody, _ := json.Marshal(fake)
+	fakeBody, err := json.Marshal(fake)
+	if err != nil {
+		t.Fatal(err)
+	}
 	var replicateResponse ReplicateResponse
 	if err := cluster.nodes[0].config.Client.do(context.Background(), cluster.nodes[1].Info(), ActionReplicate, fakeBody, &replicateResponse); err == nil || !strings.Contains(err.Error(), "status 400") {
 		t.Fatalf("fake Node-ID error = %v", err)
@@ -232,7 +235,10 @@ func TestPeerServiceRejectsUnknownTamperedReplayFakeAndHugeDelta(t *testing.T) {
 	client.Remotes[cluster.nodes[1].Info().ID] = remote
 
 	valid := ReplicateRequest{Protocol: ProtocolVersion, Sender: cluster.nodes[0].Info(), Digest: discovery.Digest{}, NameDigest: map[string]uint64{}}
-	validBody, _ := json.Marshal(valid)
+	validBody, err := json.Marshal(valid)
+	if err != nil {
+		t.Fatal(err)
+	}
 	tampered := append([]byte(nil), validBody...)
 	tampered[len(tampered)-1] = ' '
 	status := cluster.sendPrepared(0, 1, ActionReplicate, validBody, tampered, false)
@@ -251,7 +257,10 @@ func TestPeerServiceRejectsUnknownTamperedReplayFakeAndHugeDelta(t *testing.T) {
 			AgentID: fmt.Sprintf("oversized-%03d", i), Version: 1,
 		})
 	}
-	hugeBody, _ := json.Marshal(huge)
+	hugeBody, err := json.Marshal(huge)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := cluster.nodes[0].config.Client.do(context.Background(), cluster.nodes[1].Info(), ActionReplicate, hugeBody, &replicateResponse); err == nil || !strings.Contains(err.Error(), "status 413") {
 		t.Fatalf("oversized delta error = %v", err)
 	}
@@ -622,12 +631,15 @@ func issueTestCA(t *testing.T) (*x509.Certificate, ed25519.PrivateKey) {
 }
 
 func (c *testCluster) audience(index int) string { return "https://" + c.materials[index].id + "/peer" }
+
 func (c *testCluster) statePath(index int) string {
 	return filepath.Join(c.directory, fmt.Sprintf("node-%d", index), "state.json")
 }
+
 func (c *testCluster) replayPath(index int) string {
 	return filepath.Join(c.directory, fmt.Sprintf("node-%d", index), "replay.json")
 }
+
 func (c *testCluster) auditPath(index int) string {
 	return filepath.Join(c.directory, fmt.Sprintf("node-%d", index), "audit.jsonl")
 }

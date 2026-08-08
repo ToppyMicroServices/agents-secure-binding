@@ -187,14 +187,17 @@ func (n *Node) Start() error {
 
 // Stop stops gossip, drains HTTP requests, and commits a final snapshot.
 func (n *Node) Stop(ctx context.Context) error {
-	if n == nil || n.closed.Swap(true) {
+	if n == nil {
+		return nil
+	}
+	if ctx == nil {
+		return errors.New("agtp discovery peer: missing shutdown context")
+	}
+	if n.closed.Swap(true) {
 		return nil
 	}
 	n.ready.Store(false)
 	n.cancel()
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	var result error
 	if n.started.Load() {
 		if err := n.server.Shutdown(ctx); err != nil {
@@ -431,7 +434,9 @@ func (n *Node) handleNonce(writer http.ResponseWriter, request *http.Request) {
 		http.Error(writer, "authentication failed", http.StatusUnauthorized)
 		return
 	}
-	writeJSON(writer, nonceResponse{Nonce: nonce})
+	if err := writeJSON(writer, nonceResponse{Nonce: nonce}); err != nil {
+		return
+	}
 }
 
 type actionHandler func(http.ResponseWriter, *http.Request, PeerIdentity, []byte)
@@ -526,7 +531,9 @@ func (n *Node) handleReplicate(writer http.ResponseWriter, _ *http.Request, iden
 		http.Error(writer, "persistence failed", http.StatusInternalServerError)
 		return
 	}
-	writeJSON(writer, response)
+	if err := writeJSON(writer, response); err != nil {
+		return
+	}
 }
 
 func (n *Node) handleFindNode(writer http.ResponseWriter, _ *http.Request, identity PeerIdentity, body []byte) {
@@ -540,7 +547,9 @@ func (n *Node) handleFindNode(writer http.ResponseWriter, _ *http.Request, ident
 		http.Error(writer, "invalid request", http.StatusBadRequest)
 		return
 	}
-	writeJSON(writer, FindNodeResponse{Protocol: ProtocolVersion, Peers: peers})
+	if err := writeJSON(writer, FindNodeResponse{Protocol: ProtocolVersion, Peers: peers}); err != nil {
+		return
+	}
 }
 
 func (n *Node) handleHealth(writer http.ResponseWriter, request *http.Request) {
@@ -791,9 +800,9 @@ func decodeStrict(body []byte, target any) error {
 	return nil
 }
 
-func writeJSON(writer http.ResponseWriter, value any) {
+func writeJSON(writer http.ResponseWriter, value any) error {
 	writer.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(writer).Encode(value)
+	return json.NewEncoder(writer).Encode(value)
 }
 
 func min(left, right int) int {
