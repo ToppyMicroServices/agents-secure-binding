@@ -61,6 +61,8 @@ CWT/COSE, and gateway-route policy experiments.
   compositions and Redis/Valkey replay adapter.
 - `examples/protected-change-consumer`: independent HTTPS application consumer
   and E2E negative tests; it is not Split-Knowledge.
+- `examples/agtp-discover-consumer`: software-only ASB gate for an exact AGTP
+  `DISCOVER /population` query, with live-local and negative tests.
 - `PUBLICATION_TODO.md`: publication blockers, inherited runtime risk
   classification, module identity choice, and CI/red-team checkpoint status.
 
@@ -248,6 +250,15 @@ go test -race -count=1 \
   ./pkg/production \
   ./examples/protected-change-consumer
 ```
+
+ASB-protected AGTP population discovery:
+
+```sh
+go test ./examples/agtp-discover-consumer
+```
+
+See [`examples/agtp-discover-consumer/README.md`](examples/agtp-discover-consumer/README.md)
+for the optional live-local AGTP test.
 
 ## Security Reporting
 
