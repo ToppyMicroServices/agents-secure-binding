@@ -45,7 +45,8 @@ The integration test opens three real ports and verifies:
 8. Repeated stable gossip does not increase Presence, tombstone, or routing
    state.
 
-The longer bounded soak is opt-in:
+The bounded soak is opt-in locally and runs for 30 seconds in the CI
+`product-security` gate:
 
 ```bash
 ASB_DISCOVERY_SOAK=1 ASB_DISCOVERY_SOAK_DURATION=30s \
