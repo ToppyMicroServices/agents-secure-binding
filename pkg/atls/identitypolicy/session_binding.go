@@ -45,6 +45,7 @@ type SessionBindingOptions struct {
 // should construct it only after authenticating a deployment-specific grant
 // from a trusted manager or policy authority.
 type VerifiedGrant struct {
+	JWTID                  string
 	Issuer                 string
 	IssuerKey              string
 	Audience               string
@@ -64,6 +65,7 @@ type VerifiedGrant struct {
 // relationship between the verified grant, the signer key, and the session
 // binding fields.
 type VerifiedSessionBindingStatement struct {
+	JWTID     string
 	GrantHash string
 	Audience  string
 	SignerKey string
