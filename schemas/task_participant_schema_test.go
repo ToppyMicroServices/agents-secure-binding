@@ -165,7 +165,6 @@ func TestTaskParticipantSchemaAcceptsDurableDocuments(t *testing.T) {
 	}
 
 	for name, document := range documents {
-		document := document
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			if err := validateDocument(schema, document); err != nil {
@@ -243,7 +242,6 @@ func TestTaskParticipantSchemaRejectsPrivacyAndShapeViolations(t *testing.T) {
 	}
 
 	for name, document := range tests {
-		document := document
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			instance, err := jsonschema.UnmarshalJSON(strings.NewReader(document))

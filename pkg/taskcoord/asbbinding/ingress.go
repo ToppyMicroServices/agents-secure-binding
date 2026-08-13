@@ -533,7 +533,9 @@ func decodeIngressJSONBytes(raw []byte, target any) error {
 
 func writeIngressJSON(w http.ResponseWriter, status int, value any) {
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(value)
+	if err := json.NewEncoder(w).Encode(value); err != nil {
+		return
+	}
 }
 
 func writeIngressError(w http.ResponseWriter, status int, err error) {

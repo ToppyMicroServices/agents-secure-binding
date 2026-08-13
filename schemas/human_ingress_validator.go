@@ -18,7 +18,7 @@ var humanIngressSchema []byte
 var (
 	humanIngressOnce sync.Once
 	humanIngress     *jsonschema.Schema
-	humanIngressErr  error
+	errHumanIngress  error
 )
 
 // PrepareHumanIngressValidator compiles the embedded schema so a service can
@@ -30,17 +30,17 @@ func PrepareHumanIngressValidator() error {
 		const schemaURL = "https://toppymicroservices.github.io/agents-secure-binding/schemas/asb-taskcoord-human-ingress-v1.schema.json"
 		document, err := jsonschema.UnmarshalJSON(bytes.NewReader(humanIngressSchema))
 		if err != nil {
-			humanIngressErr = err
+			errHumanIngress = err
 			return
 		}
 		if err := compiler.AddResource(schemaURL, document); err != nil {
-			humanIngressErr = err
+			errHumanIngress = err
 			return
 		}
-		humanIngress, humanIngressErr = compiler.Compile(schemaURL)
+		humanIngress, errHumanIngress = compiler.Compile(schemaURL)
 	})
-	if humanIngressErr != nil {
-		return fmt.Errorf("compile Human ingress schema: %w", humanIngressErr)
+	if errHumanIngress != nil {
+		return fmt.Errorf("compile Human ingress schema: %w", errHumanIngress)
 	}
 	return nil
 }

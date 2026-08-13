@@ -11,6 +11,14 @@ import (
 	"github.com/thinksyncs/agents-secure-binding/pkg/taskcoord"
 )
 
+const (
+	testHumanBob       = "human:bob"
+	testTaskTwo        = "task:2"
+	testAssignmentTwo  = "assignment:2"
+	testChangedDetail  = "changed"
+	testEvidenceRefTwo = "urn:evidence:2"
+)
+
 func TestCanonicalDigestVectors(t *testing.T) {
 	t.Parallel()
 	dueAt := time.Date(2026, 8, 14, 9, 30, 15, 123456789, time.FixedZone("EEST", 3*60*60))
@@ -126,14 +134,14 @@ func TestCanonicalDigestBindsEveryTransitionField(t *testing.T) {
 		t.Fatal(err)
 	}
 	mutations := map[string]func(*TransitionRequest){
-		"participant": func(r *TransitionRequest) { r.ParticipantID = "human:bob" },
+		"participant": func(r *TransitionRequest) { r.ParticipantID = testHumanBob },
 		"event":       func(r *TransitionRequest) { r.EventID = "event:accept:2" },
-		"task":        func(r *TransitionRequest) { r.TaskID = "task:2" },
-		"assignment":  func(r *TransitionRequest) { r.AssignmentID = "assignment:2" },
+		"task":        func(r *TransitionRequest) { r.TaskID = testTaskTwo },
+		"assignment":  func(r *TransitionRequest) { r.AssignmentID = testAssignmentTwo },
 		"operation":   func(r *TransitionRequest) { r.Operation = taskcoord.OperationDecline },
 		"revision":    func(r *TransitionRequest) { r.ExpectedRevision = 2 },
-		"detail":      func(r *TransitionRequest) { r.Detail = "changed" },
-		"evidence":    func(r *TransitionRequest) { r.EvidenceRef = "urn:evidence:2" },
+		"detail":      func(r *TransitionRequest) { r.Detail = testChangedDetail },
+		"evidence":    func(r *TransitionRequest) { r.EvidenceRef = testEvidenceRefTwo },
 	}
 	for name, mutate := range mutations {
 		t.Run(name, func(t *testing.T) {
@@ -163,10 +171,10 @@ func TestCanonicalDigestBindsEveryOfferField(t *testing.T) {
 		t.Fatal(err)
 	}
 	mutations := map[string]func(*OfferRequest){
-		"participant": func(r *OfferRequest) { r.ParticipantID = "human:bob" },
+		"participant": func(r *OfferRequest) { r.ParticipantID = testHumanBob },
 		"event":       func(r *OfferRequest) { r.EventID = "event:offer:2" },
-		"task":        func(r *OfferRequest) { r.TaskID = "task:2" },
-		"assignment":  func(r *OfferRequest) { r.AssignmentID = "assignment:2" },
+		"task":        func(r *OfferRequest) { r.TaskID = testTaskTwo },
+		"assignment":  func(r *OfferRequest) { r.AssignmentID = testAssignmentTwo },
 		"target":      func(r *OfferRequest) { r.TargetParticipantID = "agent:target:2" },
 		"role":        func(r *OfferRequest) { r.Role = taskcoord.RoleReviewer },
 		"authority":   func(r *OfferRequest) { r.AuthorityDigest = repeatedDigest('b') },
@@ -207,13 +215,13 @@ func TestCanonicalDigestBindsEveryDelegationField(t *testing.T) {
 		t.Fatal(err)
 	}
 	mutations := map[string]func(*DelegationRequest){
-		"participant":       func(r *DelegationRequest) { r.ParticipantID = "human:bob" },
+		"participant":       func(r *DelegationRequest) { r.ParticipantID = testHumanBob },
 		"event":             func(r *DelegationRequest) { r.EventID = "event:delegate:2" },
 		"parent task":       func(r *DelegationRequest) { r.ParentTaskID = "task:parent:2" },
 		"parent assignment": func(r *DelegationRequest) { r.ParentAssignmentID = "assignment:parent:2" },
 		"revision":          func(r *DelegationRequest) { r.ExpectedRevision = 3 },
-		"detail":            func(r *DelegationRequest) { r.Detail = "changed" },
-		"evidence":          func(r *DelegationRequest) { r.EvidenceRef = "urn:evidence:2" },
+		"detail":            func(r *DelegationRequest) { r.Detail = testChangedDetail },
+		"evidence":          func(r *DelegationRequest) { r.EvidenceRef = testEvidenceRefTwo },
 		"decision":          func(r *DelegationRequest) { r.DecisionID = "decision:delegation:2" },
 		"child event":       func(r *DelegationRequest) { r.ChildEventID = "event:child:2" },
 		"child task":        func(r *DelegationRequest) { r.ChildTaskID = "task:child:2" },
@@ -255,11 +263,11 @@ func TestCanonicalDigestBindsEveryInteractionField(t *testing.T) {
 		t.Fatal(err)
 	}
 	mutations := map[string]func(*InteractionRequest){
-		"participant": func(r *InteractionRequest) { r.ParticipantID = "human:bob" },
+		"participant": func(r *InteractionRequest) { r.ParticipantID = testHumanBob },
 		"event":       func(r *InteractionRequest) { r.EventID = "event:correction:2" },
 		"interaction": func(r *InteractionRequest) { r.InteractionID = "interaction:2" },
-		"task":        func(r *InteractionRequest) { r.TaskID = "task:2" },
-		"assignment":  func(r *InteractionRequest) { r.AssignmentID = "assignment:2" },
+		"task":        func(r *InteractionRequest) { r.TaskID = testTaskTwo },
+		"assignment":  func(r *InteractionRequest) { r.AssignmentID = testAssignmentTwo },
 		"reply":       func(r *InteractionRequest) { r.InReplyTo = "event:question:2" },
 		"supersedes":  func(r *InteractionRequest) { r.Supersedes = "event:response:2" },
 		"finality":    func(r *InteractionRequest) { r.Finality = taskcoord.ResponseInterim },
@@ -267,7 +275,7 @@ func TestCanonicalDigestBindsEveryInteractionField(t *testing.T) {
 		"content digest": func(r *InteractionRequest) {
 			r.ContentDigest = repeatedDigest('b')
 		},
-		"evidence": func(r *InteractionRequest) { r.EvidenceRef = "urn:evidence:2" },
+		"evidence": func(r *InteractionRequest) { r.EvidenceRef = testEvidenceRefTwo },
 	}
 	for name, mutate := range mutations {
 		t.Run(name, func(t *testing.T) {
