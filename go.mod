@@ -29,6 +29,7 @@ require (
 	github.com/go-jose/go-jose/v4 v4.1.4
 	github.com/golang-jwt/jwt/v5 v5.3.0
 	github.com/google/gce-tcb-verifier v0.3.1
+	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3
 	github.com/veraison/corim v1.1.2
 	github.com/veraison/go-cose v1.3.0
 	github.com/veraison/swid v1.1.1-0.20230911094910-8ffdd07a22ca

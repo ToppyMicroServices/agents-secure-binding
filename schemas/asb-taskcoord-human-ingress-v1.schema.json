@@ -1,0 +1,221 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://toppymicroservices.github.io/agents-secure-binding/schemas/asb-taskcoord-human-ingress-v1.schema.json",
+  "title": "ASB TaskCoord Human Ingress v1",
+  "description": "Wire envelopes for the TLS-terminating Human operation ingress. Schema validation does not replace signature, TLS exporter, registry, state, or replay verification.",
+  "oneOf": [
+    { "$ref": "#/$defs/challengeTransition" },
+    { "$ref": "#/$defs/challengeInteraction" },
+    { "$ref": "#/$defs/executeTransition" },
+    { "$ref": "#/$defs/executeInteraction" }
+  ],
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "pattern": "^[^\u0000-\u001F\u007F]+$"
+    },
+    "reference": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2048,
+      "pattern": "^[^\u0000-\u001F\u007F]+$"
+    },
+    "digest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "detail": {
+      "type": "string",
+      "maxLength": 1024
+    },
+    "transition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "participant_id",
+        "event_id",
+        "task_id",
+        "assignment_id",
+        "operation",
+        "expected_revision"
+      ],
+      "properties": {
+        "participant_id": { "$ref": "#/$defs/identifier" },
+        "event_id": { "$ref": "#/$defs/identifier" },
+        "task_id": { "$ref": "#/$defs/identifier" },
+        "assignment_id": { "$ref": "#/$defs/identifier" },
+        "operation": {
+          "enum": ["ACCEPT", "DECLINE", "RELEASE", "REVOKE", "FULFILL"]
+        },
+        "expected_revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "detail": { "$ref": "#/$defs/detail" },
+        "evidence_ref": { "$ref": "#/$defs/reference" }
+      }
+    },
+    "interaction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "participant_id",
+        "event_id",
+        "interaction_id",
+        "task_id",
+        "assignment_id",
+        "kind"
+      ],
+      "properties": {
+        "participant_id": { "$ref": "#/$defs/identifier" },
+        "event_id": { "$ref": "#/$defs/identifier" },
+        "interaction_id": { "$ref": "#/$defs/identifier" },
+        "task_id": { "$ref": "#/$defs/identifier" },
+        "assignment_id": { "$ref": "#/$defs/identifier" },
+        "kind": {
+          "enum": ["QUESTION", "RESPONSE", "CORRECTION", "WITHDRAWAL"]
+        },
+        "in_reply_to": { "$ref": "#/$defs/identifier" },
+        "supersedes": { "$ref": "#/$defs/identifier" },
+        "finality": {
+          "enum": ["INTERIM", "FINAL"]
+        },
+        "content_ref": { "$ref": "#/$defs/reference" },
+        "content_digest": { "$ref": "#/$defs/digest" },
+        "evidence_ref": { "$ref": "#/$defs/reference" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "kind": { "const": "QUESTION" } }, "required": ["kind"] },
+          "then": {
+            "required": ["content_ref", "content_digest"],
+            "not": {
+              "anyOf": [
+                { "required": ["supersedes"] },
+                { "required": ["finality"] }
+              ]
+            }
+          }
+        },
+        {
+          "if": { "properties": { "kind": { "const": "RESPONSE" } }, "required": ["kind"] },
+          "then": {
+            "required": ["in_reply_to", "finality", "content_ref", "content_digest"],
+            "not": { "required": ["supersedes"] }
+          }
+        },
+        {
+          "if": { "properties": { "kind": { "const": "CORRECTION" } }, "required": ["kind"] },
+          "then": {
+            "required": ["in_reply_to", "supersedes", "finality", "content_ref", "content_digest"]
+          }
+        },
+        {
+          "if": { "properties": { "kind": { "const": "WITHDRAWAL" } }, "required": ["kind"] },
+          "then": {
+            "required": ["in_reply_to", "supersedes"],
+            "not": {
+              "anyOf": [
+                { "required": ["finality"] },
+                { "required": ["content_ref"] },
+                { "required": ["content_digest"] }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "challengeTransition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["operation", "request"],
+      "properties": {
+        "operation": { "const": "ASSIGNMENT_TRANSITION" },
+        "request": { "$ref": "#/$defs/transition" }
+      }
+    },
+    "challengeInteraction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["operation", "request"],
+      "properties": {
+        "operation": { "const": "INTERACTION_APPEND" },
+        "request": { "$ref": "#/$defs/interaction" }
+      }
+    },
+    "executeBase": {
+      "type": "object",
+      "required": [
+        "challenge_id",
+        "operation",
+        "request",
+        "grant_jwt",
+        "session_binding_jwt"
+      ],
+      "properties": {
+        "challenge_id": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "grant_jwt": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 262144
+        },
+        "session_binding_jwt": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 262144
+        }
+      }
+    },
+    "executeTransition": {
+      "allOf": [
+        { "$ref": "#/$defs/executeBase" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "challenge_id",
+            "operation",
+            "request",
+            "grant_jwt",
+            "session_binding_jwt"
+          ],
+          "properties": {
+            "challenge_id": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+            "operation": { "const": "ASSIGNMENT_TRANSITION" },
+            "request": { "$ref": "#/$defs/transition" },
+            "grant_jwt": { "type": "string", "minLength": 1, "maxLength": 262144 },
+            "session_binding_jwt": { "type": "string", "minLength": 1, "maxLength": 262144 }
+          }
+        }
+      ]
+    },
+    "executeInteraction": {
+      "allOf": [
+        { "$ref": "#/$defs/executeBase" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "challenge_id",
+            "operation",
+            "request",
+            "grant_jwt",
+            "session_binding_jwt"
+          ],
+          "properties": {
+            "challenge_id": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+            "operation": { "const": "INTERACTION_APPEND" },
+            "request": { "$ref": "#/$defs/interaction" },
+            "grant_jwt": { "type": "string", "minLength": 1, "maxLength": 262144 },
+            "session_binding_jwt": { "type": "string", "minLength": 1, "maxLength": 262144 }
+          }
+        }
+      ]
+    }
+  }
+}

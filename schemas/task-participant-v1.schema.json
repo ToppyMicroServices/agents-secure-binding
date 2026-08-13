@@ -1,0 +1,343 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/thinksyncs/agents-secure-binding/schemas/task-participant-v1.schema.json",
+  "title": "ASB Task Participant v1 documents",
+  "oneOf": [
+    { "$ref": "#/$defs/participant" },
+    { "$ref": "#/$defs/assignment" },
+    { "$ref": "#/$defs/dependency" },
+    { "$ref": "#/$defs/delegation" },
+    { "$ref": "#/$defs/interactionEvent" },
+    { "$ref": "#/$defs/agentDiscoveryRecord" },
+    { "$ref": "#/$defs/humanMatchConsent" },
+    { "$ref": "#/$defs/humanMatchConsentRevocation" },
+    { "$ref": "#/$defs/humanReachabilityGrant" },
+    { "$ref": "#/$defs/humanReachabilityRevocation" }
+  ],
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "pattern": "^[^\u0000-\u001F\u007F]+$"
+    },
+    "reference": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2048,
+      "pattern": "^[^\u0000-\u001F\u007F]+$"
+    },
+    "digest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "httpsReference": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2048,
+      "format": "uri",
+      "pattern": "^https://[^/?#@]+(?:/[^?#]*)?$"
+    },
+    "operation": {
+      "enum": ["OFFER", "ACCEPT", "DECLINE", "RELEASE", "REVOKE", "FULFILL", "DELEGATE"]
+    },
+    "assignmentStatus": {
+      "enum": ["OFFERED", "ACCEPTED", "DECLINED", "RELEASED", "REVOKED", "FULFILLED"]
+    },
+    "interactionKind": {
+      "enum": ["QUESTION", "RESPONSE", "CORRECTION", "WITHDRAWAL"]
+    },
+    "responseFinality": {
+      "enum": ["INTERIM", "FINAL"]
+    },
+    "reachabilityChannel": {
+      "enum": ["EMAIL", "SNS", "TEL"]
+    },
+    "reason": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code"],
+      "properties": {
+        "code": { "$ref": "#/$defs/operation" },
+        "detail": { "type": "string", "maxLength": 1024 }
+      }
+    },
+    "transition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "event_id", "assignment_id", "task_id", "revision", "kind", "to",
+        "reason", "at", "actor_id", "participant_id", "authorization_id", "proof_id"
+      ],
+      "properties": {
+        "event_id": { "$ref": "#/$defs/identifier" },
+        "assignment_id": { "$ref": "#/$defs/identifier" },
+        "task_id": { "$ref": "#/$defs/identifier" },
+        "revision": { "type": "integer", "minimum": 1 },
+        "kind": { "$ref": "#/$defs/operation" },
+        "from": { "$ref": "#/$defs/assignmentStatus" },
+        "to": { "$ref": "#/$defs/assignmentStatus" },
+        "reason": { "$ref": "#/$defs/reason" },
+        "at": { "type": "string", "format": "date-time" },
+        "actor_id": { "$ref": "#/$defs/identifier" },
+        "participant_id": { "$ref": "#/$defs/identifier" },
+        "authorization_id": { "$ref": "#/$defs/identifier" },
+        "proof_id": { "$ref": "#/$defs/identifier" },
+        "evidence_ref": { "$ref": "#/$defs/reference" }
+      }
+    },
+    "participant": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "participant_id", "kind", "identity_ref", "status", "may_delegate", "registered_at"],
+      "properties": {
+        "schema": { "const": "asb.task-participant/v1" },
+        "participant_id": { "$ref": "#/$defs/identifier" },
+        "kind": { "enum": ["HUMAN", "AGENT", "AUTOMATED_SERVICE"] },
+        "identity_ref": { "$ref": "#/$defs/reference" },
+        "status": { "enum": ["ACTIVE", "SUSPENDED", "REVOKED"] },
+        "may_delegate": { "type": "boolean" },
+        "registered_at": { "type": "string", "format": "date-time" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "kind": { "const": "HUMAN" } }, "required": ["kind"] },
+          "then": {
+            "properties": {
+              "identity_ref": { "not": { "pattern": "^(?:https?|mailto|tel|sms|sips?):" } }
+            }
+          }
+        }
+      ]
+    },
+    "assignment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema", "assignment_id", "task_id", "participant_id", "offered_by_participant_id",
+        "role", "authority_digest", "revision", "status", "last_transition", "created_at", "updated_at"
+      ],
+      "properties": {
+        "schema": { "const": "asb.task-assignment/v1" },
+        "assignment_id": { "$ref": "#/$defs/identifier" },
+        "task_id": { "$ref": "#/$defs/identifier" },
+        "participant_id": { "$ref": "#/$defs/identifier" },
+        "offered_by_participant_id": { "$ref": "#/$defs/identifier" },
+        "role": { "enum": ["OWNER", "ASSIGNEE", "REVIEWER"] },
+        "authority_digest": { "$ref": "#/$defs/digest" },
+        "parent_assignment_id": { "$ref": "#/$defs/identifier" },
+        "revision": { "type": "integer", "minimum": 1 },
+        "status": { "$ref": "#/$defs/assignmentStatus" },
+        "accepted_at": { "type": "string", "format": "date-time" },
+        "due_at": { "type": "string", "format": "date-time" },
+        "last_transition": { "$ref": "#/$defs/transition" },
+        "created_at": { "type": "string", "format": "date-time" },
+        "updated_at": { "type": "string", "format": "date-time" }
+      }
+    },
+    "dependency": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "dependency_id", "from_task_id", "to_task_id", "group_id", "mode", "active", "satisfied"],
+      "properties": {
+        "schema": { "const": "asb.task-dependency/v1" },
+        "dependency_id": { "$ref": "#/$defs/identifier" },
+        "from_task_id": { "$ref": "#/$defs/identifier" },
+        "to_task_id": { "$ref": "#/$defs/identifier" },
+        "group_id": { "$ref": "#/$defs/identifier" },
+        "mode": { "enum": ["ALL", "ANY", "QUORUM"] },
+        "quorum": { "type": "integer", "minimum": 1 },
+        "active": { "type": "boolean" },
+        "satisfied": { "type": "boolean" }
+      }
+    },
+    "delegation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "event_id", "decision_id", "parent_assignment_id", "child_assignment_id",
+        "parent_task_id", "child_task_id", "from_participant_id", "to_participant_id",
+        "parent_authority_digest", "child_authority_digest", "policy_ref", "evidence_ref", "at"
+      ],
+      "properties": {
+        "event_id": { "$ref": "#/$defs/identifier" },
+        "decision_id": { "$ref": "#/$defs/identifier" },
+        "parent_assignment_id": { "$ref": "#/$defs/identifier" },
+        "child_assignment_id": { "$ref": "#/$defs/identifier" },
+        "parent_task_id": { "$ref": "#/$defs/identifier" },
+        "child_task_id": { "$ref": "#/$defs/identifier" },
+        "from_participant_id": { "$ref": "#/$defs/identifier" },
+        "to_participant_id": { "$ref": "#/$defs/identifier" },
+        "parent_authority_digest": { "$ref": "#/$defs/digest" },
+        "child_authority_digest": { "$ref": "#/$defs/digest" },
+        "policy_ref": { "$ref": "#/$defs/reference" },
+        "evidence_ref": { "$ref": "#/$defs/reference" },
+        "at": { "type": "string", "format": "date-time" }
+      }
+    },
+    "interactionEvent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema", "event_id", "interaction_id", "task_id", "assignment_id",
+        "kind", "at", "actor_id", "participant_id", "authorization_id", "proof_id"
+      ],
+      "properties": {
+        "schema": { "const": "asb.task-interaction-event/v1" },
+        "event_id": { "$ref": "#/$defs/identifier" },
+        "interaction_id": { "$ref": "#/$defs/identifier" },
+        "task_id": { "$ref": "#/$defs/identifier" },
+        "assignment_id": { "$ref": "#/$defs/identifier" },
+        "kind": { "$ref": "#/$defs/interactionKind" },
+        "in_reply_to": { "$ref": "#/$defs/identifier" },
+        "supersedes": { "$ref": "#/$defs/identifier" },
+        "finality": { "$ref": "#/$defs/responseFinality" },
+        "content_ref": { "$ref": "#/$defs/reference" },
+        "content_digest": { "$ref": "#/$defs/digest" },
+        "at": { "type": "string", "format": "date-time" },
+        "actor_id": { "$ref": "#/$defs/identifier" },
+        "participant_id": { "$ref": "#/$defs/identifier" },
+        "authorization_id": { "$ref": "#/$defs/identifier" },
+        "proof_id": { "$ref": "#/$defs/identifier" },
+        "evidence_ref": { "$ref": "#/$defs/reference" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "kind": { "const": "QUESTION" } }, "required": ["kind"] },
+          "then": {
+            "required": ["content_ref", "content_digest"],
+            "not": { "anyOf": [
+              { "required": ["supersedes"] },
+              { "required": ["finality"] }
+            ] }
+          }
+        },
+        {
+          "if": { "properties": { "kind": { "const": "RESPONSE" } }, "required": ["kind"] },
+          "then": {
+            "required": ["in_reply_to", "finality", "content_ref", "content_digest"],
+            "not": { "required": ["supersedes"] }
+          }
+        },
+        {
+          "if": { "properties": { "kind": { "const": "CORRECTION" } }, "required": ["kind"] },
+          "then": {
+            "required": ["in_reply_to", "supersedes", "finality", "content_ref", "content_digest"]
+          }
+        },
+        {
+          "if": { "properties": { "kind": { "const": "WITHDRAWAL" } }, "required": ["kind"] },
+          "then": {
+            "required": ["in_reply_to", "supersedes"],
+            "not": { "anyOf": [
+              { "required": ["finality"] },
+              { "required": ["content_ref"] },
+              { "required": ["content_digest"] }
+            ] }
+          }
+        }
+      ]
+    },
+    "agentDiscoveryRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema", "record_id", "participant_id", "kind", "capability",
+        "invocation_ref", "published_at", "expires_at"
+      ],
+      "properties": {
+        "schema": { "const": "asb.agent-discovery-record/v1" },
+        "record_id": { "$ref": "#/$defs/identifier" },
+        "participant_id": { "$ref": "#/$defs/identifier" },
+        "kind": { "const": "AGENT" },
+        "capability": { "$ref": "#/$defs/identifier" },
+        "invocation_ref": { "$ref": "#/$defs/httpsReference" },
+        "published_at": { "type": "string", "format": "date-time" },
+        "expires_at": { "type": "string", "format": "date-time" }
+      }
+    },
+    "humanMatchConsent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema", "consent_id", "human_participant_id", "candidate_id",
+        "requester_participant_id", "purpose", "capability", "channel",
+        "contact_request_ref", "actor_id", "authorization_id", "proof_id",
+        "granted_at", "expires_at"
+      ],
+      "properties": {
+        "schema": { "const": "asb.human-match-consent/v1" },
+        "consent_id": { "$ref": "#/$defs/identifier" },
+        "human_participant_id": { "$ref": "#/$defs/identifier" },
+        "candidate_id": { "$ref": "#/$defs/identifier" },
+        "requester_participant_id": { "$ref": "#/$defs/identifier" },
+        "purpose": { "$ref": "#/$defs/identifier" },
+        "capability": { "$ref": "#/$defs/identifier" },
+        "channel": { "$ref": "#/$defs/reachabilityChannel" },
+        "contact_request_ref": { "$ref": "#/$defs/httpsReference" },
+        "actor_id": { "$ref": "#/$defs/identifier" },
+        "authorization_id": { "$ref": "#/$defs/identifier" },
+        "proof_id": { "$ref": "#/$defs/identifier" },
+        "granted_at": { "type": "string", "format": "date-time" },
+        "expires_at": { "type": "string", "format": "date-time" }
+      }
+    },
+    "humanMatchConsentRevocation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema", "event_id", "consent_id", "human_participant_id",
+        "actor_id", "authorization_id", "proof_id", "at"
+      ],
+      "properties": {
+        "schema": { "const": "asb.human-match-consent-revocation/v1" },
+        "event_id": { "$ref": "#/$defs/identifier" },
+        "consent_id": { "$ref": "#/$defs/identifier" },
+        "human_participant_id": { "$ref": "#/$defs/identifier" },
+        "actor_id": { "$ref": "#/$defs/identifier" },
+        "authorization_id": { "$ref": "#/$defs/identifier" },
+        "proof_id": { "$ref": "#/$defs/identifier" },
+        "at": { "type": "string", "format": "date-time" }
+      }
+    },
+    "humanReachabilityGrant": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema", "grant_id", "candidate_id", "requester_participant_id",
+        "purpose", "capability", "channel", "relay_session_ref", "issued_at",
+        "expires_at"
+      ],
+      "properties": {
+        "schema": { "const": "asb.human-reachability-grant/v1" },
+        "grant_id": { "$ref": "#/$defs/identifier" },
+        "candidate_id": { "$ref": "#/$defs/identifier" },
+        "requester_participant_id": { "$ref": "#/$defs/identifier" },
+        "purpose": { "$ref": "#/$defs/identifier" },
+        "capability": { "$ref": "#/$defs/identifier" },
+        "channel": { "$ref": "#/$defs/reachabilityChannel" },
+        "relay_session_ref": { "$ref": "#/$defs/httpsReference" },
+        "issued_at": { "type": "string", "format": "date-time" },
+        "expires_at": { "type": "string", "format": "date-time" }
+      }
+    },
+    "humanReachabilityRevocation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema", "event_id", "grant_id", "participant_id", "actor_id",
+        "authorization_id", "proof_id", "at"
+      ],
+      "properties": {
+        "schema": { "const": "asb.human-reachability-revocation/v1" },
+        "event_id": { "$ref": "#/$defs/identifier" },
+        "grant_id": { "$ref": "#/$defs/identifier" },
+        "participant_id": { "$ref": "#/$defs/identifier" },
+        "actor_id": { "$ref": "#/$defs/identifier" },
+        "authorization_id": { "$ref": "#/$defs/identifier" },
+        "proof_id": { "$ref": "#/$defs/identifier" },
+        "at": { "type": "string", "format": "date-time" }
+      }
+    }
+  }
+}

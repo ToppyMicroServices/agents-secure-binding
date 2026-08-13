@@ -275,6 +275,7 @@ func VerifyIdentityGrantJWT(tokenString string, opts JWTVerifyOptions) (identity
 	}
 
 	return identitypolicy.VerifiedGrant{
+		JWTID:                  claims.ID,
 		Issuer:                 claims.Issuer,
 		IssuerKey:              signerKey,
 		Audience:               opts.ExpectedAudience,
@@ -304,6 +305,7 @@ func VerifySessionBindingJWT(tokenString string, opts JWTVerifyOptions) (identit
 	}
 
 	return identitypolicy.VerifiedSessionBindingStatement{
+		JWTID:     claims.ID,
 		GrantHash: claims.GrantHash,
 		Audience:  opts.ExpectedAudience,
 		SignerKey: signerKey,

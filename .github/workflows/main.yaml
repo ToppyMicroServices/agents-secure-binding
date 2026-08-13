@@ -39,7 +39,7 @@ jobs:
     needs: lint
     strategy:
       matrix:
-        module: [agent, cli, cmd, internal, pkg, manager]
+        module: [agent, cli, cmd, internal, pkg, schemas, manager]
         include:
           - module: manager
             sudo: true
