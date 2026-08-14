@@ -392,7 +392,9 @@ Schema検証はingressで再利用できるが、現在はCI/test gateとして�
 - relay-only reachability grantとrevocation;
 - strict JSON decoder;
 - Draft 2020-12 Schema validatorを含むCI test;
-- concurrency-safe in-memory stub。
+- concurrency-safe in-memory stub;
+- immutable bindingとstate-preserving projectionによる別packageのAction lifecycleとの
+  [統合](task-action-lifecycle-v1-spec-ja.md)。
 
 ## 16. 未実装・out of scope
 
@@ -406,8 +408,7 @@ Schema検証はingressで再利用できるが、現在はCI/test gateとして�
 - 暗号化contact vault;
 - Email/SNS/TEL relayとdelivery;
 - rate limit、abuse monitoring、retention/deletion運用;
-- Participant status変更のaudit log;
-- 別packageのAction lifecycleとの統合。
+- Participant status変更のaudit log。
 
 ## 17. 最小適合チェックリスト
 

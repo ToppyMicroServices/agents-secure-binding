@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/thinksyncs/agents-secure-binding/schemas/task-action-binding-v1.schema.json",
+  "title": "ASB Task to Action binding v1 durable documents",
+  "oneOf": [
+    { "$ref": "#/$defs/binding" },
+    { "$ref": "#/$defs/dependencyWait" }
+  ],
+  "$defs": {
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "task_id", "assignment_id", "action_id", "created_at"],
+      "properties": {
+        "schema": { "const": "asb.task-action-binding/v1" },
+        "task_id": { "$ref": "#/$defs/id" },
+        "assignment_id": { "$ref": "#/$defs/id" },
+        "action_id": { "$ref": "#/$defs/id" },
+        "created_at": { "$ref": "#/$defs/timestamp" }
+      }
+    },
+    "dependencyWait": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema", "task_id", "action_id", "action_revision",
+        "dependency_ids", "dependency_set_digest", "created_at"
+      ],
+      "properties": {
+        "schema": { "const": "asb.task-action-dependency-wait/v1" },
+        "task_id": { "$ref": "#/$defs/id" },
+        "action_id": { "$ref": "#/$defs/id" },
+        "action_revision": { "type": "integer", "minimum": 1 },
+        "dependency_ids": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/id" }
+        },
+        "dependency_set_digest": { "$ref": "#/$defs/digest" },
+        "created_at": { "$ref": "#/$defs/timestamp" }
+      }
+    }
+  }
+}

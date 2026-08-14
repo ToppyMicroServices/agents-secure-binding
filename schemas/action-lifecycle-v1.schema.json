@@ -1,0 +1,175 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/thinksyncs/agents-secure-binding/schemas/action-lifecycle-v1.schema.json",
+  "title": "ASB Action Lifecycle v1 durable snapshot",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema", "action_id", "action_digest", "owner_id", "revision", "state",
+    "reason", "lease_generation", "recovery_policy", "recovery_attempts",
+    "last_transition", "created_at", "updated_at"
+  ],
+  "properties": {
+    "schema": { "const": "asb.action-lifecycle/v1" },
+    "action_id": { "$ref": "#/$defs/id" },
+    "action_digest": { "$ref": "#/$defs/digest" },
+    "owner_id": { "$ref": "#/$defs/id" },
+    "revision": { "type": "integer", "minimum": 1 },
+    "state": { "$ref": "#/$defs/state" },
+    "reason": { "$ref": "#/$defs/reason" },
+    "lease_generation": { "type": "integer", "minimum": 0 },
+    "executor_lease": { "$ref": "#/$defs/executorLease" },
+    "resume_condition": { "$ref": "#/$defs/resumeCondition" },
+    "checkpoint": { "$ref": "#/$defs/checkpoint" },
+    "recovery_policy": { "$ref": "#/$defs/recoveryPolicy" },
+    "recovery_attempts": { "type": "integer", "minimum": 0 },
+    "reconciliation": { "$ref": "#/$defs/reconciliation" },
+    "outcome": { "$ref": "#/$defs/outcome" },
+    "last_transition": { "$ref": "#/$defs/transition" },
+    "created_at": { "$ref": "#/$defs/timestamp" },
+    "updated_at": { "$ref": "#/$defs/timestamp" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "state": { "const": "WAITING" } } },
+      "then": { "required": ["resume_condition"] }
+    },
+    {
+      "if": { "properties": { "state": { "enum": ["RUNNING", "CANCELING"] } } },
+      "then": { "required": ["executor_lease"] }
+    },
+    {
+      "if": { "properties": { "state": { "const": "INDETERMINATE" } } },
+      "then": { "required": ["reconciliation"] }
+    },
+    {
+      "if": { "properties": { "state": { "enum": ["SUCCEEDED", "FAILED", "CANCELED"] } } },
+      "then": { "required": ["outcome"] }
+    }
+  ],
+  "$defs": {
+    "id": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "reference": { "type": "string", "minLength": 1, "maxLength": 2048 },
+    "digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "timestamp": { "type": "string", "format": "date-time" },
+    "state": {
+      "type": "string",
+      "enum": [
+        "ACCEPTED", "RUNNING", "WAITING", "PAUSED", "ORPHANED", "CANCELING",
+        "INDETERMINATE", "SUCCEEDED", "FAILED", "CANCELED"
+      ]
+    },
+    "reason": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code"],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "ACCEPTED", "STARTED", "SCHEDULED", "TARGET_BUSY", "SERVER_UNAVAILABLE",
+            "DEPENDENCY_PENDING", "OPERATOR_PAUSE", "RESUMED", "CANCEL_REQUESTED",
+            "COMPLETED", "EXECUTION_FAILED", "CANCELED", "OUTCOME_UNKNOWN", "TIMEOUT",
+            "TRANSPORT_TIMEOUT", "LEASE_EXPIRED", "TAKEN_OVER",
+            "RECONCILIATION_REQUIRED", "RECONCILIATION_RESOLVED", "LEASE_RENEWED"
+          ]
+        },
+        "detail": { "type": "string", "maxLength": 1024 }
+      }
+    },
+    "executorLease": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["lease_id", "executor_id", "generation", "issued_at", "expires_at"],
+      "properties": {
+        "lease_id": { "$ref": "#/$defs/id" },
+        "executor_id": { "$ref": "#/$defs/id" },
+        "generation": { "type": "integer", "minimum": 1 },
+        "issued_at": { "$ref": "#/$defs/timestamp" },
+        "expires_at": { "$ref": "#/$defs/timestamp" }
+      }
+    },
+    "resumeCondition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type"],
+      "properties": {
+        "type": { "enum": ["TIME", "TARGET_AVAILABLE", "SERVER_AVAILABLE", "DEPENDENCY", "MANUAL", "SIGNAL"] },
+        "not_before": { "$ref": "#/$defs/timestamp" },
+        "probe_after": { "$ref": "#/$defs/timestamp" },
+        "target": { "$ref": "#/$defs/reference" },
+        "dependency_action_id": { "$ref": "#/$defs/id" },
+        "signal": { "$ref": "#/$defs/id" }
+      }
+    },
+    "checkpoint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sequence", "payload_digest", "storage_ref", "created_at"],
+      "properties": {
+        "sequence": { "type": "integer", "minimum": 1 },
+        "payload_digest": { "$ref": "#/$defs/digest" },
+        "storage_ref": { "$ref": "#/$defs/reference" },
+        "created_at": { "$ref": "#/$defs/timestamp" }
+      }
+    },
+    "recoveryPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "max_attempts"],
+      "properties": {
+        "mode": { "enum": ["RESUME_FROM_CHECKPOINT", "RESTART_IDEMPOTENT", "RECONCILE_BEFORE_RESUME", "MANUAL"] },
+        "max_attempts": { "type": "integer", "minimum": 1 },
+        "idempotency_key": { "type": "string", "minLength": 1, "maxLength": 2048 }
+      }
+    },
+    "reconciliation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "attempt", "updated_at"],
+      "properties": {
+        "status": { "enum": ["REQUIRED", "RUNNING", "RESOLVED"] },
+        "attempt": { "type": "integer", "minimum": 0 },
+        "evidence_ref": { "$ref": "#/$defs/reference" },
+        "result": { "enum": ["NO_EFFECT", "SUCCEEDED", "FAILED", "CANCELED"] },
+        "updated_at": { "$ref": "#/$defs/timestamp" }
+      }
+    },
+    "outcome": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "recorded_at"],
+      "properties": {
+        "status": { "enum": ["SUCCEEDED", "FAILED", "CANCELED"] },
+        "result_ref": { "$ref": "#/$defs/reference" },
+        "error_code": { "$ref": "#/$defs/id" },
+        "recorded_at": { "$ref": "#/$defs/timestamp" }
+      }
+    },
+    "transition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["event_id", "kind", "from", "to", "reason", "at"],
+      "properties": {
+        "event_id": { "$ref": "#/$defs/id" },
+        "kind": {
+          "enum": [
+            "ACCEPT", "START", "WAIT", "PAUSE", "RESUME", "REQUEST_CANCEL", "COMPLETE",
+            "FAIL", "CONFIRM_CANCELED", "MARK_INDETERMINATE", "LEASE_EXPIRED", "TAKEOVER",
+            "BEGIN_RECONCILIATION", "RESOLVE_RECONCILIATION", "RENEW_LEASE"
+          ]
+        },
+        "from": { "oneOf": [{ "$ref": "#/$defs/state" }, { "const": "" }] },
+        "to": { "$ref": "#/$defs/state" },
+        "reason": { "$ref": "#/$defs/reason" },
+        "at": { "$ref": "#/$defs/timestamp" },
+        "actor_id": { "$ref": "#/$defs/id" },
+        "authorization_id": { "$ref": "#/$defs/id" },
+        "proof_id": { "$ref": "#/$defs/id" },
+        "evidence_ref": { "$ref": "#/$defs/reference" },
+        "lease_generation": { "type": "integer", "minimum": 0 }
+      }
+    }
+  }
+}
+

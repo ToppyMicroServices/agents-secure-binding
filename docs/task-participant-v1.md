@@ -240,7 +240,9 @@ Implemented:
 - strict bounded JSON decoders;
 - typed dependency groups and conservative deadlock detection; and
 - Draft 2020-12 JSON Schema for durable documents, with meta-schema, format,
-  positive fixture, and privacy-negative validation in CI.
+  positive fixture, and privacy-negative validation in CI; and
+- integration with the separate Action lifecycle through the immutable and
+  state-preserving [Task–Action binding profile](task-action-lifecycle-v1.md).
 
 Not implemented:
 
@@ -253,5 +255,4 @@ Not implemented:
 - Participant status-transition audit (`MemoryStore` registry records are
   immutable);
 - cryptographic verification of projected ASB operations, consent, approvals,
-  or revocations; or
-- integration with the separate Action lifecycle package.
+  or revocations.
