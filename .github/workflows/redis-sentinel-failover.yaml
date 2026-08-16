@@ -45,7 +45,7 @@ jobs:
       - name: Install Go
         uses: actions/setup-go@v5
         with:
-          go-version: 1.26.x
+          go-version: 1.26.6
           cache-dependency-path: go.sum
 
       - name: Run real Redis Sentinel failover gate

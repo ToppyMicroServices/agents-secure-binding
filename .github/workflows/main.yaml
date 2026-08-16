@@ -21,7 +21,7 @@ jobs:
       - name: Install Go
         uses: actions/setup-go@v5
         with:
-          go-version: 1.26.x
+          go-version: 1.26.6
 
       - name: Verify module downloads
         run: go mod verify
@@ -51,7 +51,7 @@ jobs:
       - name: Install Go
         uses: actions/setup-go@v5
         with:
-          go-version: 1.26.x
+          go-version: 1.26.6
 
       - name: Create coverage directory
         run: mkdir -p coverage
@@ -103,7 +103,7 @@ jobs:
       - name: Install Go
         uses: actions/setup-go@v5
         with:
-          go-version: 1.26.x
+          go-version: 1.26.6
           cache-dependency-path: go.sum
 
       - name: Verify modules
