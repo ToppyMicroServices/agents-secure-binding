@@ -6,8 +6,8 @@ import (
 	"context"
 	"log/slog"
 
-	"github.com/thinksyncs/agents-secure-binding/agent/cvms"
-	"github.com/thinksyncs/agents-secure-binding/agent/log"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/agent/cvms"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/agent/log"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 

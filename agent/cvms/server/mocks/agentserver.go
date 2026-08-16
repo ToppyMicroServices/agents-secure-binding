@@ -8,8 +8,8 @@
 package mocks
 
 import (
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/agent"
 	mock "github.com/stretchr/testify/mock"
-	"github.com/thinksyncs/agents-secure-binding/agent"
 )
 
 // NewAgentServer creates a new instance of AgentServer. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.

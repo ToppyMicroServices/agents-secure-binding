@@ -10,11 +10,11 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/attestation/azure"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/attestation/gcp"
 	"github.com/google/gce-tcb-verifier/proto/endorsement"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/thinksyncs/agents-secure-binding/pkg/attestation/azure"
-	"github.com/thinksyncs/agents-secure-binding/pkg/attestation/gcp"
 	"google.golang.org/protobuf/proto"
 )
 

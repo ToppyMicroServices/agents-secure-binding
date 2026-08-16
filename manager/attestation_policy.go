@@ -11,9 +11,9 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/thinksyncs/agents-secure-binding/manager/qemu"
-	"github.com/thinksyncs/agents-secure-binding/pkg/attestation/generator"
-	"github.com/thinksyncs/agents-secure-binding/pkg/attestation/igvmmeasure"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/manager/qemu"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/attestation/generator"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/attestation/igvmmeasure"
 )
 
 func (ms *managerService) FetchAttestationPolicy(_ context.Context, computationId string) ([]byte, error) {

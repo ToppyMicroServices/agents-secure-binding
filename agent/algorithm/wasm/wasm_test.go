@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/thinksyncs/agents-secure-binding/agent/algorithm/logging"
-	"github.com/thinksyncs/agents-secure-binding/agent/events/mocks"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/agent/algorithm/logging"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/agent/events/mocks"
 )
 
 const testWasm = "test.wasm"

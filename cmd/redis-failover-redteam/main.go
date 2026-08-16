@@ -20,7 +20,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/thinksyncs/agents-secure-binding/pkg/production"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/production"
 )
 
 const (

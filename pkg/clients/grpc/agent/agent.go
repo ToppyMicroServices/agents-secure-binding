@@ -5,11 +5,11 @@ package agent
 import (
 	"context"
 
-	"github.com/thinksyncs/agents-secure-binding/agent"
-	"github.com/thinksyncs/agents-secure-binding/internal/errors"
-	"github.com/thinksyncs/agents-secure-binding/pkg/clients"
-	"github.com/thinksyncs/agents-secure-binding/pkg/clients/grpc"
-	"github.com/thinksyncs/agents-secure-binding/pkg/tls"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/agent"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/internal/errors"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/clients"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/clients/grpc"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/tls"
 	grpchealth "google.golang.org/grpc/health/grpc_health_v1"
 )
 

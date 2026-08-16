@@ -18,7 +18,7 @@ This package consolidates CoRIM generation logic for SNP and TDX platforms, prov
 ### Basic Example
 
 ```go
-import "github.com/thinksyncs/agents-secure-binding/pkg/attestation/generator"
+import "github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/attestation/generator"
 
 // Generate SNP CoRIM with defaults
 opts := generator.Options{

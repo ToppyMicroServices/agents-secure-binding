@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/thinksyncs/agents-secure-binding/agent/statemachine"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/agent/statemachine"
 )
 
 type MockState int

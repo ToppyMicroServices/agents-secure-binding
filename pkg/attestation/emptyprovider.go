@@ -6,7 +6,7 @@ package attestation
 import (
 	"fmt"
 
-	asb "github.com/thinksyncs/agents-secure-binding"
+	asb "github.com/ToppyMicroServices/agents-secure-binding/v2"
 )
 
 var _ Provider = (*EmptyProvider)(nil)

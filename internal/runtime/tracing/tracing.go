@@ -8,7 +8,7 @@ import (
 	"errors"
 	"net/url"
 
-	"github.com/thinksyncs/agents-secure-binding/internal/runtime/netguard"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/internal/runtime/netguard"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace"

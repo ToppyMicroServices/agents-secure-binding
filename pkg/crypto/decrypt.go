@@ -11,7 +11,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 
-	"github.com/thinksyncs/agents-secure-binding/internal/errors"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/internal/errors"
 	"golang.org/x/crypto/hkdf"
 )
 

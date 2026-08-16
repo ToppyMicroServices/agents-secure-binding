@@ -10,7 +10,7 @@ import (
 	"errors"
 	"fmt"
 
-	eaattestation "github.com/thinksyncs/agents-secure-binding/pkg/atls/eaattestation"
+	eaattestation "github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/atls/eaattestation"
 )
 
 var (

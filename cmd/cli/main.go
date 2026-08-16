@@ -9,13 +9,13 @@ import (
 	"path"
 	"syscall"
 
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/cli"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/attestation/cmdconfig"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/clients"
 	"github.com/caarlos0/env/v11"
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
-	"github.com/thinksyncs/agents-secure-binding/cli"
-	"github.com/thinksyncs/agents-secure-binding/pkg/attestation/cmdconfig"
-	"github.com/thinksyncs/agents-secure-binding/pkg/clients"
 	cmd "github.com/virtee/sev-snp-measure-go/sevsnpmeasure/cmd"
 )
 

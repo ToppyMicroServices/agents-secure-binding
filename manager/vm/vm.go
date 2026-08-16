@@ -5,7 +5,7 @@ package vm
 import (
 	"log/slog"
 
-	pkgmanager "github.com/thinksyncs/agents-secure-binding/pkg/manager"
+	pkgmanager "github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/manager"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 

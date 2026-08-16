@@ -12,9 +12,9 @@ import (
 	"testing"
 	"time"
 
+	aa "github.com/ToppyMicroServices/agents-secure-binding/v2/internal/proto/attestation-agent"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	aa "github.com/thinksyncs/agents-secure-binding/internal/proto/attestation-agent"
 	"google.golang.org/grpc"
 )
 

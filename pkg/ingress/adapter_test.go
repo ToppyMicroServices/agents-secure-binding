@@ -5,8 +5,8 @@ package ingress
 import (
 	"testing"
 
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/agent"
 	"github.com/stretchr/testify/assert"
-	"github.com/thinksyncs/agents-secure-binding/agent"
 )
 
 // TestAgentConfigToProxyConfig tests conversion from AgentConfig to ProxyConfig.

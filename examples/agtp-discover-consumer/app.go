@@ -16,9 +16,9 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/thinksyncs/agents-secure-binding/pkg/agtp/discovery"
-	"github.com/thinksyncs/agents-secure-binding/pkg/atls/identitypolicy"
-	"github.com/thinksyncs/agents-secure-binding/pkg/production"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/agtp/discovery"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/atls/identitypolicy"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/production"
 )
 
 const (

@@ -7,13 +7,13 @@ import (
 	"crypto/sha3"
 	"testing"
 
+	eaattestation "github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/atls/eaattestation"
+	asbattestation "github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/attestation"
 	"github.com/google/go-sev-guest/proto/sevsnp"
 	"github.com/google/go-tpm-tools/proto/attest"
 	tpmpb "github.com/google/go-tpm-tools/proto/tpm"
 	"github.com/google/go-tpm/legacy/tpm2"
 	"github.com/google/go-tpm/tpmutil"
-	eaattestation "github.com/thinksyncs/agents-secure-binding/pkg/atls/eaattestation"
-	asbattestation "github.com/thinksyncs/agents-secure-binding/pkg/attestation"
 	"google.golang.org/protobuf/proto"
 )
 

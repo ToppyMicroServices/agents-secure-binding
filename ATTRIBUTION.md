@@ -14,6 +14,6 @@ replaced with local scratch implementations. Retained notices remain where the
 file still contains derived Cocos code.
 
 Agents Secure Binding profile documentation, tests, vectors, and profile helper
-code are maintained by ToppyMicroServices OU unless a file states otherwise.
+code are maintained by ToppyMicroServices OÜ unless a file states otherwise.
 Cocos is implementation provenance and experience; it is not the normative
 scope of the Session-Bound Agent Identity Profile.

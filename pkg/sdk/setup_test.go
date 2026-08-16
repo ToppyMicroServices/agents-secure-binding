@@ -10,9 +10,9 @@ import (
 	"os"
 	"testing"
 
-	"github.com/thinksyncs/agents-secure-binding/agent"
-	agentgrpc "github.com/thinksyncs/agents-secure-binding/agent/api/grpc"
-	"github.com/thinksyncs/agents-secure-binding/agent/mocks"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/agent"
+	agentgrpc "github.com/ToppyMicroServices/agents-secure-binding/v2/agent/api/grpc"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/agent/mocks"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/test/bufconn"
 )

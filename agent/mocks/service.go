@@ -10,9 +10,9 @@ package mocks
 import (
 	"context"
 
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/agent"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/attestation"
 	mock "github.com/stretchr/testify/mock"
-	"github.com/thinksyncs/agents-secure-binding/agent"
-	"github.com/thinksyncs/agents-secure-binding/pkg/attestation"
 )
 
 // NewService creates a new instance of Service. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.

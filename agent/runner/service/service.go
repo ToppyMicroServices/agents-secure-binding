@@ -10,13 +10,13 @@ import (
 	"path/filepath"
 	"sync"
 
-	"github.com/thinksyncs/agents-secure-binding/agent/algorithm"
-	"github.com/thinksyncs/agents-secure-binding/agent/algorithm/binary"
-	"github.com/thinksyncs/agents-secure-binding/agent/algorithm/docker"
-	"github.com/thinksyncs/agents-secure-binding/agent/algorithm/python"
-	"github.com/thinksyncs/agents-secure-binding/agent/algorithm/wasm"
-	"github.com/thinksyncs/agents-secure-binding/agent/events"
-	pb "github.com/thinksyncs/agents-secure-binding/agent/runner"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/agent/algorithm"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/agent/algorithm/binary"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/agent/algorithm/docker"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/agent/algorithm/python"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/agent/algorithm/wasm"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/agent/events"
+	pb "github.com/ToppyMicroServices/agents-secure-binding/v2/agent/runner"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 

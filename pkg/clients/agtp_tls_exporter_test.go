@@ -7,8 +7,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/thinksyncs/agents-secure-binding/pkg/atls"
-	"github.com/thinksyncs/agents-secure-binding/pkg/atls/identitypolicy"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/atls"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/atls/identitypolicy"
 )
 
 func TestAGTPObservedIdentityRejectsMockedTLSExporterWithRealState(t *testing.T) {

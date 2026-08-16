@@ -9,9 +9,9 @@ import (
 	"os"
 	"strings"
 
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/attestation/vtpm"
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
-	"github.com/thinksyncs/agents-secure-binding/pkg/attestation/vtpm"
 )
 
 const (

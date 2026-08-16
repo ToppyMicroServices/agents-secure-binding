@@ -8,9 +8,9 @@ import (
 	"os"
 	"strings"
 
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/agent"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/attestation/vtpm"
 	"github.com/fatih/color"
-	"github.com/thinksyncs/agents-secure-binding/agent"
-	"github.com/thinksyncs/agents-secure-binding/pkg/attestation/vtpm"
 	"golang.org/x/term"
 )
 

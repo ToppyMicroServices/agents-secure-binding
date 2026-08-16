@@ -21,7 +21,7 @@ The `corimgen` package generates CoRIM attestation policies for confidential com
 ### Basic Usage (Unsigned)
 
 ```go
-import "github.com/thinksyncs/agents-secure-binding/pkg/attestation/corimgen"
+import "github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/attestation/corimgen"
 
 opts := corimgen.Options{
     Platform:    "snp",
@@ -41,7 +41,7 @@ import (
     "crypto/elliptic"
     "crypto/rand"
     
-    "github.com/thinksyncs/agents-secure-binding/pkg/attestation/corimgen"
+    "github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/attestation/corimgen"
 )
 
 // Generate signing key

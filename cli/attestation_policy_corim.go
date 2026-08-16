@@ -7,11 +7,11 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/attestation/azure"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/attestation/corimgen"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/attestation/gcp"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/attestation/generator"
 	"github.com/spf13/cobra"
-	"github.com/thinksyncs/agents-secure-binding/pkg/attestation/azure"
-	"github.com/thinksyncs/agents-secure-binding/pkg/attestation/corimgen"
-	"github.com/thinksyncs/agents-secure-binding/pkg/attestation/gcp"
-	"github.com/thinksyncs/agents-secure-binding/pkg/attestation/generator"
 )
 
 func (cli *CLI) NewCreateCoRIMCmd() *cobra.Command {

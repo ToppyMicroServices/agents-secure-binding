@@ -10,8 +10,8 @@ package mocks
 import (
 	"context"
 
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/internal/proto/attestation-agent"
 	mock "github.com/stretchr/testify/mock"
-	"github.com/thinksyncs/agents-secure-binding/internal/proto/attestation-agent"
 	"google.golang.org/grpc"
 )
 

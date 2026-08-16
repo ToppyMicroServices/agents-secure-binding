@@ -8,9 +8,9 @@ import (
 	"encoding/json"
 	"os"
 
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/agent"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/internal"
 	"github.com/spf13/cobra"
-	"github.com/thinksyncs/agents-secure-binding/agent"
-	"github.com/thinksyncs/agents-secure-binding/internal"
 	"golang.org/x/crypto/sha3"
 )
 

@@ -6,7 +6,7 @@ package agtp
 import (
 	"time"
 
-	"github.com/thinksyncs/agents-secure-binding/pkg/agtp/gatewayroute"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/agtp/gatewayroute"
 	"github.com/veraison/go-cose"
 )
 

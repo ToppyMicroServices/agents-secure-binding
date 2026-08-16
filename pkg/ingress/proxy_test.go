@@ -23,9 +23,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/atls/mocks"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/thinksyncs/agents-secure-binding/pkg/atls/mocks"
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
 )

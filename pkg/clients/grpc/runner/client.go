@@ -6,7 +6,7 @@ import (
 	"context"
 	"time"
 
-	pb "github.com/thinksyncs/agents-secure-binding/agent/runner"
+	pb "github.com/ToppyMicroServices/agents-secure-binding/v2/agent/runner"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/protobuf/types/known/emptypb"

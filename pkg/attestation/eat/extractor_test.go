@@ -8,9 +8,9 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/attestation"
 	"github.com/google/go-sev-guest/abi"
 	"github.com/stretchr/testify/assert"
-	"github.com/thinksyncs/agents-secure-binding/pkg/attestation"
 )
 
 func TestExtractSNPClaims(t *testing.T) {

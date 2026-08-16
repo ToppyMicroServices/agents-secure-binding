@@ -10,9 +10,9 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/sdk/mocks"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
-	"github.com/thinksyncs/agents-secure-binding/pkg/sdk/mocks"
 )
 
 const compResult = "Test computation result"

@@ -8,12 +8,12 @@ import (
 	"os"
 	"testing"
 
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/internal/errors"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/attestation/vtpm"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/sdk/mocks"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
-	"github.com/thinksyncs/agents-secure-binding/internal/errors"
-	"github.com/thinksyncs/agents-secure-binding/pkg/attestation/vtpm"
-	"github.com/thinksyncs/agents-secure-binding/pkg/sdk/mocks"
 )
 
 func TestNewAttestationCmd(t *testing.T) {

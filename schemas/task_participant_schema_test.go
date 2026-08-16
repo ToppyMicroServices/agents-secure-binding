@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/taskcoord"
 	"github.com/santhosh-tekuri/jsonschema/v6"
-	"github.com/thinksyncs/agents-secure-binding/pkg/taskcoord"
 )
 
 const taskParticipantSchemaFile = "task-participant-v1.schema.json"

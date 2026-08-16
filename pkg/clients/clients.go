@@ -11,9 +11,9 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/thinksyncs/agents-secure-binding/pkg/atls"
-	"github.com/thinksyncs/agents-secure-binding/pkg/atls/ea"
-	"github.com/thinksyncs/agents-secure-binding/pkg/atls/identitypolicy"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/atls"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/atls/ea"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/atls/identitypolicy"
 )
 
 var (

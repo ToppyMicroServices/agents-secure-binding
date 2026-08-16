@@ -5,8 +5,8 @@ package agent
 import (
 	"context"
 
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/attestation"
 	"github.com/stretchr/testify/mock"
-	"github.com/thinksyncs/agents-secure-binding/pkg/attestation"
 )
 
 type MockAttestationClient struct {
