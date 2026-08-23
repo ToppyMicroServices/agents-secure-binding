@@ -60,6 +60,10 @@ slice.
   acceptance implementation.
 - `pkg/production`: supported attested and software-only fail-closed
   compositions and Redis/Valkey replay adapter.
+- `pkg/authorityquorum`: generic k-of-n authority approval binding with an
+  atomic consume contract and a reduced, secret-free projection.
+- `docs/authority-quorum-binding-v1.md`: authority-slot, policy rotation,
+  revocation, session interruption, and external release boundary.
 - `examples/protected-change-consumer`: independent HTTPS application consumer
   and E2E negative tests; it is not Split-Knowledge.
 - `pkg/agtp/discovery`: local Go Presence, capability DISCOVER,
@@ -189,6 +193,19 @@ resource outside the authenticated grant, a wrong audience, a binding borrowed
 from another TLS session, and reuse of an accepted binding. It is a
 software-only localhost demonstration; it does not perform hardware attestation
 or define an application-protocol message format.
+
+## Authority Quorum Demonstration
+
+Run the local 2-of-3 authority approval demonstration:
+
+```sh
+go run ./examples/authority-quorum-demo
+```
+
+The demo creates two trusted post-verification projections and exercises the
+immutable approval and atomic quorum-consume core. It does not run the ASB/JWT
+adapter, hold secret shares, or claim an exactly-once external release. See
+[`docs/authority-quorum-binding-v1.md`](docs/authority-quorum-binding-v1.md).
 
 ## Formal Assurance
 

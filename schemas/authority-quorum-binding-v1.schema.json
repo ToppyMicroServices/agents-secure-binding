@@ -1,0 +1,110 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://toppymicroservices.github.io/agents-secure-binding/schemas/authority-quorum-binding-v1.schema.json",
+  "title": "ASB Authority Quorum Binding v1",
+  "oneOf": [
+    { "$ref": "#/$defs/policy" },
+    { "$ref": "#/$defs/approval" },
+    { "$ref": "#/$defs/revocation" },
+    { "$ref": "#/$defs/quorum" }
+  ],
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "pattern": "^[^\\s\\p{Cc}]+$"
+    },
+    "audience": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512,
+      "pattern": "^[^\\s\\p{Cc}]+$"
+    },
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema", "policy_id", "policy_digest", "authority_map_digest", "audience", "epoch",
+        "threshold", "authority_ids", "valid_from", "expires_at"
+      ],
+      "properties": {
+        "schema": { "const": "asb.authority-quorum-policy/v1" },
+        "policy_id": { "$ref": "#/$defs/identifier" },
+        "policy_digest": { "$ref": "#/$defs/digest" },
+        "authority_map_digest": { "$ref": "#/$defs/digest" },
+        "audience": { "$ref": "#/$defs/audience" },
+        "epoch": { "type": "integer", "minimum": 1 },
+        "threshold": { "type": "integer", "minimum": 1, "maximum": 128 },
+        "authority_ids": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 128,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/identifier" }
+        },
+        "valid_from": { "type": "string", "format": "date-time" },
+        "expires_at": { "type": "string", "format": "date-time" }
+      }
+    },
+    "approval": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema", "approval_id", "decision_id", "policy_digest",
+        "operation_digest", "audience", "authority_id", "authorization_tag",
+        "principal_tag", "credential_tag", "approved_at", "expires_at"
+      ],
+      "properties": {
+        "schema": { "const": "asb.authority-approval/v1" },
+        "approval_id": { "$ref": "#/$defs/identifier" },
+        "decision_id": { "$ref": "#/$defs/identifier" },
+        "policy_digest": { "$ref": "#/$defs/digest" },
+        "operation_digest": { "$ref": "#/$defs/digest" },
+        "audience": { "$ref": "#/$defs/audience" },
+        "authority_id": { "$ref": "#/$defs/identifier" },
+        "principal_tag": { "$ref": "#/$defs/digest" },
+        "credential_tag": { "$ref": "#/$defs/digest" },
+        "authorization_tag": { "$ref": "#/$defs/digest" },
+        "approved_at": { "type": "string", "format": "date-time" },
+        "expires_at": { "type": "string", "format": "date-time" }
+      }
+    },
+    "revocation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "revocation_id", "decision_id", "revoked_at"],
+      "properties": {
+        "schema": { "const": "asb.authority-decision-revocation/v1" },
+        "revocation_id": { "$ref": "#/$defs/identifier" },
+        "decision_id": { "$ref": "#/$defs/identifier" },
+        "revoked_at": { "type": "string", "format": "date-time" }
+      }
+    },
+    "quorum": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema", "consumption_id", "decision_id", "policy_digest",
+        "operation_digest", "audience", "threshold", "approval_count",
+        "consumed_at", "accepted_until"
+      ],
+      "properties": {
+        "schema": { "const": "asb.verified-authority-quorum/v1" },
+        "consumption_id": { "$ref": "#/$defs/identifier" },
+        "decision_id": { "$ref": "#/$defs/identifier" },
+        "policy_digest": { "$ref": "#/$defs/digest" },
+        "operation_digest": { "$ref": "#/$defs/digest" },
+        "audience": { "$ref": "#/$defs/audience" },
+        "threshold": { "type": "integer", "minimum": 1, "maximum": 128 },
+        "approval_count": { "type": "integer", "minimum": 1, "maximum": 128 },
+        "consumed_at": { "type": "string", "format": "date-time" },
+        "accepted_until": { "type": "string", "format": "date-time" }
+      }
+    }
+  }
+}
