@@ -55,48 +55,13 @@ func (s RedisSetNXStore) SetNX(ctx context.Context, key string, ttl time.Duratio
 	if key == "" || ttl <= 0 {
 		return false, ErrInvalidRedisConfig
 	}
-	operationCtx, cancel := context.WithTimeout(ctx, s.OperationTimeout)
-	defer cancel()
-	ctx = operationCtx
-
-	dialer := s.Dialer
-	if dialer == nil {
-		dialer = &net.Dialer{Timeout: 5 * time.Second, KeepAlive: 30 * time.Second}
-	}
-	raw, err := dialer.DialContext(ctx, "tcp", s.Address)
+	session, err := s.openSession(ctx)
 	if err != nil {
-		return false, fmt.Errorf("redis replay dial: %w", err)
+		return false, err
 	}
-	defer raw.Close()
-
-	tlsConfig := s.TLSConfig.Clone()
-	conn := tls.Client(raw, tlsConfig)
-	if err := conn.HandshakeContext(ctx); err != nil {
-		return false, fmt.Errorf("redis replay TLS: %w", err)
-	}
-	if deadline, ok := ctx.Deadline(); ok {
-		if err := conn.SetDeadline(deadline); err != nil {
-			return false, fmt.Errorf("redis replay deadline: %w", err)
-		}
-	}
-	reader := bufio.NewReader(conn)
-
-	if s.Password != "" {
-		auth := []string{"AUTH", s.Password}
-		if s.Username != "" {
-			auth = []string{"AUTH", s.Username, s.Password}
-		}
-		if err := writeRESPArray(conn, auth); err != nil {
-			return false, fmt.Errorf("redis replay AUTH: %w", err)
-		}
-		kind, value, err := readRESP(reader)
-		if err != nil {
-			return false, fmt.Errorf("redis replay AUTH: %w", err)
-		}
-		if kind != '+' || value != "OK" {
-			return false, fmt.Errorf("%w: AUTH rejected", ErrRedisProtocol)
-		}
-	}
+	defer session.close()
+	conn := session.conn
+	reader := session.reader
 
 	digest := sha256.Sum256([]byte(key))
 	redisKey := s.KeyPrefix + hex.EncodeToString(digest[:])
@@ -114,39 +79,8 @@ func (s RedisSetNXStore) SetNX(ctx context.Context, key string, ttl time.Duratio
 	}
 	switch {
 	case kind == '+' && value == "OK":
-		if s.RequiredReplicaAcknowledgements == 0 {
-			return true, nil
-		}
-		waitMillis := s.ReplicationTimeout.Milliseconds()
-		if waitMillis < 1 {
-			waitMillis = 1
-		}
-		wait := []string{
-			"WAIT",
-			strconv.Itoa(s.RequiredReplicaAcknowledgements),
-			strconv.FormatInt(waitMillis, 10),
-		}
-		if err := writeRESPArray(conn, wait); err != nil {
-			return false, fmt.Errorf("redis replay WAIT: %w", err)
-		}
-		kind, value, err = readRESP(reader)
-		if err != nil {
-			return false, fmt.Errorf("redis replay WAIT: %w", err)
-		}
-		if kind != ':' {
-			return false, fmt.Errorf("%w: unexpected WAIT response", ErrRedisProtocol)
-		}
-		acknowledged, err := strconv.Atoi(value)
-		if err != nil || acknowledged < 0 {
-			return false, fmt.Errorf("%w: invalid WAIT acknowledgement", ErrRedisProtocol)
-		}
-		if acknowledged < s.RequiredReplicaAcknowledgements {
-			return false, fmt.Errorf(
-				"%w: got %d, require %d",
-				ErrRedisReplication,
-				acknowledged,
-				s.RequiredReplicaAcknowledgements,
-			)
+		if err := s.waitForReplication(conn, reader); err != nil {
+			return false, fmt.Errorf("redis replay: %w", err)
 		}
 		return true, nil
 	case kind == '$' && value == "":
@@ -154,6 +88,111 @@ func (s RedisSetNXStore) SetNX(ctx context.Context, key string, ttl time.Duratio
 	default:
 		return false, fmt.Errorf("%w: unexpected SET response", ErrRedisProtocol)
 	}
+}
+
+func (s RedisSetNXStore) waitForReplication(conn io.Writer, reader *bufio.Reader) error {
+	if s.RequiredReplicaAcknowledgements == 0 {
+		return nil
+	}
+	waitMillis := s.ReplicationTimeout.Milliseconds()
+	if waitMillis < 1 {
+		waitMillis = 1
+	}
+	wait := []string{
+		"WAIT",
+		strconv.Itoa(s.RequiredReplicaAcknowledgements),
+		strconv.FormatInt(waitMillis, 10),
+	}
+	if err := writeRESPArray(conn, wait); err != nil {
+		return fmt.Errorf("redis WAIT: %w", err)
+	}
+	kind, value, err := readRESP(reader)
+	if err != nil {
+		return fmt.Errorf("redis WAIT: %w", err)
+	}
+	if kind != ':' {
+		return fmt.Errorf("%w: unexpected WAIT response", ErrRedisProtocol)
+	}
+	acknowledged, err := strconv.Atoi(value)
+	if err != nil || acknowledged < 0 {
+		return fmt.Errorf("%w: invalid WAIT acknowledgement", ErrRedisProtocol)
+	}
+	if acknowledged < s.RequiredReplicaAcknowledgements {
+		return fmt.Errorf(
+			"%w: got %d, require %d",
+			ErrRedisReplication,
+			acknowledged,
+			s.RequiredReplicaAcknowledgements,
+		)
+	}
+	return nil
+}
+
+type redisSession struct {
+	conn   net.Conn
+	reader *bufio.Reader
+	cancel context.CancelFunc
+}
+
+func (s *redisSession) close() {
+	if s == nil {
+		return
+	}
+	if s.conn != nil {
+		_ = s.conn.Close()
+	}
+	if s.cancel != nil {
+		s.cancel()
+	}
+}
+
+// openSession returns an authenticated TLS session whose deadline is bounded
+// by both the caller and OperationTimeout. Authentication material is sent only
+// after the TLS 1.3 handshake succeeds.
+func (s RedisSetNXStore) openSession(ctx context.Context) (*redisSession, error) {
+	operationCtx, cancel := context.WithTimeout(ctx, s.OperationTimeout)
+	dialer := s.Dialer
+	if dialer == nil {
+		dialer = &net.Dialer{Timeout: 5 * time.Second, KeepAlive: 30 * time.Second}
+	}
+	raw, err := dialer.DialContext(operationCtx, "tcp", s.Address)
+	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("redis dial: %w", err)
+	}
+	fail := func(err error) (*redisSession, error) {
+		_ = raw.Close()
+		cancel()
+		return nil, err
+	}
+
+	conn := tls.Client(raw, s.TLSConfig.Clone())
+	if err := conn.HandshakeContext(operationCtx); err != nil {
+		return fail(fmt.Errorf("redis TLS: %w", err))
+	}
+	if deadline, ok := operationCtx.Deadline(); ok {
+		if err := conn.SetDeadline(deadline); err != nil {
+			return fail(fmt.Errorf("redis deadline: %w", err))
+		}
+	}
+	reader := bufio.NewReader(conn)
+	if s.Password != "" {
+		auth := []string{"AUTH", s.Password}
+		if s.Username != "" {
+			auth = []string{"AUTH", s.Username, s.Password}
+		}
+		if err := writeRESPArray(conn, auth); err != nil {
+			return fail(fmt.Errorf("redis AUTH: %w", err))
+		}
+		kind, value, err := readRESP(reader)
+		if err != nil {
+			return fail(fmt.Errorf("redis AUTH: %w", err))
+		}
+		if kind != '+' || value != "OK" {
+			return fail(fmt.Errorf("%w: AUTH rejected", ErrRedisProtocol))
+		}
+	}
+	return &redisSession{conn: conn, reader: reader, cancel: cancel}, nil
 }
 
 func (s RedisSetNXStore) validate() error {
@@ -202,6 +241,13 @@ func writeRESPArray(w io.Writer, values []string) error {
 }
 
 func readRESP(r *bufio.Reader) (byte, string, error) {
+	return readRESPBounded(r, 4096)
+}
+
+func readRESPBounded(r *bufio.Reader, maxBulkBytes int) (byte, string, error) {
+	if maxBulkBytes < 0 {
+		return 0, "", ErrRedisProtocol
+	}
 	prefix, err := r.ReadByte()
 	if err != nil {
 		return 0, "", err
@@ -222,7 +268,7 @@ func readRESP(r *bufio.Reader) (byte, string, error) {
 		return 0, "", fmt.Errorf("%w: server error", ErrRedisProtocol)
 	case '$':
 		length, err := strconv.Atoi(line)
-		if err != nil || length < -1 || length > 4096 {
+		if err != nil || length < -1 || length > maxBulkBytes {
 			return 0, "", ErrRedisProtocol
 		}
 		if length == -1 {

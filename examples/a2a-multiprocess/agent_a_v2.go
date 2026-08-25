@@ -12,7 +12,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"path/filepath"
 	"time"
@@ -23,7 +22,19 @@ import (
 
 type issueMutationV2 func(claims jwt.MapClaims, sbo *securityBindingObjectV2, request *a2aSendMessageRequest)
 
-func runAgentAV2(ctx context.Context, opts options, out outputWriter) error {
+func runAgentAV2(ctx context.Context, opts options, out outputWriter) (runErr error) {
+	reporter, err := newTestRunReporter(opts, out)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if runErr != nil {
+			reporter.recordInfrastructureError()
+		}
+		if err := reporter.finish(); runErr == nil && err != nil {
+			runErr = err
+		}
+	}()
 	for name, value := range map[string]string{
 		"manager": opts.managerURL, "attester": opts.attesterURL,
 		"verifier": opts.verifierURL, "agent-b": opts.agentBURL,
@@ -75,26 +86,12 @@ func runAgentAV2(ctx context.Context, opts options, out outputWriter) error {
 		return err
 	}
 
-	fmt.Fprintln(out, "Agents Secure Binding: experimental draft-06 v2 multiprocess A2A demonstration")
-	fmt.Fprintln(out, "profile: separate draft06-v2 challenge, context, attestation, policy, and replay path")
-	fmt.Fprintln(out)
+	reporter.printHeader(opts.attestationMode)
 
-	completed := 0
+	scenarioNumber := 0
 	report := func(label, risk string, result a2aResult, expectedStatus int, expectedReason string) error {
-		if result.status != expectedStatus || result.reason != expectedReason {
-			return fmt.Errorf("scenario %q: status=%d reason=%q, want status=%d reason=%q", label, result.status, result.reason, expectedStatus, expectedReason)
-		}
-		completed++
-		action := "ALLOW"
-		if expectedStatus >= 400 {
-			action = "BLOCK"
-		}
-		fmt.Fprintf(out, "[PASS] %-32s %-5s status=%d risk=%s", label, action, result.status, risk)
-		if result.reason != "" {
-			fmt.Fprintf(out, " reason=%s", result.reason)
-		}
-		fmt.Fprintln(out)
-		return nil
+		scenarioNumber++
+		return reporter.record(fmt.Sprintf("ASB-A2A-V2-%03d", scenarioNumber), label, risk, result, expectedStatus, expectedReason)
 	}
 
 	issue := func(conn *a2aConnection, mutation issueMutationV2) (a2aSendMessageRequest, challengeResponseV2, error) {
@@ -213,15 +210,15 @@ func runAgentAV2(ctx context.Context, opts options, out outputWriter) error {
 		}
 	}
 
-	fmt.Fprintln(out)
-	fmt.Fprintf(out, "summary: %d/%d expected draft06-v2 decisions observed\n", completed, completed)
-	fmt.Fprintln(out, "audit output contains decisions only; grants, proofs, nonces, evidence, and private keys were not logged")
 	return nil
 }
 
 func newTaskRequestV2() a2aSendMessageRequest {
 	request := newTaskRequest(demoResource)
 	request.Message.ContextID = demoThreadID
+	// The experimental v2 profile still models a message for a pre-existing
+	// task. The supported v1 new-task path leaves taskId empty.
+	request.Message.TaskID = demoTaskID
 	request.Message.Extensions = []string{securityBindingExtensionV2, attestationResultExtensionV2}
 	request.Message.Metadata = map[string]json.RawMessage{
 		securityBindingExtensionV2:   json.RawMessage(`{}`),
@@ -345,35 +342,19 @@ func (c *a2aConnection) challengeV2() (challengeResponseV2, error) {
 		return challengeResponseV2{}, fmt.Errorf("read draft-06 challenge response: %w", err)
 	}
 	defer response.Body.Close()
-	if response.StatusCode != http.StatusOK {
-		var p problem
-		_ = json.NewDecoder(io.LimitReader(response.Body, maxBodySize)).Decode(&p)
-		return challengeResponseV2{}, fmt.Errorf("challenge rejected: %s", p.Reason)
-	}
-	var challenge challengeResponseV2
-	if err := json.NewDecoder(io.LimitReader(response.Body, maxBodySize)).Decode(&challenge); err != nil {
-		return challengeResponseV2{}, fmt.Errorf("decode challenge response: %w", err)
-	}
-	if _, err := decodeNonceV2(challenge.VerifierNonce, 32); err != nil {
-		return challengeResponseV2{}, err
-	}
-	if challenge.AttemptID != "" {
-		if _, err := decodeNonceV2(challenge.AttemptID, 16); err != nil {
-			return challengeResponseV2{}, err
-		}
-	}
-	if challenge.ExpiresAt <= time.Now().UTC().Unix() {
-		return challengeResponseV2{}, fmt.Errorf("challenge is already expired")
-	}
-	return challenge, nil
+	return decodeChallengeHTTPResponseV2(response, time.Now())
 }
 
 func (c *a2aConnection) sendV2(request a2aSendMessageRequest) (a2aResult, error) {
+	return c.sendV2WithTimeout(request, 10*time.Second)
+}
+
+func (c *a2aConnection) sendV2WithTimeout(request a2aSendMessageRequest, timeout time.Duration) (a2aResult, error) {
 	payload, err := json.Marshal(request)
 	if err != nil {
 		return a2aResult{}, err
 	}
-	if err := c.conn.SetDeadline(time.Now().Add(10 * time.Second)); err != nil {
+	if err := c.conn.SetDeadline(time.Now().Add(timeout)); err != nil {
 		return a2aResult{}, err
 	}
 	httpRequest, err := http.NewRequest(http.MethodPost, "https://"+c.host+"/message:send", bytes.NewReader(payload))
@@ -392,19 +373,7 @@ func (c *a2aConnection) sendV2(request a2aSendMessageRequest) (a2aResult, error)
 		return a2aResult{}, fmt.Errorf("read draft-06 A2A response: %w", err)
 	}
 	defer response.Body.Close()
-	result := a2aResult{status: response.StatusCode}
-	if response.StatusCode >= 200 && response.StatusCode < 300 {
-		if err := json.NewDecoder(io.LimitReader(response.Body, maxBodySize)).Decode(&result.task); err != nil {
-			return a2aResult{}, fmt.Errorf("decode A2A task: %w", err)
-		}
-		return result, nil
-	}
-	var p problem
-	if err := json.NewDecoder(io.LimitReader(response.Body, maxBodySize)).Decode(&p); err != nil {
-		return a2aResult{}, fmt.Errorf("decode A2A problem: %w", err)
-	}
-	result.reason = p.Reason
-	return result, nil
+	return decodeA2ASendHTTPResponseV2(response)
 }
 
 func discoverAgentCardV2(ctx context.Context, client *http.Client, baseURL string) error {
@@ -418,15 +387,5 @@ func discoverAgentCardV2(ctx context.Context, client *http.Client, baseURL strin
 		return fmt.Errorf("discover draft-06 Agent B card: %w", err)
 	}
 	defer response.Body.Close()
-	if response.StatusCode != http.StatusOK {
-		return fmt.Errorf("discover draft-06 Agent B card: status %d", response.StatusCode)
-	}
-	raw, err := io.ReadAll(io.LimitReader(response.Body, maxBodySize))
-	if err != nil {
-		return err
-	}
-	if !bytes.Contains(raw, []byte(securityBindingExtensionV2)) || !bytes.Contains(raw, []byte(attestationResultExtensionV2)) {
-		return fmt.Errorf("Agent B card does not advertise the draft-06 extension profile")
-	}
-	return nil
+	return validateAgentCardHTTPResponseV2(response)
 }

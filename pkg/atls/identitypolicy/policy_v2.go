@@ -59,20 +59,6 @@ type AuthorizationV2 struct {
 	AuthorizationDetails []string `json:"authorization_details,omitempty" yaml:"authorization_details,omitempty"`
 }
 
-// AcceptedAssertionV2 is the verifier-local projection returned after the
-// complete v2 acceptance path. Values and Target contain only policy-selected
-// fields; unrequested or otherwise surplus grant values are not copied here.
-// ExpiresAt is bounded by the verified grant and proof lifetimes. It does not
-// imply an attestation-result or certificate lifetime.
-type AcceptedAssertionV2 struct {
-	Issuer                 string          `json:"issuer" yaml:"issuer"`
-	Values                 Values          `json:"values" yaml:"values"`
-	Target                 TargetV2        `json:"target,omitempty" yaml:"target,omitempty"`
-	Binding                BindingV2       `json:"binding" yaml:"binding"`
-	EffectiveAuthorization AuthorizationV2 `json:"effective_authorization" yaml:"effective_authorization"`
-	ExpiresAt              time.Time       `json:"expires_at" yaml:"expires_at"`
-}
-
 // PolicyV2 separates verifier-local expectations from authenticated observed
 // values. D6 and D7 are represented independently by ExpectedTarget and
 // ExpectedAuthorization. Accepted channel values are supplied separately to
@@ -181,53 +167,6 @@ func ValidateAssertionV2(policy PolicyV2, assertion AssertionV2, expectedBinding
 		return errs
 	}
 	return nil
-}
-
-// AcceptAssertionV2 validates the observed assertion and returns only values
-// selected by verifier-local policy. Callers should expose this projection to
-// applications instead of the raw verified grant or observed assertion.
-func AcceptAssertionV2(policy PolicyV2, assertion AssertionV2, expectedBinding BindingV2, now time.Time) (AcceptedAssertionV2, error) {
-	if err := ValidateAssertionV2(policy, assertion, expectedBinding, now); err != nil {
-		return AcceptedAssertionV2{}, err
-	}
-	if err := validateDecisionValueV2(assertion.Issuer); err != nil || isEmpty(assertion.Issuer) {
-		if err == nil {
-			err = ErrMissingObserved
-		}
-		return AcceptedAssertionV2{}, validationError(LayerIdentityGrant, FieldIssuer, err)
-	}
-	if assertion.AuthorityExpiresAt.IsZero() {
-		return AcceptedAssertionV2{}, validationError(LayerIdentityGrant, FieldExpiresAt, ErrMissingObserved)
-	}
-	if now.IsZero() {
-		return AcceptedAssertionV2{}, validationError(LayerIdentityGrant, FieldExpiresAt, ErrMissingCurrentTimeV2)
-	}
-	if !now.Before(assertion.AuthorityExpiresAt) {
-		return AcceptedAssertionV2{}, validationError(LayerIdentityGrant, FieldExpiresAt, ErrExpiredAssertion)
-	}
-
-	effectiveAuthorization, err := EffectiveAuthorization(policy, assertion)
-	if err != nil {
-		return AcceptedAssertionV2{}, err
-	}
-	expiresAt := assertion.Binding.ExpiresAt
-	if assertion.AuthorityExpiresAt.Before(expiresAt) {
-		expiresAt = assertion.AuthorityExpiresAt
-	}
-	binding := assertion.Binding
-	binding.ExpiresAt = expiresAt
-
-	accepted := AcceptedAssertionV2{
-		Issuer:                 assertion.Issuer,
-		Values:                 acceptedValuesV2(policy),
-		Binding:                binding,
-		EffectiveAuthorization: effectiveAuthorization,
-		ExpiresAt:              expiresAt,
-	}
-	if policy.Require.D6 {
-		accepted.Target = policy.ExpectedTarget
-	}
-	return accepted, nil
 }
 
 // EffectiveAuthorization returns the locally bounded D7 authorization after

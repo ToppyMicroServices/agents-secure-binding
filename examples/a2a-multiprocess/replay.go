@@ -6,16 +6,27 @@ package main
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
+
+	"github.com/thinksyncs/agents-secure-binding/pkg/operationjournal"
+	"github.com/thinksyncs/agents-secure-binding/pkg/production"
 )
 
-const replayStateFile = "replay-state.json"
+const (
+	replayStateFile       = "replay-state.json"
+	acceptanceStoreFile   = "file"
+	acceptanceStoreRedis  = "redis"
+	defaultRedisSecretEnv = "ASB_REDIS_PASSWORD"
+	maxRedisCAFileBytes   = 1 << 20
+)
 
 type durableReplayStore struct {
 	mu      sync.Mutex
@@ -27,6 +38,10 @@ func runReplayStore(ctx context.Context, opts options, out outputWriter) error {
 	store, err := openDurableReplayStore(filepath.Join(roleDirectory(opts.stateDir, "replay"), replayStateFile))
 	if err != nil {
 		return err
+	}
+	operationStore, err := openAcceptanceStoreV2(opts)
+	if err != nil {
+		return fmt.Errorf("open v2 acceptance store: %w", err)
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
@@ -52,7 +67,77 @@ func runReplayStore(ctx context.Context, opts options, out outputWriter) error {
 		}
 		writeJSON(w, http.StatusOK, "application/json", replayResponse{Inserted: inserted})
 	})
+	registerOperationJournalV2(mux, operationStore)
 	return serveTLS(ctx, opts, "replay", tls.RequireAndVerifyClientCert, mux, out)
+}
+
+func openAcceptanceStoreV2(opts options) (operationjournal.ResultStore, error) {
+	switch effectiveAcceptanceStore(opts.acceptanceStore) {
+	case acceptanceStoreFile:
+		return operationjournal.OpenFileStore(filepath.Join(roleDirectory(opts.stateDir, "replay"), acceptanceStateFileV2))
+	case acceptanceStoreRedis:
+		if !validEnvironmentName(effectiveRedisPasswordEnv(opts.redisPasswordEnv)) {
+			return nil, fmt.Errorf("Redis password environment variable name is invalid")
+		}
+		password, ok := os.LookupEnv(effectiveRedisPasswordEnv(opts.redisPasswordEnv))
+		if !ok || password == "" {
+			return nil, fmt.Errorf("Redis password environment variable is not set")
+		}
+		roots, err := loadRedisRoots(opts.redisCAFile)
+		if err != nil {
+			return nil, err
+		}
+		store := &production.RedisAcceptanceStore{
+			RedisSetNXStore: production.RedisSetNXStore{
+				Address: opts.redisAddress, Username: opts.redisUsername, Password: password,
+				KeyPrefix:                       opts.redisKeyPrefix,
+				TLSConfig:                       &tls.Config{RootCAs: roots, ServerName: opts.redisServerName, MinVersion: tls.VersionTLS13},
+				OperationTimeout:                opts.redisOperationTimeout,
+				RequiredReplicaAcknowledgements: opts.redisReplicaAcks,
+				ReplicationTimeout:              opts.redisReplicationTimeout,
+			},
+			MaxReplayTTL: opts.redisMaxReplayTTL,
+		}
+		if err := store.Validate(); err != nil {
+			return nil, fmt.Errorf("validate Redis acceptance store: %w", err)
+		}
+		return store, nil
+	default:
+		return nil, fmt.Errorf("unsupported acceptance store %q", opts.acceptanceStore)
+	}
+}
+
+func loadRedisRoots(path string) (*x509.CertPool, error) {
+	if strings.TrimSpace(path) == "" {
+		return nil, fmt.Errorf("Redis CA file is required")
+	}
+	info, err := os.Stat(path)
+	if err != nil || !info.Mode().IsRegular() || info.Size() <= 0 || info.Size() > maxRedisCAFileBytes {
+		return nil, fmt.Errorf("Redis CA file is unavailable or invalid")
+	}
+	pemBytes, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read Redis CA file: %w", err)
+	}
+	roots := x509.NewCertPool()
+	if !roots.AppendCertsFromPEM(pemBytes) {
+		return nil, fmt.Errorf("Redis CA file contains no certificate")
+	}
+	return roots, nil
+}
+
+func effectiveAcceptanceStore(value string) string {
+	if value == "" {
+		return acceptanceStoreFile
+	}
+	return value
+}
+
+func effectiveRedisPasswordEnv(value string) string {
+	if value == "" {
+		return defaultRedisSecretEnv
+	}
+	return value
 }
 
 func openDurableReplayStore(path string) (*durableReplayStore, error) {

@@ -18,6 +18,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/thinksyncs/agents-secure-binding/pkg/atls/identitypolicy"
 	"github.com/thinksyncs/agents-secure-binding/pkg/clients"
+	"github.com/thinksyncs/agents-secure-binding/pkg/llmruntime"
 )
 
 type agentBServer struct {
@@ -28,6 +29,7 @@ type agentBServer struct {
 	allowSimulation     bool
 	expectedMeasurement string
 	publicURL           string
+	generator           llmruntime.Generator
 }
 
 func runAgentB(ctx context.Context, opts options, out outputWriter) error {
@@ -39,6 +41,17 @@ func runAgentB(ctx context.Context, opts options, out outputWriter) error {
 	}
 	if opts.replayURL == "" {
 		return fmt.Errorf("replay URL is required")
+	}
+	var generator llmruntime.Generator
+	if effectiveWorkflow(opts.workflow) == workflowLLMConversation {
+		if err := validateAgentBConversationOptions(opts); err != nil {
+			return err
+		}
+		configuredGenerator, generationErr := newConversationGenerator(opts.agentBLLMURL, opts.agentBLLMModel, opts.agentBAPIKeyEnv, opts.allowInsecureLLMLoopback)
+		if generationErr != nil {
+			return fmt.Errorf("configure Agent B LLM: %w", generationErr)
+		}
+		generator = configuredGenerator
 	}
 	dir := roleDirectory(opts.stateDir, "agent-b")
 	managerKey, err := loadPublicKey(filepath.Join(dir, managerPublicFile))
@@ -61,7 +74,7 @@ func runAgentB(ctx context.Context, opts options, out outputWriter) error {
 		managerKey: managerKey, agentKey: agentKey, verifierKey: verifierKey,
 		replay:          identitypolicy.NewSetNXReplayCache(ctx, &httpSetNXStore{client: newHTTPClient(replayTLS), url: opts.replayURL}),
 		allowSimulation: opts.allowSimulation, expectedMeasurement: opts.expectedMeasurementHex,
-		publicURL: opts.publicURL,
+		publicURL: opts.publicURL, generator: generator,
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
@@ -74,7 +87,7 @@ func runAgentB(ctx context.Context, opts options, out outputWriter) error {
 
 func (s *agentBServer) handleAgentCard(w http.ResponseWriter, r *http.Request) {
 	if r.Header.Get("A2A-Version") != a2aVersion {
-		writeProblem(w, http.StatusBadRequest, "a2a-version", "Unsupported A2A version", "A2A-Version must be 1.0")
+		writeA2AProtocolError(w, http.StatusBadRequest, "VERSION_NOT_SUPPORTED", "A2A-Version must be 1.0")
 		return
 	}
 	baseURL := s.publicURL
@@ -98,85 +111,89 @@ func (s *agentBServer) handleAgentCard(w http.ResponseWriter, r *http.Request) {
 
 func (s *agentBServer) handleMessage(w http.ResponseWriter, r *http.Request) {
 	if err := requirePeer(r, demoAgentIssuer); err != nil {
-		writeProblem(w, http.StatusForbidden, "mutual-tls-required", "Mutual TLS required", err.Error())
+		writeASBA2AError(w, http.StatusForbidden, "mutual-tls-required", "Mutual TLS is required")
 		return
 	}
 	if r.Header.Get("A2A-Version") != a2aVersion {
-		writeProblem(w, http.StatusBadRequest, "a2a-version", "Unsupported A2A version", "A2A-Version must be 1.0")
+		writeA2AProtocolError(w, http.StatusBadRequest, "VERSION_NOT_SUPPORTED", "A2A-Version must be 1.0")
 		return
 	}
 	if r.Header.Get("A2A-Extensions") != securityBindingExtension+","+attestationResultExtension {
-		writeProblem(w, http.StatusBadRequest, "a2a-extensions", "Unsupported A2A extensions", "A2A-Extensions must select the two required security extensions")
+		writeA2AProtocolError(w, http.StatusBadRequest, "EXTENSION_SUPPORT_REQUIRED", "The required ASB extensions were not selected")
 		return
 	}
 	mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
 	if err != nil || mediaType != a2aMediaType {
-		writeProblem(w, http.StatusUnsupportedMediaType, "media-type", "Unsupported media type", "Content-Type must be application/a2a+json")
+		writeASBA2AError(w, http.StatusUnsupportedMediaType, "media-type", "Content-Type must be application/a2a+json")
 		return
 	}
 	raw, err := io.ReadAll(io.LimitReader(r.Body, maxBodySize+1))
 	if err != nil || len(raw) > maxBodySize {
-		writeProblem(w, http.StatusBadRequest, "invalid-request", "Invalid request", "request body is unavailable or too large")
+		writeASBA2AError(w, http.StatusBadRequest, "invalid-request", "The request body is unavailable or too large")
 		return
 	}
 	var request a2aSendMessageRequest
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&request); err != nil || decoder.Decode(&struct{}{}) != io.EOF {
-		writeProblem(w, http.StatusBadRequest, "invalid-request", "Invalid request", "request is outside the supported A2A Send Message subset")
+		writeASBA2AError(w, http.StatusBadRequest, "invalid-request", "The request is outside the supported Send Message subset")
 		return
 	}
-	if request.Message.MessageID == "" || request.Message.TaskID != demoTaskID || request.Message.ContextID != demoContextID ||
+	if request.Message.TaskID != "" {
+		writeA2AProtocolError(w, http.StatusNotFound, "TASK_NOT_FOUND", "The specified task ID does not exist or is not accessible")
+		return
+	}
+	if request.Message.MessageID == "" || request.Message.ContextID != demoContextID ||
 		request.Message.Role != "ROLE_USER" || !hasExactExtensions(request.Message.Extensions) {
-		writeProblem(w, http.StatusForbidden, "message-policy", "Message policy rejected", "message identifiers, role, or extensions do not match policy")
+		writeASBA2AError(w, http.StatusForbidden, "message-policy", "Message identifiers, role, or extensions do not match policy")
 		return
 	}
 	operation, resource, err := taskOperationAndResource(request.Message)
-	if err != nil || operation != demoOperation || resource != demoResource {
-		writeProblem(w, http.StatusForbidden, "message-policy", "Message policy rejected", "operation or resource does not match policy")
+	if err != nil || operation == "" || resource == "" {
+		writeASBA2AError(w, http.StatusForbidden, "message-policy", "Operation or resource is missing or malformed")
 		return
 	}
 	var sbo securityBindingObject
 	if err := json.Unmarshal(request.Message.Metadata[securityBindingExtension], &sbo); err != nil {
-		writeProblem(w, http.StatusForbidden, "security-binding", "Security binding rejected", "Security Binding Object is missing or malformed")
+		writeASBA2AError(w, http.StatusForbidden, "security-binding", "The Security Binding Object is missing or malformed")
 		return
 	}
 	var attestationToken string
 	if err := json.Unmarshal(request.Message.Metadata[attestationResultExtension], &attestationToken); err != nil || attestationToken == "" {
-		writeProblem(w, http.StatusForbidden, "attestation-result", "Attestation result rejected", "attestation result is missing or malformed")
+		writeASBA2AError(w, http.StatusForbidden, "attestation-result", "The attestation result is missing or malformed")
 		return
 	}
 	contextValue, err := canonicalRequestContext(request)
 	if err != nil {
-		writeProblem(w, http.StatusForbidden, "session-binding", "Session binding rejected", "canonical request context failed")
+		writeASBA2AError(w, http.StatusForbidden, "session-binding", "The canonical request context is invalid")
 		return
 	}
 	expected, binder, err := deriveAcceptedBinding(r.TLS, contextValue, r.TLS.PeerCertificates[0])
 	if err != nil {
-		writeProblem(w, http.StatusForbidden, "session-binding", "Session binding rejected", "accepted TLS session cannot be bound")
+		writeASBA2AError(w, http.StatusForbidden, "session-binding", "The accepted TLS session cannot be bound")
 		return
 	}
 	attestationClaims, err := parseAttestationResult(attestationToken, s.verifierKey)
 	if err != nil || attestationClaims.BinderSHA256 != sha256String(binder) {
-		writeProblem(w, http.StatusForbidden, "attestation-result", "Attestation result rejected", "signature or session binder mismatch")
+		writeASBA2AError(w, http.StatusForbidden, "attestation-result", "The attestation result does not match the accepted session")
 		return
 	}
 	if attestationClaims.Simulation {
 		if !s.allowSimulation || attestationClaims.Platform != platformSimulated || attestationClaims.MeasurementSHA256 != sha256String([]byte(demoMeasurement)) {
-			writeProblem(w, http.StatusForbidden, "simulation-not-allowed", "Simulation attestation rejected", "receiver policy does not permit this simulation result")
+			writeASBA2AError(w, http.StatusForbidden, "simulation-not-allowed", "Receiver policy does not permit this simulation result")
 			return
 		}
 	} else {
 		measurement, measurementErr := decodeExpectedMeasurement(s.expectedMeasurement)
 		if measurementErr != nil || attestationClaims.MeasurementSHA256 != sha256String(measurement) ||
 			(attestationClaims.Platform != platformSNP && attestationClaims.Platform != platformTDX) {
-			writeProblem(w, http.StatusForbidden, "measurement-mismatch", "Hardware measurement rejected", "result does not match receiver measurement policy")
+			writeASBA2AError(w, http.StatusForbidden, "measurement-mismatch", "The result does not match receiver measurement policy")
 			return
 		}
 	}
 	expected.Nonce = sbo.Nonce
 	if err := validateSBO(sbo, expected, attestationClaims.BinderSHA256); err != nil {
-		writeProblem(w, http.StatusForbidden, "security-binding", "Security binding rejected", err.Error())
+		writeASBA2AError(w, http.StatusForbidden, "security-binding", "The Security Binding Object does not match the accepted interaction")
 		return
 	}
 	result, err := clients.VerifySessionIdentityJWT(sbo.Grant, sbo.Binding, clients.SessionIdentityJWTOptions{
@@ -191,17 +208,39 @@ func (s *agentBServer) handleMessage(w http.ResponseWriter, r *http.Request) {
 		Policy: receiverPolicy(), ExpectedBinding: expected, ReplayCache: s.replay, Now: time.Now().UTC(),
 	})
 	if err != nil {
-		writeProblem(w, http.StatusForbidden, classifyVerificationError(err), "Identity binding rejected", "grant, session, replay, or local policy validation failed")
+		writeASBA2AError(w, http.StatusForbidden, classifyVerificationError(err), "Grant, session, replay, or local policy validation failed")
 		return
 	}
-	if result.Assertion.Values.TaskID != request.Message.TaskID || result.Assertion.Values.CapabilityRef != demoCapability {
-		writeProblem(w, http.StatusForbidden, "message-policy", "Message policy rejected", "verified grant does not authorize this message")
+	if result.Assertion.Values.TaskID != demoTaskID || result.Assertion.Values.CapabilityRef != demoCapability ||
+		operation != demoOperation || resource != demoResource {
+		writeASBA2AError(w, http.StatusForbidden, "message-policy", "The verified grant does not authorize this message")
+		return
+	}
+	artifactText := "The authorized Agent B completed the bound demonstration task."
+	if s.generator != nil {
+		if len(request.Message.Parts) != 1 || request.Message.Parts[0].MediaType != "text/plain" || !validConversationText(request.Message.Parts[0].Text) {
+			writeASBA2AError(w, http.StatusBadRequest, "invalid-llm-input", "The verified request does not contain valid LLM input")
+			return
+		}
+		generated, generationErr := s.generator.Generate(r.Context(), llmruntime.Request{
+			System: agentBSystemPrompt,
+			Input:  request.Message.Parts[0].Text,
+		})
+		if generationErr != nil {
+			writeASBA2AError(w, http.StatusServiceUnavailable, "llm-unavailable", "Agent B could not produce a model response")
+			return
+		}
+		artifactText = generated.Text
+	}
+	taskID, err := randomID("task-")
+	if err != nil {
+		writeASBA2AError(w, http.StatusInternalServerError, "internal", "Task identifier generation failed")
 		return
 	}
 	writeJSON(w, http.StatusOK, a2aMediaType, a2aTaskResponse{Task: a2aTask{
-		ID: request.Message.TaskID, ContextID: request.Message.ContextID,
+		ID: taskID, ContextID: request.Message.ContextID,
 		Status:    a2aTaskStatus{State: "TASK_STATE_COMPLETED", Timestamp: time.Now().UTC().Format(time.RFC3339)},
-		Artifacts: []a2aArtifact{{ArtifactID: "artifact-summary-1", Name: "Demonstration result", Parts: []a2aPart{{Text: "The authorized Agent B completed the bound demonstration task.", MediaType: "text/plain"}}}},
+		Artifacts: []a2aArtifact{{ArtifactID: "artifact-summary-1", Name: "Demonstration result", Parts: []a2aPart{{Text: artifactText, MediaType: "text/plain"}}}},
 	}})
 }
 

@@ -1,0 +1,102 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:asb:a2a-security-test-report:v1",
+  "title": "ASB A2A Security Test Report v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema", "tool", "run_id", "profile", "mode", "attestation", "started_at",
+    "finished_at", "status", "summary", "scenarios"
+  ],
+  "properties": {
+    "schema": { "const": "urn:asb:a2a-security-test-report:v1" },
+    "tool": { "$ref": "#/$defs/tool" },
+    "run_id": { "$ref": "#/$defs/id" },
+    "profile": { "$ref": "#/$defs/id" },
+    "mode": { "enum": ["selftest", "target"] },
+    "attestation": { "$ref": "#/$defs/attestation" },
+    "started_at": { "$ref": "#/$defs/timestamp" },
+    "finished_at": { "$ref": "#/$defs/timestamp" },
+    "status": { "$ref": "#/$defs/status" },
+    "summary": { "$ref": "#/$defs/summary" },
+    "scenarios": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 1024,
+      "items": { "$ref": "#/$defs/scenario" }
+    }
+  },
+  "$defs": {
+    "id": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "timestamp": { "type": "string", "format": "date-time" },
+    "status": { "enum": ["PASS", "FAIL", "INDETERMINATE", "ERROR"] },
+    "tool": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version", "commit"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "version": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "commit": { "type": "string", "minLength": 1, "maxLength": 64 }
+      }
+    },
+    "attestation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "platform"],
+      "properties": {
+        "mode": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "platform": { "type": "string", "minLength": 1, "maxLength": 64 }
+      }
+    },
+    "decision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["decision", "http_status", "reason"],
+      "properties": {
+        "decision": { "enum": ["ALLOW", "BLOCK"] },
+        "http_status": {
+          "oneOf": [
+            { "const": 0 },
+            { "type": "integer", "minimum": 100, "maximum": 599 }
+          ]
+        },
+        "reason": { "type": "string", "minLength": 1, "maxLength": 256 }
+      }
+    },
+    "scenario": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "risk", "expected", "observed", "status"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "risk": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "expected": {
+          "allOf": [
+            { "$ref": "#/$defs/decision" },
+            {
+              "properties": {
+                "http_status": { "type": "integer", "minimum": 100, "maximum": 599 }
+              }
+            }
+          ]
+        },
+        "observed": { "$ref": "#/$defs/decision" },
+        "status": { "$ref": "#/$defs/status" }
+      }
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["total", "passed", "failed", "indeterminate", "errors"],
+      "properties": {
+        "total": { "type": "integer", "minimum": 1, "maximum": 1024 },
+        "passed": { "type": "integer", "minimum": 0, "maximum": 1024 },
+        "failed": { "type": "integer", "minimum": 0, "maximum": 1024 },
+        "indeterminate": { "type": "integer", "minimum": 0, "maximum": 1024 },
+        "errors": { "type": "integer", "minimum": 0, "maximum": 1024 }
+      }
+    }
+  }
+}

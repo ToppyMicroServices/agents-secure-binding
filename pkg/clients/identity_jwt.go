@@ -136,7 +136,7 @@ type AttestationVerifierV2 func(
 	grant identitypolicy.VerifiedGrantV2,
 	statement identitypolicy.VerifiedSessionBindingStatementV2,
 	expected identitypolicy.BindingV2,
-) error
+) (identitypolicy.VerifiedAttestationResultV2, error)
 
 // SessionIdentityJWTOptionsV2 contains the verifier-local inputs for the
 // repository's experimental draft-06 profile. It is intentionally separate
@@ -146,9 +146,15 @@ type SessionIdentityJWTOptionsV2 struct {
 	SessionBinding      JWTVerifyOptions
 	Policy              identitypolicy.PolicyV2
 	ExpectedBinding     identitypolicy.BindingV2
+	AcceptedProfile     identitypolicy.ProfileSelectionV2
+	Freshness           identitypolicy.FreshnessInputsV2
 	ReplayCache         identitypolicy.ReplayCache
 	AttestationVerifier AttestationVerifierV2
-	Now                 time.Time
+	// Clock is read at replay commit as well as at initial verification. It
+	// defaults to time.Now. Now can fix the initial verification instant, but
+	// does not freeze commit-time expiry checks.
+	Clock func() time.Time
+	Now   time.Time
 }
 
 // SessionIdentityJWTResultV2 exposes only the verifier-local projection
@@ -438,6 +444,7 @@ func VerifyIdentityGrantJWTV2(tokenString string, opts JWTVerifyOptions) (identi
 
 	return identitypolicy.VerifiedGrantV2{
 		VerifiedGrant: identitypolicy.VerifiedGrant{
+			JWTID:                  claims.ID,
 			Issuer:                 claims.Issuer,
 			IssuerKey:              signerKey,
 			Audience:               opts.ExpectedAudience,
@@ -515,6 +522,7 @@ func VerifySessionBindingJWTV2(tokenString string, opts JWTVerifyOptions) (ident
 	}
 
 	return identitypolicy.VerifiedSessionBindingStatementV2{
+		JWTID:     claims.ID,
 		GrantHash: claims.GrantHash,
 		Audience:  opts.ExpectedAudience,
 		SignerKey: signerKey,
@@ -544,9 +552,13 @@ func VerifySessionIdentityJWTV2(grantToken, bindingToken string, opts SessionIde
 		return SessionIdentityJWTResultV2{}, ErrMissingReplayCache
 	}
 
+	clock := opts.Clock
+	if clock == nil {
+		clock = time.Now
+	}
 	now := opts.Now
 	if now.IsZero() {
-		now = time.Now()
+		now = clock()
 	}
 
 	grantOpts := opts.Grant
@@ -571,6 +583,7 @@ func VerifySessionIdentityJWTV2(grantToken, bindingToken string, opts SessionIde
 		return SessionIdentityJWTResultV2{}, err
 	}
 	attestationSelected := opts.AttestationVerifier != nil || opts.ExpectedBinding.AttestationBinderSHA256 != ""
+	var attestationResult *identitypolicy.VerifiedAttestationResultV2
 	if attestationSelected {
 		if opts.ExpectedBinding.AttestationBinderSHA256 == "" || statement.Binding.AttestationBinderSHA256 == "" {
 			return SessionIdentityJWTResultV2{}, ErrMissingAttestationBinder
@@ -578,15 +591,25 @@ func VerifySessionIdentityJWTV2(grantToken, bindingToken string, opts SessionIde
 		if opts.AttestationVerifier == nil {
 			return SessionIdentityJWTResultV2{}, ErrMissingAttestationVerifier
 		}
-		if err := opts.AttestationVerifier(grant, statement, opts.ExpectedBinding); err != nil {
+		verifiedResult, err := opts.AttestationVerifier(grant, statement, opts.ExpectedBinding)
+		if err != nil {
 			return SessionIdentityJWTResultV2{}, fmt.Errorf("binding jwt v2: verify attestation: %w", err)
 		}
+		attestationResult = &verifiedResult
 	}
-	accepted, err := identitypolicy.AcceptAssertionV2(opts.Policy, assertion, opts.ExpectedBinding, now)
+	if opts.AcceptedProfile.ProfileType != TokenTypeSessionBinding || opts.AcceptedProfile.ProfileVersion != ProfileVersionV2 {
+		return SessionIdentityJWTResultV2{}, ErrUnsupportedVersion
+	}
+	prepared, err := identitypolicy.PrepareAssertionV2(opts.Policy, assertion, opts.ExpectedBinding, now, identitypolicy.AcceptanceInputsV2{
+		Profile:           opts.AcceptedProfile,
+		Freshness:         opts.Freshness,
+		AttestationResult: attestationResult,
+	})
 	if err != nil {
 		return SessionIdentityJWTResultV2{}, err
 	}
-	if err := identitypolicy.MarkSessionBindingUsedV2(opts.ReplayCache, statement); err != nil {
+	accepted, err := identitypolicy.CommitPreparedAssertionV2(opts.ReplayCache, prepared, clock)
+	if err != nil {
 		return SessionIdentityJWTResultV2{}, err
 	}
 

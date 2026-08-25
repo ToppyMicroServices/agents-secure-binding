@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"sync"
+	"unicode/utf8"
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
 )
@@ -54,8 +55,8 @@ func ValidateAuthorityQuorumJSON(raw []byte) error {
 	if err := PrepareAuthorityQuorumValidator(); err != nil {
 		return err
 	}
-	if err := rejectAuthorityQuorumDuplicateMembers(raw); err != nil {
-		return err
+	if err := rejectDuplicateJSONMembers(raw); err != nil {
+		return fmt.Errorf("validate authority quorum JSON: %w", err)
 	}
 	instance, err := jsonschema.UnmarshalJSON(bytes.NewReader(raw))
 	if err != nil {
@@ -67,22 +68,25 @@ func ValidateAuthorityQuorumJSON(raw []byte) error {
 	return nil
 }
 
-func rejectAuthorityQuorumDuplicateMembers(raw []byte) error {
+func rejectDuplicateJSONMembers(raw []byte) error {
+	if !utf8.Valid(raw) {
+		return errors.New("JSON is not valid UTF-8")
+	}
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.UseNumber()
-	if err := scanAuthorityQuorumJSONValue(decoder); err != nil {
-		return fmt.Errorf("validate authority quorum JSON: %w", err)
+	if err := scanJSONValue(decoder); err != nil {
+		return err
 	}
 	if _, err := decoder.Token(); err != io.EOF {
 		if err == nil {
-			return errors.New("validate authority quorum JSON: trailing JSON value")
+			return errors.New("trailing JSON value")
 		}
-		return fmt.Errorf("validate authority quorum JSON: %w", err)
+		return err
 	}
 	return nil
 }
 
-func scanAuthorityQuorumJSONValue(decoder *json.Decoder) error {
+func scanJSONValue(decoder *json.Decoder) error {
 	token, err := decoder.Token()
 	if err != nil {
 		return err
@@ -107,13 +111,13 @@ func scanAuthorityQuorumJSONValue(decoder *json.Decoder) error {
 				return fmt.Errorf("duplicate object member %q", name)
 			}
 			seen[name] = struct{}{}
-			if err := scanAuthorityQuorumJSONValue(decoder); err != nil {
+			if err := scanJSONValue(decoder); err != nil {
 				return err
 			}
 		}
 	case '[':
 		for decoder.More() {
-			if err := scanAuthorityQuorumJSONValue(decoder); err != nil {
+			if err := scanJSONValue(decoder); err != nil {
 				return err
 			}
 		}

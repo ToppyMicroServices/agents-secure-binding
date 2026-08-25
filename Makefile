@@ -4,7 +4,10 @@ DIRECT_AGENT_CORE_PKGS = ./pkg/atls/... ./pkg/clients/... ./pkg/agtp/... ./pkg/p
 PRODUCTION_CONSUMER_PKGS = ./examples/protected-change-consumer
 CGO_ENABLED ?= 0
 GOARCH ?= amd64
+A2A_GOOS ?= $(shell go env GOOS)
+A2A_GOARCH ?= $(shell go env GOARCH)
 VERSION ?= $(shell git describe --abbrev=0 --tags --always)
+A2A_VERSION ?= $(shell git describe --tags --always --dirty)
 COMMIT ?= $(shell git rev-parse HEAD)
 TIME ?= $(shell date +%F_%T)
 EMBED_ENABLED ?= 0
@@ -23,13 +26,19 @@ define compile_service
 	-o ${BUILD_DIR}/agents-secure-binding-$(1) ./cmd/$(1)
 endef
 
-.PHONY: all $(SERVICES) install clean product-security-gate fuzz-smoke
+.PHONY: all $(SERVICES) a2a-test install install-a2a-test clean product-security-gate fuzz-smoke
 
 all: $(SERVICES)
 
 $(SERVICES): 
 	$(call compile_service,$@)
 	@if [ "$@" = "cli" ] || [ "$@" = "manager" ]; then $(MAKE) build-igvm; fi
+
+a2a-test:
+	@mkdir -p $(BUILD_DIR)
+	CGO_ENABLED=$(CGO_ENABLED) GOOS=$(A2A_GOOS) GOARCH=$(A2A_GOARCH) \
+	go build -ldflags "-s -w -X main.version=$(A2A_VERSION) -X main.commit=$(COMMIT)" \
+	-o $(BUILD_DIR)/asb-a2a-test ./examples/a2a-multiprocess
 
 protoc:
 	protoc -I. --go_out=. --go_opt=paths=source_relative --go-grpc_out=. --go-grpc_opt=paths=source_relative agent/agent.proto
@@ -50,6 +59,10 @@ install: $(SERVICES)
 	install $(BUILD_DIR)/agents-secure-binding-manager $(INSTALL_DIR)/agents-secure-binding-manager
 	install -d $(CONFIG_DIR)
 	install agents-secure-binding-manager.env $(CONFIG_DIR)/agents-secure-binding-manager.env
+
+install-a2a-test: a2a-test
+	install -d $(INSTALL_DIR)
+	install $(BUILD_DIR)/asb-a2a-test $(INSTALL_DIR)/asb-a2a-test
 
 clean:
 	rm -rf $(BUILD_DIR)

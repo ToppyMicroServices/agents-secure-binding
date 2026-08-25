@@ -248,11 +248,11 @@ func TestDraft06Section21FailsClosedWhenReplayIsUnavailable(t *testing.T) {
 	if grant.GrantHash != statement.GrantHash {
 		t.Fatal("section 21 replay fixture grant hash mismatch")
 	}
-	if err := identitypolicy.MarkSessionBindingUsedV2(nil, statement); !errors.Is(err, identitypolicy.ErrMissingReplayCacheV2) {
+	if err := identitypolicy.MarkSessionBindingUsedV2(nil, statement, statement.Binding.ExpiresAt); !errors.Is(err, identitypolicy.ErrMissingReplayCacheV2) {
 		t.Fatalf("nil replay cache error = %v", err)
 	}
 	failing := replayCacheFailureV2{}
-	if err := identitypolicy.MarkSessionBindingUsedV2(failing, statement); !errors.Is(err, errReplayOutageV2) {
+	if err := identitypolicy.MarkSessionBindingUsedV2(failing, statement, statement.Binding.ExpiresAt); !errors.Is(err, errReplayOutageV2) {
 		t.Fatalf("replay outage error = %v", err)
 	}
 }
@@ -450,6 +450,7 @@ func section21FixtureV2() (time.Time, identitypolicy.VerifiedGrantV2, identitypo
 	}
 	grant := identitypolicy.VerifiedGrantV2{
 		VerifiedGrant: identitypolicy.VerifiedGrant{
+			JWTID:  "grant-section21-v2",
 			Issuer: demoManagerIssuer, IssuerKey: demoManagerKeyID, Audience: demoAudience,
 			GrantHash: sha256String([]byte("grant")), ConfirmationKey: demoAgentKeyID,
 			Values: identitypolicy.Values{
@@ -462,6 +463,7 @@ func section21FixtureV2() (time.Time, identitypolicy.VerifiedGrantV2, identitypo
 		Target: identitypolicy.TargetV2{Resource: demoResource, Operation: demoOperation},
 	}
 	statement := identitypolicy.VerifiedSessionBindingStatementV2{
+		JWTID:     "proof-section21-v2",
 		GrantHash: grant.GrantHash, Audience: demoAudience, SignerKey: demoAgentKeyID, Binding: binding,
 	}
 	return now, grant, statement, binding

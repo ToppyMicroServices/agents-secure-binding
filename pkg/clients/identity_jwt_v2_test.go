@@ -82,6 +82,9 @@ func TestVerifyIdentityGrantJWTV2ExtractsTargetWithoutChangingAuthorization(t *t
 	if grant.Target.Resource != testV2Target || grant.Target.Operation != "message:send" {
 		t.Fatalf("Target = %#v", grant.Target)
 	}
+	if grant.JWTID != "grant-v2-1" {
+		t.Fatalf("JWTID = %q, want grant-v2-1", grant.JWTID)
+	}
 	if len(grant.Values.Resources) != 1 || grant.Values.Resources[0] != "records:read" {
 		t.Fatalf("D7 Resources = %#v", grant.Values.Resources)
 	}
@@ -273,6 +276,9 @@ func TestVerifySessionBindingJWTV2AcceptsCanonicalProof(t *testing.T) {
 	if statement.GrantHash != IdentityGrantHash(grantToken) {
 		t.Fatalf("GrantHash = %q", statement.GrantHash)
 	}
+	if statement.JWTID != "proof-v2-1" {
+		t.Fatalf("JWTID = %q, want proof-v2-1", statement.JWTID)
+	}
 	if !equalBindingV2(statement.Binding, fixture.binding) {
 		t.Fatalf("Binding = %#v, want %#v", statement.Binding, fixture.binding)
 	}
@@ -418,9 +424,9 @@ func TestVerifySessionIdentityJWTV2AttestationAndReplayOrder(t *testing.T) {
 		opts := fixture.sessionOptions(replay)
 		opts.ExpectedBinding.TLSExporterSHA256 = testV2Hash("5")
 		called := false
-		opts.AttestationVerifier = func(identitypolicy.VerifiedGrantV2, identitypolicy.VerifiedSessionBindingStatementV2, identitypolicy.BindingV2) error {
+		opts.AttestationVerifier = func(identitypolicy.VerifiedGrantV2, identitypolicy.VerifiedSessionBindingStatementV2, identitypolicy.BindingV2) (identitypolicy.VerifiedAttestationResultV2, error) {
 			called = true
-			return nil
+			return fixture.attestationResult(), nil
 		}
 		if _, err := VerifySessionIdentityJWTV2(grantToken, proofToken, opts); err == nil {
 			t.Fatal("VerifySessionIdentityJWTV2() error = nil, want binding rejection")
@@ -450,8 +456,8 @@ func TestVerifySessionIdentityJWTV2AttestationAndReplayOrder(t *testing.T) {
 		replay := &v2ReplaySpy{}
 		opts := fixture.sessionOptions(replay)
 		want := errors.New("attestation rejected")
-		opts.AttestationVerifier = func(identitypolicy.VerifiedGrantV2, identitypolicy.VerifiedSessionBindingStatementV2, identitypolicy.BindingV2) error {
-			return want
+		opts.AttestationVerifier = func(identitypolicy.VerifiedGrantV2, identitypolicy.VerifiedSessionBindingStatementV2, identitypolicy.BindingV2) (identitypolicy.VerifiedAttestationResultV2, error) {
+			return identitypolicy.VerifiedAttestationResultV2{}, want
 		}
 		_, err := VerifySessionIdentityJWTV2(grantToken, proofToken, opts)
 		if !errors.Is(err, want) {
@@ -467,9 +473,9 @@ func TestVerifySessionIdentityJWTV2AttestationAndReplayOrder(t *testing.T) {
 		opts := fixture.sessionOptions(replay)
 		opts.Policy.Expected.Service = "wrong-service"
 		called := false
-		opts.AttestationVerifier = func(identitypolicy.VerifiedGrantV2, identitypolicy.VerifiedSessionBindingStatementV2, identitypolicy.BindingV2) error {
+		opts.AttestationVerifier = func(identitypolicy.VerifiedGrantV2, identitypolicy.VerifiedSessionBindingStatementV2, identitypolicy.BindingV2) (identitypolicy.VerifiedAttestationResultV2, error) {
 			called = true
-			return nil
+			return fixture.attestationResult(), nil
 		}
 		if _, err := VerifySessionIdentityJWTV2(grantToken, proofToken, opts); err == nil {
 			t.Fatal("VerifySessionIdentityJWTV2() error = nil, want D3 rejection")
@@ -486,12 +492,12 @@ func TestVerifySessionIdentityJWTV2AttestationAndReplayOrder(t *testing.T) {
 		replay := &v2ReplaySpy{}
 		opts := fixture.sessionOptions(replay)
 		attestationCalled := false
-		opts.AttestationVerifier = func(grant identitypolicy.VerifiedGrantV2, statement identitypolicy.VerifiedSessionBindingStatementV2, expected identitypolicy.BindingV2) error {
+		opts.AttestationVerifier = func(grant identitypolicy.VerifiedGrantV2, statement identitypolicy.VerifiedSessionBindingStatementV2, expected identitypolicy.BindingV2) (identitypolicy.VerifiedAttestationResultV2, error) {
 			attestationCalled = true
 			if grant.GrantHash != statement.GrantHash || !equalBindingV2(statement.Binding, expected) {
-				return errors.New("attestation inputs did not match accepted binding")
+				return identitypolicy.VerifiedAttestationResultV2{}, errors.New("attestation inputs did not match accepted binding")
 			}
-			return nil
+			return fixture.attestationResult(), nil
 		}
 		result, err := VerifySessionIdentityJWTV2(grantToken, proofToken, opts)
 		if err != nil {
@@ -500,14 +506,41 @@ func TestVerifySessionIdentityJWTV2AttestationAndReplayOrder(t *testing.T) {
 		if !attestationCalled || replay.calls != 1 {
 			t.Fatalf("attestation called = %t, replay calls = %d", attestationCalled, replay.calls)
 		}
-		if result.Accepted.Target.Resource != testV2Target || result.Accepted.EffectiveAuthorization.CapabilityRef != "cap:summarize" {
+		if result.Accepted.AcceptedProfile.BindingProfile != "draft06-v2" ||
+			result.Accepted.Scope.BindingContextSHA256 != fixture.binding.BindingContextSHA256 ||
+			result.Accepted.AcceptedChannel.EndpointRole != fixture.binding.EndpointRole ||
+			result.Accepted.AcceptedActor.ID != "agent-a" ||
+			result.Accepted.AcceptedAuthority.Issuer != "manager" ||
+			result.Accepted.AcceptedInteraction.Type != "agent-to-agent" ||
+			result.Accepted.AttestationResult == nil ||
+			result.Accepted.ReplayCommit.State != identitypolicy.ReplayCommitStateCommittedV2 {
+			t.Fatalf("accepted assertion is incomplete: %#v", result.Accepted)
+		}
+		if result.Accepted.AcceptedTarget == nil || result.Accepted.AcceptedTarget.Resource != testV2Target || result.Accepted.EffectiveAuthorization.CapabilityRef != "cap:summarize" {
 			t.Fatalf("result = %#v", result)
 		}
-		if result.Accepted.Values.Service != "document-service" || result.Accepted.Values.Agent != "" || result.Accepted.Values.TaskID != "" {
-			t.Fatalf("accepted values expose surplus grant fields: %#v", result.Accepted.Values)
+		if result.Accepted.AcceptedInteraction.Service != "document-service" || result.Accepted.AcceptedInteraction.TaskID != "task-1" || result.Accepted.AcceptedInteraction.ThreadID != "" {
+			t.Fatalf("accepted interaction exposes surplus grant fields: %#v", result.Accepted.AcceptedInteraction)
 		}
-		if !result.Accepted.ExpiresAt.Equal(fixture.binding.ExpiresAt) {
-			t.Fatalf("accepted expiry = %v, want %v", result.Accepted.ExpiresAt, fixture.binding.ExpiresAt)
+		if !result.Accepted.Expiry.Equal(fixture.binding.ExpiresAt) {
+			t.Fatalf("accepted expiry = %v, want %v", result.Accepted.Expiry, fixture.binding.ExpiresAt)
+		}
+		if !replay.expiresAt.Equal(result.Accepted.ReplayCommit.RetainUntil) || replay.expiresAt.Before(result.Accepted.Expiry) || strings.Contains(replay.key, fixture.binding.VerifierNonce) {
+			t.Fatalf("replay store = %q/%v, assertion = %#v", replay.key, replay.expiresAt, result.Accepted.ReplayCommit)
+		}
+	})
+
+	t.Run("expiry crossed during replay commit returns no assertion", func(t *testing.T) {
+		current := fixture.now
+		replay := &v2ReplaySpy{onMark: func() { current = fixture.binding.ExpiresAt }}
+		opts := fixture.sessionOptions(replay)
+		opts.Clock = func() time.Time { return current }
+		result, err := VerifySessionIdentityJWTV2(grantToken, proofToken, opts)
+		if !errors.Is(err, identitypolicy.ErrExpiredAssertion) {
+			t.Fatalf("error = %v, want %v", err, identitypolicy.ErrExpiredAssertion)
+		}
+		if replay.calls != 1 || !result.Accepted.Expiry.IsZero() || result.Accepted.ReplayCommit.State != "" {
+			t.Fatalf("replay calls = %d, accepted = %#v", replay.calls, result.Accepted)
 		}
 	})
 }
@@ -585,9 +618,9 @@ func TestVerifySessionIdentityJWTV2ConfiguredVerifierRequiresBinder(t *testing.T
 	replay := &v2ReplaySpy{}
 	opts := fixture.sessionOptions(replay)
 	called := false
-	opts.AttestationVerifier = func(identitypolicy.VerifiedGrantV2, identitypolicy.VerifiedSessionBindingStatementV2, identitypolicy.BindingV2) error {
+	opts.AttestationVerifier = func(identitypolicy.VerifiedGrantV2, identitypolicy.VerifiedSessionBindingStatementV2, identitypolicy.BindingV2) (identitypolicy.VerifiedAttestationResultV2, error) {
 		called = true
-		return nil
+		return fixture.attestationResult(), nil
 	}
 
 	_, err := VerifySessionIdentityJWTV2(grantToken, proofToken, opts)
@@ -600,15 +633,23 @@ func TestVerifySessionIdentityJWTV2ConfiguredVerifierRequiresBinder(t *testing.T
 }
 
 type v2ReplaySpy struct {
-	calls int
-	err   error
+	calls     int
+	key       string
+	expiresAt time.Time
+	err       error
+	onMark    func()
 }
 
-func (r *v2ReplaySpy) MarkUsed(string, time.Time) error {
+func (r *v2ReplaySpy) MarkUsed(key string, expiresAt time.Time) error {
 	if r == nil {
 		return errors.New("typed-nil replay method called")
 	}
 	r.calls++
+	r.key = key
+	r.expiresAt = expiresAt
+	if r.onMark != nil {
+		r.onMark()
+	}
 	return r.err
 }
 
@@ -705,14 +746,24 @@ func (f jwtV2Fixture) sessionOptions(replay identitypolicy.ReplayCache) SessionI
 		Grant:           f.grantOptions(),
 		SessionBinding:  f.proofOptions(),
 		ExpectedBinding: f.binding,
-		ReplayCache:     replay,
-		Now:             f.now,
+		AcceptedProfile: identitypolicy.ProfileSelectionV2{
+			ProfileType: TokenTypeSessionBinding, ProfileVersion: ProfileVersionV2,
+			BindingProfile: "draft06-v2", ProtocolID: "urn:test:a2a-http-json:v2",
+		},
+		Freshness: identitypolicy.FreshnessInputsV2{
+			EndpointCredentialExpiresAt: f.now.Add(10 * time.Minute),
+			EvidenceChallengeExpiresAt:  f.now.Add(2 * time.Minute),
+			LocalPolicyExpiresAt:        f.now.Add(3 * time.Minute),
+		},
+		ReplayCache: replay,
+		Clock:       func() time.Time { return f.now },
+		Now:         f.now,
 		Policy: identitypolicy.PolicyV2{
 			Mode:    identitypolicy.ModeRequired,
 			SetMode: identitypolicy.SetModeContainsAll,
-			Require: identitypolicy.RequirementsV2{D3: true, D6: true, D7: true},
+			Require: identitypolicy.RequirementsV2{D3: true, D4: true, D5: true, D6: true, D7: true},
 			Expected: identitypolicy.Values{
-				Service: "document-service",
+				Service: "document-service", Agent: "agent-a", TaskID: "task-1",
 			},
 			ExpectedTarget: identitypolicy.TargetV2{
 				Resource:  testV2Target,
@@ -725,9 +776,25 @@ func (f jwtV2Fixture) sessionOptions(replay identitypolicy.ReplayCache) SessionI
 				AuthorizationDetails: []string{"document:submit"},
 			},
 		},
-		AttestationVerifier: func(identitypolicy.VerifiedGrantV2, identitypolicy.VerifiedSessionBindingStatementV2, identitypolicy.BindingV2) error {
-			return nil
+		AttestationVerifier: func(identitypolicy.VerifiedGrantV2, identitypolicy.VerifiedSessionBindingStatementV2, identitypolicy.BindingV2) (identitypolicy.VerifiedAttestationResultV2, error) {
+			return f.attestationResult(), nil
 		},
+	}
+}
+
+func (f jwtV2Fixture) attestationResult() identitypolicy.VerifiedAttestationResultV2 {
+	return identitypolicy.VerifiedAttestationResultV2{
+		ProfileType:       "sbaip.attestation-result",
+		ProfileVersion:    "2",
+		ResultID:          "attestation-result-v2-1",
+		Issuer:            "attestation-verifier",
+		Subject:           "agent-a",
+		SignerKeyID:       "attestation-verifier-key",
+		Audience:          "agent-b",
+		AppraisalPolicyID: "urn:test:attestation-policy:v2",
+		BinderSHA256:      f.binding.AttestationBinderSHA256,
+		IssuedAt:          f.now.Add(-time.Second),
+		ExpiresAt:         f.now.Add(2 * time.Minute),
 	}
 }
 
