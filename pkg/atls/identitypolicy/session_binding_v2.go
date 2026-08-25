@@ -55,6 +55,7 @@ type VerifiedGrantV2 struct {
 // VerifiedSessionBindingStatementV2 is an already signature-verified v2
 // holder-of-key proof.
 type VerifiedSessionBindingStatementV2 struct {
+	JWTID     string
 	GrantHash string
 	Audience  string
 	SignerKey string
@@ -64,29 +65,45 @@ type VerifiedSessionBindingStatementV2 struct {
 // AssertionV2 contains only authenticated observed inputs. It is compared
 // with verifier-local PolicyV2 before any value is accepted by an application.
 type AssertionV2 struct {
-	Issuer                string
-	ObservedValues        Values
-	Target                TargetV2
-	ObservedAuthorization AuthorizationV2
-	Binding               BindingV2
-	AuthorityExpiresAt    time.Time
+	Issuer                 string
+	AuthorityGrantID       string
+	AuthorityKeyID         string
+	Audience               string
+	GrantHash              string
+	ActorConfirmationKeyID string
+	SessionProofID         string
+	ObservedValues         Values
+	Target                 TargetV2
+	ObservedAuthorization  AuthorizationV2
+	Binding                BindingV2
+	AuthorityIssuedAt      time.Time
+	AuthorityExpiresAt     time.Time
 }
 
 // NewAssertionFromSessionBindingV2 validates grant-to-proof authority and
 // freshness, then builds an observed assertion. Replay is intentionally not
-// committed here: call MarkSessionBindingUsedV2 only after binding,
-// attestation, D3-D7 policy, and effective-authorization checks succeed.
+// committed here. Complete acceptance paths should use PrepareAssertionV2 and
+// CommitPreparedAssertionV2 so replay retention includes the trusted challenge
+// expiry. MarkSessionBindingUsedV2 is a lower-level alternative for callers
+// that already completed binding, attestation, policy, and authorization checks.
 func NewAssertionFromSessionBindingV2(grant VerifiedGrantV2, statement VerifiedSessionBindingStatementV2, now time.Time) (AssertionV2, error) {
 	if err := ValidateSessionBindingStatementV2(grant, statement, now); err != nil {
 		return AssertionV2{}, err
 	}
 	return AssertionV2{
-		Issuer:                grant.Issuer,
-		ObservedValues:        grant.Values,
-		Target:                grant.Target,
-		ObservedAuthorization: authorizationFromValuesV2(grant.Values),
-		Binding:               statement.Binding,
-		AuthorityExpiresAt:    grant.ExpiresAt,
+		Issuer:                 grant.Issuer,
+		AuthorityGrantID:       grant.JWTID,
+		AuthorityKeyID:         grant.IssuerKey,
+		Audience:               grant.Audience,
+		GrantHash:              grant.GrantHash,
+		ActorConfirmationKeyID: grant.ConfirmationKey,
+		SessionProofID:         statement.JWTID,
+		ObservedValues:         grant.Values,
+		Target:                 grant.Target,
+		ObservedAuthorization:  authorizationFromValuesV2(grant.Values),
+		Binding:                statement.Binding,
+		AuthorityIssuedAt:      grant.IssuedAt,
+		AuthorityExpiresAt:     grant.ExpiresAt,
 	}, nil
 }
 
@@ -105,6 +122,12 @@ func ValidateSessionBindingStatementV2(grant VerifiedGrantV2, statement Verified
 		errs = appendValidationErrors(errs, err)
 	}
 	if err := validateExpectedStringV2(LayerIdentityGrant, FieldGrantHash, grant.GrantHash); err != nil {
+		errs = appendValidationErrors(errs, err)
+	}
+	if err := validateExpectedStringV2(LayerIdentityGrant, "grant_id", grant.JWTID); err != nil {
+		errs = appendValidationErrors(errs, err)
+	}
+	if err := validateObservedStringV2(LayerSessionBinding, "proof_id", statement.JWTID); err != nil {
 		errs = appendValidationErrors(errs, err)
 	}
 	if err := validateObservedStringV2(LayerSessionBinding, FieldGrantHash, statement.GrantHash); err != nil {
@@ -197,33 +220,27 @@ func ValidateAcceptedBindingV2(observed, expected BindingV2, now time.Time) erro
 	return nil
 }
 
-// SessionReplayKeyV2 derives a domain-separated, length-delimited replay key
-// covering the minimum draft-06 tuple. The returned key is a SHA-256 encoding;
-// the raw verifier nonce and other tuple values do not leave this function.
+// SessionReplayKeyV2 derives the nonce-reservation key for the verifier
+// audience. Proof, context, and attestation identifiers are deliberately not
+// part of this key: changing them must not make one verifier nonce reusable.
 func SessionReplayKeyV2(statement VerifiedSessionBindingStatementV2) (string, error) {
+	return replayNonceKeyV2(statement.Audience, statement.Binding.VerifierNonce)
+}
+
+func replayNonceKeyV2(audience, verifierNonce string) (string, error) {
 	for _, item := range []struct {
 		field string
 		value string
 	}{
-		{FieldGrantHash, statement.GrantHash},
-		{FieldAudience, statement.Audience},
-		{FieldEndpointRole, statement.Binding.EndpointRole},
-		{FieldInteractionType, statement.Binding.InteractionType},
-		{FieldTLSExporterHash, statement.Binding.TLSExporterSHA256},
-		{FieldBindingContextHash, statement.Binding.BindingContextSHA256},
-		{FieldVerifierNonce, statement.Binding.VerifierNonce},
+		{FieldAudience, audience},
+		{FieldVerifierNonce, verifierNonce},
 	} {
 		if err := validateBindingStringV2(item.field, item.value); err != nil {
 			return "", err
 		}
 	}
-	if !isEmpty(statement.Binding.AttemptID) {
-		if err := validateBindingStringV2(FieldAttemptID, statement.Binding.AttemptID); err != nil {
-			return "", err
-		}
-	}
 
-	encoded := make([]byte, 0, 512)
+	encoded := make([]byte, 0, 192)
 	encoded = append(encoded, replayKeyDomainV2...)
 	encoded = append(encoded, 0)
 	var err error
@@ -231,14 +248,8 @@ func SessionReplayKeyV2(statement VerifiedSessionBindingStatementV2) (string, er
 		name  string
 		value string
 	}{
-		{"grant_hash", statement.GrantHash},
-		{"aud", statement.Audience},
-		{"endpoint_role", statement.Binding.EndpointRole},
-		{"interaction_type", statement.Binding.InteractionType},
-		{"tls_exporter_sha256", statement.Binding.TLSExporterSHA256},
-		{"binding_context_sha256", statement.Binding.BindingContextSHA256},
-		{"verifier_nonce", statement.Binding.VerifierNonce},
-		{"attempt_id", statement.Binding.AttemptID},
+		{"aud", audience},
+		{"verifier_nonce", verifierNonce},
 	} {
 		encoded, err = appendReplayFieldV2(encoded, item.name, item.value)
 		if err != nil {
@@ -249,13 +260,10 @@ func SessionReplayKeyV2(statement VerifiedSessionBindingStatementV2) (string, er
 	return "sbaip-replay-v2:" + hex.EncodeToString(digest[:]), nil
 }
 
-// MarkSessionBindingUsedV2 atomically commits the v2 replay key. Unlike the
-// legacy helper, v2 fails closed when the cache is nil or contains a typed-nil
-// implementation.
-func MarkSessionBindingUsedV2(cache ReplayCache, statement VerifiedSessionBindingStatementV2) error {
-	if isNilReplayCacheV2(cache) {
-		return validationError(LayerSessionBinding, FieldVerifierNonce, ErrMissingReplayCacheV2)
-	}
+// MarkSessionBindingUsedV2 atomically commits the v2 replay key through the
+// later of the proof and trusted verifier-challenge expiries. Unlike the legacy
+// helper, v2 fails closed when the cache, or either retention bound, is absent.
+func MarkSessionBindingUsedV2(cache ReplayCache, statement VerifiedSessionBindingStatementV2, verifierChallengeExpiresAt time.Time) error {
 	key, err := SessionReplayKeyV2(statement)
 	if err != nil {
 		return err
@@ -263,7 +271,23 @@ func MarkSessionBindingUsedV2(cache ReplayCache, statement VerifiedSessionBindin
 	if statement.Binding.ExpiresAt.IsZero() {
 		return validationError(LayerSessionBinding, FieldExpiresAt, ErrMissingBinding)
 	}
-	if err := cache.MarkUsed(key, statement.Binding.ExpiresAt); err != nil {
+	if verifierChallengeExpiresAt.IsZero() {
+		return validationError(LayerSessionBinding, "evidence_challenge_expires_at", ErrMissingAcceptanceInputV2)
+	}
+	return commitReplayKeyV2(cache, key, latestTimeV2(statement.Binding.ExpiresAt, verifierChallengeExpiresAt))
+}
+
+func commitReplayKeyV2(cache ReplayCache, key string, retainUntil time.Time) error {
+	if isNilReplayCacheV2(cache) {
+		return validationError(LayerSessionBinding, FieldVerifierNonce, ErrMissingReplayCacheV2)
+	}
+	if isEmpty(key) {
+		return validationError(LayerSessionBinding, FieldVerifierNonce, ErrMissingBinding)
+	}
+	if retainUntil.IsZero() {
+		return validationError(LayerSessionBinding, FieldExpiresAt, ErrMissingBinding)
+	}
+	if err := cache.MarkUsed(key, retainUntil); err != nil {
 		if errors.Is(err, ErrReplayDetected) {
 			return validationError(LayerSessionBinding, FieldVerifierNonce, err)
 		}

@@ -254,7 +254,7 @@ func readTestRESPArray(r *bufio.Reader) ([]string, error) {
 			return nil, errors.New("invalid bulk string")
 		}
 		length, err := strconv.Atoi(strings.TrimSuffix(lengthLine[1:], "\r\n"))
-		if err != nil || length < 0 || length > 4096 {
+		if err != nil || length < 0 || length > maxRedisResultReplyBytes {
 			return nil, errors.New("invalid bulk string length")
 		}
 		value := make([]byte, length+2)

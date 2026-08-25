@@ -120,7 +120,7 @@ func TestEffectiveAuthorizationReturnsEmptyWhenD7NotRequired(t *testing.T) {
 	}
 }
 
-func TestAcceptAssertionV2ProjectsOnlyLocalValuesAndBoundsExpiry(t *testing.T) {
+func TestAcceptedAssertionV2ProjectsOnlyLocalValuesAndFinalizesAfterReplay(t *testing.T) {
 	now := time.Unix(1_700_000_000, 0)
 	grant := testVerifiedGrantV2(now)
 	statement := testSessionBindingStatementV2(now)
@@ -130,8 +130,8 @@ func TestAcceptAssertionV2ProjectsOnlyLocalValuesAndBoundsExpiry(t *testing.T) {
 	}
 	policy := PolicyV2{
 		SetMode:  SetModeContainsAll,
-		Require:  RequirementsV2{D3: true, D6: true, D7: true},
-		Expected: Values{Service: "document-service"},
+		Require:  RequirementsV2{D3: true, D4: true, D5: true, D6: true, D7: true},
+		Expected: Values{Service: "document-service", Agent: "agent-a", TaskID: "task-1"},
 		ExpectedTarget: TargetV2{
 			Resource:  "document-api",
 			Operation: "summarize",
@@ -143,21 +143,36 @@ func TestAcceptAssertionV2ProjectsOnlyLocalValuesAndBoundsExpiry(t *testing.T) {
 		},
 	}
 
-	accepted, err := AcceptAssertionV2(policy, assertion, statement.Binding, now)
+	prepared, err := PrepareAssertionV2(policy, assertion, statement.Binding, now, testAcceptanceInputsV2(now, nil))
 	if err != nil {
-		t.Fatalf("AcceptAssertionV2() error = %v", err)
+		t.Fatalf("PrepareAssertionV2() error = %v", err)
 	}
-	if accepted.Values.Service != policy.Expected.Service || accepted.Values.Agent != "" || accepted.Values.TaskID != "" {
-		t.Fatalf("Accepted Values = %#v, want only verifier-selected D3 values", accepted.Values)
+	cache := &v2RecordingReplayCache{seen: make(map[string]struct{})}
+	accepted, err := CommitPreparedAssertionV2(cache, prepared, func() time.Time { return now })
+	if err != nil {
+		t.Fatalf("CommitPreparedAssertionV2() error = %v", err)
 	}
-	if !reflect.DeepEqual(accepted.Target, policy.ExpectedTarget) {
-		t.Fatalf("Accepted Target = %#v, want %#v", accepted.Target, policy.ExpectedTarget)
+	if accepted.AcceptedInteraction.Service != policy.Expected.Service ||
+		accepted.AcceptedActor.ID != policy.Expected.Agent ||
+		accepted.AcceptedInteraction.TaskID != policy.Expected.TaskID ||
+		accepted.AcceptedInteraction.ThreadID != "" {
+		t.Fatalf("Accepted interaction = %#v, actor = %#v", accepted.AcceptedInteraction, accepted.AcceptedActor)
+	}
+	if accepted.AcceptedTarget == nil || accepted.AcceptedTarget.Resource != policy.ExpectedTarget.Resource || accepted.AcceptedTarget.Operation != policy.ExpectedTarget.Operation {
+		t.Fatalf("Accepted Target = %#v, want %#v", accepted.AcceptedTarget, policy.ExpectedTarget)
 	}
 	if !reflect.DeepEqual(accepted.EffectiveAuthorization, policy.ExpectedAuthorization) {
 		t.Fatalf("EffectiveAuthorization = %#v, want %#v", accepted.EffectiveAuthorization, policy.ExpectedAuthorization)
 	}
-	if !accepted.ExpiresAt.Equal(statement.Binding.ExpiresAt) || !accepted.Binding.ExpiresAt.Equal(accepted.ExpiresAt) {
-		t.Fatalf("Accepted expiry = %v, binding expiry = %v, want proof-bounded %v", accepted.ExpiresAt, accepted.Binding.ExpiresAt, statement.Binding.ExpiresAt)
+	if accepted.Scope.BindingContextSHA256 != statement.Binding.BindingContextSHA256 || accepted.Scope.Audience != assertion.Audience {
+		t.Fatalf("Accepted scope = %#v", accepted.Scope)
+	}
+	if !accepted.Expiry.Equal(statement.Binding.ExpiresAt) {
+		t.Fatalf("Accepted expiry = %v, want %v", accepted.Expiry, statement.Binding.ExpiresAt)
+	}
+	wantReplayRetention := testAcceptanceInputsV2(now, nil).Freshness.EvidenceChallengeExpiresAt
+	if accepted.ReplayCommit.State != ReplayCommitStateCommittedV2 || !accepted.ReplayCommit.RetainUntil.Equal(wantReplayRetention) || !cache.expiresAt.Equal(wantReplayRetention) {
+		t.Fatalf("Replay commit = %#v", accepted.ReplayCommit)
 	}
 }
 
@@ -166,19 +181,33 @@ func TestAcceptAssertionV2RejectsNonCanonicalLocalDecisionValue(t *testing.T) {
 	grant := testVerifiedGrantV2(now)
 	grant.Values.Service = "document\ufffdservice"
 	statement := testSessionBindingStatementV2(now)
-	assertion := AssertionV2{
-		Issuer:             grant.Issuer,
-		ObservedValues:     grant.Values,
-		Binding:            statement.Binding,
-		AuthorityExpiresAt: grant.ExpiresAt,
+	assertion, err := NewAssertionFromSessionBindingV2(testVerifiedGrantV2(now), statement, now)
+	if err != nil {
+		t.Fatal(err)
 	}
+	assertion.ObservedValues.Service = grant.Values.Service
 	policy := PolicyV2{
-		Require:  RequirementsV2{D3: true},
-		Expected: Values{Service: grant.Values.Service},
+		Require:  RequirementsV2{D3: true, D4: true, D5: true},
+		Expected: Values{Service: grant.Values.Service, Agent: "agent-a", TaskID: "task-1"},
 	}
 
-	_, err := AcceptAssertionV2(policy, assertion, statement.Binding, now)
+	_, err = PrepareAssertionV2(policy, assertion, statement.Binding, now, testAcceptanceInputsV2(now, nil))
 	if !errors.Is(err, ErrUnsafeValue) {
-		t.Fatalf("AcceptAssertionV2() error = %v, want %v", err, ErrUnsafeValue)
+		t.Fatalf("PrepareAssertionV2() error = %v, want %v", err, ErrUnsafeValue)
+	}
+}
+
+func testAcceptanceInputsV2(now time.Time, attestation *VerifiedAttestationResultV2) AcceptanceInputsV2 {
+	return AcceptanceInputsV2{
+		Profile: ProfileSelectionV2{
+			ProfileType: "sbaip.session-binding", ProfileVersion: "2",
+			BindingProfile: "draft06-v2", ProtocolID: "urn:test:a2a:v2",
+		},
+		Freshness: FreshnessInputsV2{
+			EndpointCredentialExpiresAt: now.Add(10 * time.Minute),
+			EvidenceChallengeExpiresAt:  now.Add(2 * time.Minute),
+			LocalPolicyExpiresAt:        now.Add(3 * time.Minute),
+		},
+		AttestationResult: attestation,
 	}
 }

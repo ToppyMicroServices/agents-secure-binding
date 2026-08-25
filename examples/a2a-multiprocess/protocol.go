@@ -88,6 +88,9 @@ func classifyVerificationError(err error) string {
 	if errors.Is(err, identitypolicy.ErrReplayDetected) {
 		return "replay-detected"
 	}
+	if errors.Is(err, jwt.ErrTokenExpired) {
+		return "token-expired"
+	}
 	if errors.Is(err, jwt.ErrTokenInvalidAudience) {
 		return "audience-mismatch"
 	}

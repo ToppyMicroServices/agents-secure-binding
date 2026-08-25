@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime"
 	"net"
 	"net/http"
 	"net/url"
@@ -39,15 +40,42 @@ type a2aResult struct {
 	task   a2aTaskResponse
 }
 
+type proofWindow struct {
+	issuedAt  time.Time
+	expiresAt time.Time
+}
+
 var demoMessageSequence atomic.Uint64
 
-func runAgentA(ctx context.Context, opts options, out outputWriter) error {
+func runAgentA(ctx context.Context, opts options, out outputWriter) (runErr error) {
+	if effectiveWorkflow(opts.workflow) == workflowLLMConversation {
+		switch opts.bindingProfile {
+		case bindingProfileV1:
+			return runAgentAConversation(ctx, opts, out)
+		case bindingProfileDraft06V2:
+			return runAgentAConversationV2(ctx, opts, out)
+		default:
+			return fmt.Errorf("unsupported binding profile %q", opts.bindingProfile)
+		}
+	}
 	if opts.bindingProfile == bindingProfileDraft06V2 {
 		return runAgentAV2(ctx, opts, out)
 	}
 	if opts.bindingProfile != bindingProfileV1 {
 		return fmt.Errorf("unsupported binding profile %q", opts.bindingProfile)
 	}
+	reporter, err := newTestRunReporter(opts, out)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if runErr != nil {
+			reporter.recordInfrastructureError()
+		}
+		if err := reporter.finish(); runErr == nil && err != nil {
+			runErr = err
+		}
+	}()
 	for name, value := range map[string]string{
 		"manager": opts.managerURL, "attester": opts.attesterURL,
 		"verifier": opts.verifierURL, "agent-b": opts.agentBURL,
@@ -99,35 +127,14 @@ func runAgentA(ctx context.Context, opts options, out outputWriter) error {
 		return err
 	}
 
-	fmt.Fprintln(out, "Agents Secure Binding: multiprocess A2A 1.0 demonstration")
-	fmt.Fprintf(out, "processes: Manager, Attester (%s), Verifier, durable Replay Store, Agent B, Agent A\n", opts.attestationMode)
-	fmt.Fprintln(out, "transport: TLS 1.3 mutual authentication; application: A2A HTTP+JSON Send Message subset")
-	fmt.Fprintln(out)
-
-	completed := 0
-	report := func(label, risk string, result a2aResult, expectedStatus int, expectedReason string) error {
-		if result.status != expectedStatus || result.reason != expectedReason {
-			return fmt.Errorf("scenario %q: status=%d reason=%q, want status=%d reason=%q", label, result.status, result.reason, expectedStatus, expectedReason)
-		}
-		completed++
-		action := "ALLOW"
-		if expectedStatus >= 400 {
-			action = "BLOCK"
-		}
-		fmt.Fprintf(out, "[PASS] %-24s %-5s status=%d risk=%s", label, action, result.status, risk)
-		if result.reason != "" {
-			fmt.Fprintf(out, " reason=%s", result.reason)
-		}
-		fmt.Fprintln(out)
-		return nil
-	}
+	reporter.printHeader(opts.attestationMode)
 
 	validConn, err := dialAgentB(opts.agentBURL, agentBTLS)
 	if err != nil {
 		return err
 	}
 	validRequest := newTaskRequest(demoResource)
-	validRequest, err = issueBoundRequest(ctx, validConn, validRequest, managerClient, opts.managerURL, attesterClient, opts.attesterURL, verifierClient, opts.verifierURL, signingKey, agentLeaf)
+	validRequest, err = issueBoundRequest(ctx, validConn, validRequest, managerClient, opts.managerURL, attesterClient, opts.attesterURL, verifierClient, opts.verifierURL, signingKey, agentLeaf, nil)
 	if err != nil {
 		validConn.close()
 		return err
@@ -137,22 +144,80 @@ func runAgentA(ctx context.Context, opts options, out outputWriter) error {
 	if err != nil {
 		return err
 	}
-	if err := report("authorized Send Message", "none", validResult, http.StatusOK, ""); err != nil {
+	if validResult.task.Task.ID == "" || validResult.task.Task.ID == demoTaskID {
+		return fmt.Errorf("Agent B did not generate a new A2A Task ID")
+	}
+	if err := reporter.record("ASB-A2A-001", "authorized Send Message", "valid_interaction_rejected", validResult, http.StatusOK, ""); err != nil {
 		return err
 	}
 
-	if err := runTamperedEvidenceScenario(ctx, attesterClient, verifierClient, opts.attesterURL, opts.verifierURL); err != nil {
+	tamperedConn, err := dialAgentB(opts.agentBURL, agentBTLS)
+	if err != nil {
 		return err
 	}
-	completed++
-	fmt.Fprintln(out, "[PASS] tampered evidence        BLOCK status=403 risk=attestation_forgery reason=attestation-rejected")
+	tamperedRequest := newTaskRequest(demoResource)
+	tamperedRequest, err = issueBoundRequest(ctx, tamperedConn, tamperedRequest, managerClient, opts.managerURL, attesterClient, opts.attesterURL, verifierClient, opts.verifierURL, signingKey, agentLeaf, nil)
+	if err != nil {
+		tamperedConn.close()
+		return err
+	}
+	if err := tamperAttestationResult(&tamperedRequest); err != nil {
+		tamperedConn.close()
+		return err
+	}
+	tamperedResult, err := tamperedConn.send(tamperedRequest, a2aVersion)
+	tamperedConn.close()
+	if err != nil {
+		return err
+	}
+	if err := reporter.record("ASB-A2A-002", "tampered attestation result", "attestation_forgery", tamperedResult, http.StatusForbidden, "attestation-result"); err != nil {
+		return err
+	}
+
+	unknownTaskConn, err := dialAgentB(opts.agentBURL, agentBTLS)
+	if err != nil {
+		return err
+	}
+	unknownTaskRequest := newTaskRequest(demoResource)
+	unknownTaskRequest.Message.TaskID = "unknown-task"
+	unknownTaskResult, err := unknownTaskConn.send(unknownTaskRequest, a2aVersion)
+	unknownTaskConn.close()
+	if err != nil {
+		return err
+	}
+	if err := reporter.record("ASB-A2A-003", "unknown client task", "task_confusion", unknownTaskResult, http.StatusNotFound, "task-not-found"); err != nil {
+		return err
+	}
+
+	expiredConn, err := dialAgentB(opts.agentBURL, agentBTLS)
+	if err != nil {
+		return err
+	}
+	expiredRequest := newTaskRequest(demoResource)
+	now := time.Now().UTC().Truncate(time.Second)
+	expiredRequest, err = issueBoundRequest(ctx, expiredConn, expiredRequest, managerClient, opts.managerURL, attesterClient, opts.attesterURL, verifierClient, opts.verifierURL, signingKey, agentLeaf, &proofWindow{
+		issuedAt:  now.Add(-4 * time.Minute),
+		expiresAt: now.Add(-2 * time.Minute),
+	})
+	if err != nil {
+		expiredConn.close()
+		return err
+	}
+	expiredResult, err := expiredConn.send(expiredRequest, a2aVersion)
+	expiredConn.close()
+	if err != nil {
+		return err
+	}
+	if err := reporter.record("ASB-A2A-004", "expired session proof", "stale_authorization", expiredResult, http.StatusForbidden, "token-expired"); err != nil {
+		return err
+	}
 
 	replayConn, err := dialAgentB(opts.agentBURL, agentBTLS)
 	if err != nil {
 		return err
 	}
 	replayRequest := newTaskRequest(demoResource)
-	replayRequest, err = issueBoundRequest(ctx, replayConn, replayRequest, managerClient, opts.managerURL, attesterClient, opts.attesterURL, verifierClient, opts.verifierURL, signingKey, agentLeaf)
+	replayRequest, err = issueBoundRequest(ctx, replayConn, replayRequest, managerClient, opts.managerURL, attesterClient, opts.attesterURL, verifierClient, opts.verifierURL, signingKey, agentLeaf, nil)
 	if err != nil {
 		replayConn.close()
 		return err
@@ -167,7 +232,7 @@ func runAgentA(ctx context.Context, opts options, out outputWriter) error {
 	if err != nil {
 		return err
 	}
-	if err := report("durable replay", "replay", second, http.StatusForbidden, "replay-detected"); err != nil {
+	if err := reporter.record("ASB-A2A-005", "durable replay", "replay", second, http.StatusForbidden, "replay-detected"); err != nil {
 		return err
 	}
 
@@ -176,7 +241,7 @@ func runAgentA(ctx context.Context, opts options, out outputWriter) error {
 		return err
 	}
 	borrowedRequest := newTaskRequest(demoResource)
-	borrowedRequest, err = issueBoundRequest(ctx, borrowedFrom, borrowedRequest, managerClient, opts.managerURL, attesterClient, opts.attesterURL, verifierClient, opts.verifierURL, signingKey, agentLeaf)
+	borrowedRequest, err = issueBoundRequest(ctx, borrowedFrom, borrowedRequest, managerClient, opts.managerURL, attesterClient, opts.attesterURL, verifierClient, opts.verifierURL, signingKey, agentLeaf, nil)
 	borrowedFrom.close()
 	if err != nil {
 		return err
@@ -190,7 +255,7 @@ func runAgentA(ctx context.Context, opts options, out outputWriter) error {
 	if err != nil {
 		return err
 	}
-	if err := report("borrowed TLS session", "session_borrowing", borrowedResult, http.StatusForbidden, "attestation-result"); err != nil {
+	if err := reporter.record("ASB-A2A-006", "borrowed TLS session", "session_borrowing", borrowedResult, http.StatusForbidden, "attestation-result"); err != nil {
 		return err
 	}
 
@@ -199,7 +264,7 @@ func runAgentA(ctx context.Context, opts options, out outputWriter) error {
 		return err
 	}
 	substitutionRequest := newTaskRequest(demoResource)
-	substitutionRequest, err = issueBoundRequest(ctx, substitutionConn, substitutionRequest, managerClient, opts.managerURL, attesterClient, opts.attesterURL, verifierClient, opts.verifierURL, signingKey, agentLeaf)
+	substitutionRequest, err = issueBoundRequest(ctx, substitutionConn, substitutionRequest, managerClient, opts.managerURL, attesterClient, opts.attesterURL, verifierClient, opts.verifierURL, signingKey, agentLeaf, nil)
 	if err != nil {
 		substitutionConn.close()
 		return err
@@ -210,7 +275,7 @@ func runAgentA(ctx context.Context, opts options, out outputWriter) error {
 	if err != nil {
 		return err
 	}
-	if err := report("resource substitution", "data_exfiltration", substitutionResult, http.StatusForbidden, "message-policy"); err != nil {
+	if err := reporter.record("ASB-A2A-007", "bound resource substitution", "data_exfiltration", substitutionResult, http.StatusForbidden, "attestation-result"); err != nil {
 		return err
 	}
 
@@ -223,28 +288,28 @@ func runAgentA(ctx context.Context, opts options, out outputWriter) error {
 	if err != nil {
 		return err
 	}
-	if err := report("version downgrade", "protocol_confusion", versionResult, http.StatusBadRequest, "a2a-version"); err != nil {
+	if err := reporter.record("ASB-A2A-008", "version downgrade", "protocol_confusion", versionResult, http.StatusBadRequest, "a2a-version"); err != nil {
 		return err
 	}
-
-	fmt.Fprintln(out)
-	fmt.Fprintf(out, "summary: %d/%d expected decisions observed\n", completed, completed)
-	fmt.Fprintln(out, "audit output contains decisions only; grants, bindings, evidence, and private keys were not logged")
 	return nil
 }
 
 func newTaskRequest(resource string) a2aSendMessageRequest {
+	return newTaskRequestWithText(resource, "Summarize the authorized document")
+}
+
+func newTaskRequestWithText(resource, text string) a2aSendMessageRequest {
 	return a2aSendMessageRequest{
 		Message: a2aMessage{
-			MessageID: fmt.Sprintf("message-%s-%d", demoTaskID, demoMessageSequence.Add(1)), ContextID: demoContextID, TaskID: demoTaskID, Role: "ROLE_USER",
-			Parts:      []a2aPart{{Text: "Summarize the authorized document", MediaType: "text/plain", Metadata: map[string]string{"operation": demoOperation, "resource": resource}}},
+			MessageID: fmt.Sprintf("message-%s-%d", demoTaskID, demoMessageSequence.Add(1)), ContextID: demoContextID, Role: "ROLE_USER",
+			Parts:      []a2aPart{{Text: text, MediaType: "text/plain", Metadata: map[string]string{"operation": demoOperation, "resource": resource}}},
 			Extensions: []string{securityBindingExtension, attestationResultExtension},
 		},
 		Configuration: &a2aConfiguration{AcceptedOutputModes: []string{"text/plain"}},
 	}
 }
 
-func issueBoundRequest(ctx context.Context, conn *a2aConnection, request a2aSendMessageRequest, managerClient *http.Client, managerURL string, attesterClient *http.Client, attesterURL string, verifierClient *http.Client, verifierURL string, signingKey *ecdsa.PrivateKey, agentLeaf *x509.Certificate) (a2aSendMessageRequest, error) {
+func issueBoundRequest(ctx context.Context, conn *a2aConnection, request a2aSendMessageRequest, managerClient *http.Client, managerURL string, attesterClient *http.Client, attesterURL string, verifierClient *http.Client, verifierURL string, signingKey *ecdsa.PrivateKey, agentLeaf *x509.Certificate, window *proofWindow) (a2aSendMessageRequest, error) {
 	var grant grantResponse
 	if err := postJSONContext(ctx, managerClient, managerURL+"/grants", grantRequest{TaskID: demoTaskID, ContextID: demoContextID}, &grant); err != nil {
 		return request, fmt.Errorf("Manager grant request: %w", err)
@@ -268,6 +333,12 @@ func issueBoundRequest(ctx context.Context, conn *a2aConnection, request a2aSend
 		return request, fmt.Errorf("verifier appraisal request: %w", err)
 	}
 	now := time.Now().UTC().Truncate(time.Second)
+	proofIssuedAt := now
+	proofExpiresAt := now.Add(2 * time.Minute)
+	if window != nil {
+		proofIssuedAt = window.issuedAt.UTC().Truncate(time.Second)
+		proofExpiresAt = window.expiresAt.UTC().Truncate(time.Second)
+	}
 	nonce, err := randomID("nonce-")
 	if err != nil {
 		return request, err
@@ -278,7 +349,7 @@ func issueBoundRequest(ctx context.Context, conn *a2aConnection, request a2aSend
 	}
 	bindingToken, err := signJWT(demoAgentKeyID, signingKey, jwt.MapClaims{
 		"iss": demoAgentIssuer, "aud": demoAudience, "jti": bindingID,
-		"iat": now.Unix(), "exp": now.Add(2 * time.Minute).Unix(),
+		"iat": proofIssuedAt.Unix(), "exp": proofExpiresAt.Unix(),
 		"profile_type": clients.TokenTypeSessionBinding, "profile_version": clients.ProfileVersion,
 		"grant_hash":                clients.IdentityGrantHash(grant.IdentityGrant),
 		"leaf_public_key_sha256":    binding.LeafPublicKeySHA256,
@@ -315,23 +386,24 @@ func issueBoundRequest(ctx context.Context, conn *a2aConnection, request a2aSend
 	return request, nil
 }
 
-func runTamperedEvidenceScenario(ctx context.Context, attesterClient, verifierClient *http.Client, attesterURL, verifierURL string) error {
-	binder := []byte("tamper-scenario-binder")
-	reportData := sha512.Sum512(binder)
-	var evidence evidenceResponse
-	if err := postJSONContext(ctx, attesterClient, attesterURL+"/evidence", evidenceRequest{ReportData: base64.RawURLEncoding.EncodeToString(reportData[:])}, &evidence); err != nil {
-		return err
+func tamperAttestationResult(request *a2aSendMessageRequest) error {
+	raw, ok := request.Message.Metadata[attestationResultExtension]
+	if !ok {
+		return fmt.Errorf("attestation result is missing")
 	}
-	tampered, err := tamperCompactJWT(evidence.Evidence)
+	var token string
+	if err := json.Unmarshal(raw, &token); err != nil {
+		return fmt.Errorf("decode attestation result: %w", err)
+	}
+	tampered, err := tamperCompactJWT(token)
 	if err != nil {
 		return err
 	}
-	evidence.Evidence = tampered
-	var appraisal appraisalResponse
-	err = postJSONContext(ctx, verifierClient, verifierURL+"/attest", appraisalRequest{Binder: base64.RawURLEncoding.EncodeToString(binder), Evidence: evidence}, &appraisal)
-	if err == nil || !strings.Contains(err.Error(), "attestation-rejected") {
-		return fmt.Errorf("tampered evidence was not rejected as expected")
+	encoded, err := json.Marshal(tampered)
+	if err != nil {
+		return fmt.Errorf("encode tampered attestation result: %w", err)
 	}
+	request.Message.Metadata[attestationResultExtension] = encoded
 	return nil
 }
 
@@ -423,11 +495,15 @@ func dialAgentB(rawURL string, config *tls.Config) (*a2aConnection, error) {
 }
 
 func (c *a2aConnection) send(request a2aSendMessageRequest, version string) (a2aResult, error) {
+	return c.sendWithTimeout(request, version, 10*time.Second)
+}
+
+func (c *a2aConnection) sendWithTimeout(request a2aSendMessageRequest, version string, timeout time.Duration) (a2aResult, error) {
 	payload, err := json.Marshal(request)
 	if err != nil {
 		return a2aResult{}, err
 	}
-	if err := c.conn.SetDeadline(time.Now().Add(10 * time.Second)); err != nil {
+	if err := c.conn.SetDeadline(time.Now().Add(timeout)); err != nil {
 		return a2aResult{}, err
 	}
 	httpRequest, err := http.NewRequest(http.MethodPost, "https://"+c.host+"/message:send", bytes.NewReader(payload))
@@ -446,6 +522,10 @@ func (c *a2aConnection) send(request a2aSendMessageRequest, version string) (a2a
 		return a2aResult{}, fmt.Errorf("read A2A response: %w", err)
 	}
 	defer response.Body.Close()
+	responseMediaType, _, err := mime.ParseMediaType(response.Header.Get("Content-Type"))
+	if err != nil || responseMediaType != a2aMediaType {
+		return a2aResult{}, fmt.Errorf("A2A response has unsupported Content-Type %q", response.Header.Get("Content-Type"))
+	}
 	result := a2aResult{status: response.StatusCode}
 	if response.StatusCode >= 200 && response.StatusCode < 300 {
 		if err := json.NewDecoder(io.LimitReader(response.Body, maxBodySize)).Decode(&result.task); err != nil {
@@ -453,11 +533,11 @@ func (c *a2aConnection) send(request a2aSendMessageRequest, version string) (a2a
 		}
 		return result, nil
 	}
-	var p problem
-	if err := json.NewDecoder(io.LimitReader(response.Body, maxBodySize)).Decode(&p); err != nil {
-		return a2aResult{}, fmt.Errorf("decode A2A problem: %w", err)
+	reason, err := decodeA2AErrorReason(response.Body, response.StatusCode)
+	if err != nil {
+		return a2aResult{}, err
 	}
-	result.reason = p.Reason
+	result.reason = reason
 	return result, nil
 }
 

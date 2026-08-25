@@ -8,6 +8,11 @@ inspired by
 [`draft-okutomi-session-bound-agent-identity-06`][draft-06]. It is not an IETF
 or A2A conformance claim.
 
+The wire-profile name is kept for compatibility. The application-facing
+`AcceptedAssertionV2` follows the repository's next-revision design: one scoped
+accepted result, one overall expiry, and a separate replay-retention boundary.
+It is not a claim that the public `-06` draft defines the exact Go structure.
+
 [draft-06]: https://datatracker.ietf.org/doc/html/draft-okutomi-session-bound-agent-identity-06
 
 The profile is separate from v1. With no `--binding-profile` flag the demo
@@ -75,9 +80,25 @@ accepts only the intersection authorized by the signed grant and Agent B's
 fixed local policy; surplus grant values do not expand the returned effective
 authorization.
 
-The reusable v2 verifier returns an `AcceptedAssertionV2` projection containing
-only verifier-selected values and bounded effective authorization. It does not
-return the raw grant or surplus observed fields as accepted application input.
+The reusable v2 verifier returns `AcceptedAssertionV2` only after every check
+and the replay commit succeed. The result contains one shared scope, the
+selected profile, accepted channel and endpoint-key hash, actor, authority,
+interaction, effective authorization, replay receipt, and one overall expiry.
+Target, delegation, and attestation results appear only when accepted for this
+interaction. Every sub-result inherits the assertion's audience and binding-
+context scope. The application view does not expose the raw grant, proof,
+nonce, replay key, source IDs, or surplus grant fields.
+
+The overall expiry is the earliest applicable limit from the authority grant,
+session proof, verified TLS certificate path, challenge, local policy,
+attestation result, and any exported-authenticator or attestation-collateral
+limit used by the selected deployment. A missing required trusted limit fails
+before replay is committed. Source-specific lifetimes can remain in a separate
+audit record; applications use the overall expiry.
+
+Replay retention is separate from application expiry. The nonce reservation
+lasts until the later of the proof and challenge expiry, so an earlier
+attestation, collateral, or local-policy limit cannot make the nonce reusable.
 
 The singular and plural D7 forms are mutually exclusive. `scope` is split only
 on one ASCII space between non-empty values; leading, trailing, repeated, or
@@ -127,7 +148,7 @@ Parsing and reserializing grant claims is not an equivalent digest input.
 The nonce is single-use. `attempt_id` is optional in the byte construction,
 but this demo always issues one. Collision checks cover all live entries in one
 Agent B challenge store. Restart discards pending challenges and therefore
-fails closed. Multi-replica uniqueness and coordination are not provided.
+fails closed. The challenge registry is not shared across replicas.
 
 ## Canonical byte construction
 
@@ -252,19 +273,47 @@ high-level acceptance routine verifies the grant and Agent proof again, checks
 the bounded lifetime and authority-to-holder key relationship, and compares the
 recomputed binding. Its attestation callback then verifies the result signature,
 profile, audience, freshness, binder, and local appraisal policy before D3-D5
-identity/task policy, D6 target, and D7 effective authorization. The durable
-replay commit is last. Agent B returns a successful task only after that commit.
+identity/task policy, D6 target, and D7 effective authorization. The high-level
+verifier commits replay after those checks and only then returns the accepted
+assertion. In the demonstration, that commit also reserves a stable application
+operation ID and request digest in the replay service. Agent B consumes the
+challenge before starting the operation.
 
-The domain-separated replay digest covers at least:
+The domain-separated replay reservation covers:
 
 ```text
-grant_hash, aud, endpoint_role, interaction_type,
-tls_exporter_sha256, binding_context_sha256,
-verifier_nonce, attempt_id
+aud, verifier_nonce
 ```
 
-The replay service stores only a digest. Nil, typed-nil, unavailable,
-malformed, or duplicate replay state fails closed.
+The store receives a domain-separated digest, not the raw nonce. Proof,
+context, attempt, and attestation-result IDs do not alter this reservation;
+changing them cannot make the nonce reusable. Nil, typed-nil, unavailable,
+malformed, or duplicate replay state fails closed. The accepted assertion is
+returned only after the store commits the replay and operation reservation.
+
+The operation digest covers the canonical task and target application
+contexts, but not the grant, proof, nonce, TLS, or attestation data. Agent B
+marks the operation RUNNING before invoking the model or demo action. A known
+success and an encrypted copy of the exact A2A response are committed together.
+Agent B owns the AES-256-GCM key; the store sees only an opaque envelope bound
+to the operation ID, request and outcome digests, media type, version, and
+plaintext length. A fresh, authenticated exact retry can therefore recover a
+lost response without invoking the model again. A handled execution error is
+recorded as INDETERMINATE. A crash or failed journal update can leave RUNNING;
+neither state permits automatic re-execution.
+
+Two reproducible artifacts cover different boundaries:
+
+- [`examples/a2a-multiprocess/testdata/draft06-v2-wire.json`](../examples/a2a-multiprocess/testdata/draft06-v2-wire.json)
+  fixes the HTTP request, public-key JWS inputs, contexts, hashes, and expected
+  Accepted Assertion for this repository profile. A separate Python verifier
+  rebuilds these values and uses OpenSSL to check all three ES256 signatures.
+- [`interop/draft06-v2/appendix-b-context.json`](../interop/draft06-v2/appendix-b-context.json)
+  is rebuilt by a standard-library Python verifier as second-language byte and
+  hash evidence.
+
+Neither artifact proves independent-vendor, multi-host, or complete protocol
+interoperability.
 
 ## CI negative matrix
 
@@ -299,10 +348,19 @@ challenge bytes, or private keys.
 
 ## Caveats and deployment boundary
 
-- Challenge state is process-local; multi-replica coordination is unsupported.
+- Challenge state is process-local; coordinated challenge routing across Agent
+  B replicas is not demonstrated.
+- The default file adapter supports one replay-service process. The optional
+  Redis/Valkey adapter shares replay, operation, and encrypted-result state and
+  commits replay with the operation reservation atomically. Real replica
+  failover has not been tested.
+- Agent B replicas that recover results must share the same protected sealing
+  key. Key rotation and result-retention policy are deployment responsibilities.
 - The direct profile does not treat a TLS-terminating proxy as the final Agent.
 - Hardware collection paths exist, but production endorsement, collateral,
-  measurement, and appraisal policy remain deployment responsibilities.
+  measurement, and appraisal policy remain deployment responsibilities. The
+  demo does not provide a separate collateral-expiry bound, so its hardware
+  path does not claim complete Accepted Assertion expiry conformance.
 - Certificate enrollment, CRL/OCSP service, application data, consent and
   retention policy, external adapters, and backup erasure are outside this
   repository profile.

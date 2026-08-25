@@ -201,7 +201,7 @@ func TestValidateSessionBindingStatementV2RejectsReplacementCharacter(t *testing
 	}
 }
 
-func TestSessionReplayKeyV2CoversMinimumTupleAndHidesNonce(t *testing.T) {
+func TestSessionReplayKeyV2MakesVerifierNonceSingleUse(t *testing.T) {
 	now := time.Unix(1_700_000_000, 0)
 	base := testSessionBindingStatementV2(now)
 	base.Binding.AttemptID = testAttemptIDV2
@@ -216,17 +216,32 @@ func TestSessionReplayKeyV2CoversMinimumTupleAndHidesNonce(t *testing.T) {
 		t.Fatalf("SessionReplayKeyV2() = %q, want domain-separated prefix", baseKey)
 	}
 
-	mutations := map[string]func(*VerifiedSessionBindingStatementV2){
+	sameReservation := map[string]func(*VerifiedSessionBindingStatementV2){
+		"proof ID":         func(v *VerifiedSessionBindingStatementV2) { v.JWTID = "proof-v2-2" },
 		"grant hash":       func(v *VerifiedSessionBindingStatementV2) { v.GrantHash = "grant-hash-2" },
-		"audience":         func(v *VerifiedSessionBindingStatementV2) { v.Audience = "audience-2" },
 		"endpoint role":    func(v *VerifiedSessionBindingStatementV2) { v.Binding.EndpointRole = "server-tls-endpoint" },
 		"interaction type": func(v *VerifiedSessionBindingStatementV2) { v.Binding.InteractionType = "agent-to-tool" },
 		"TLS exporter":     func(v *VerifiedSessionBindingStatementV2) { v.Binding.TLSExporterSHA256 = "exporter-2" },
 		"binding context":  func(v *VerifiedSessionBindingStatementV2) { v.Binding.BindingContextSHA256 = "context-2" },
-		"verifier nonce":   func(v *VerifiedSessionBindingStatementV2) { v.Binding.VerifierNonce = "nonce-2" },
 		"attempt ID":       func(v *VerifiedSessionBindingStatementV2) { v.Binding.AttemptID = "attempt-2" },
 	}
-	for name, mutate := range mutations {
+	for name, mutate := range sameReservation {
+		t.Run(name, func(t *testing.T) {
+			changed := base
+			mutate(&changed)
+			changedKey, err := SessionReplayKeyV2(changed)
+			if err != nil {
+				t.Fatalf("SessionReplayKeyV2() error = %v", err)
+			}
+			if changedKey != baseKey {
+				t.Fatalf("SessionReplayKeyV2() allowed nonce reuse after %s mutation", name)
+			}
+		})
+	}
+	for name, mutate := range map[string]func(*VerifiedSessionBindingStatementV2){
+		"audience":       func(v *VerifiedSessionBindingStatementV2) { v.Audience = "audience-2" },
+		"verifier nonce": func(v *VerifiedSessionBindingStatementV2) { v.Binding.VerifierNonce = "nonce-2" },
+	} {
 		t.Run(name, func(t *testing.T) {
 			changed := base
 			mutate(&changed)
@@ -235,7 +250,7 @@ func TestSessionReplayKeyV2CoversMinimumTupleAndHidesNonce(t *testing.T) {
 				t.Fatalf("SessionReplayKeyV2() error = %v", err)
 			}
 			if changedKey == baseKey {
-				t.Fatalf("SessionReplayKeyV2() unchanged after %s mutation", name)
+				t.Fatalf("SessionReplayKeyV2() did not separate %s", name)
 			}
 		})
 	}
@@ -243,6 +258,7 @@ func TestSessionReplayKeyV2CoversMinimumTupleAndHidesNonce(t *testing.T) {
 
 func TestMarkSessionBindingUsedV2FailsClosedWithoutCache(t *testing.T) {
 	statement := testSessionBindingStatementV2(time.Unix(1_700_000_000, 0))
+	challengeExpiresAt := statement.Binding.ExpiresAt.Add(time.Minute)
 
 	tests := []struct {
 		name  string
@@ -253,7 +269,7 @@ func TestMarkSessionBindingUsedV2FailsClosedWithoutCache(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := MarkSessionBindingUsedV2(tt.cache, statement)
+			err := MarkSessionBindingUsedV2(tt.cache, statement, challengeExpiresAt)
 			if !errors.Is(err, ErrMissingReplayCacheV2) {
 				t.Fatalf("MarkSessionBindingUsedV2() error = %v, want %v", err, ErrMissingReplayCacheV2)
 			}
@@ -264,10 +280,10 @@ func TestMarkSessionBindingUsedV2FailsClosedWithoutCache(t *testing.T) {
 func TestMarkSessionBindingUsedV2RejectsReplay(t *testing.T) {
 	statement := testSessionBindingStatementV2(time.Unix(1_700_000_000, 0))
 	cache := &v2RecordingReplayCache{seen: make(map[string]struct{})}
-	if err := MarkSessionBindingUsedV2(cache, statement); err != nil {
+	if err := MarkSessionBindingUsedV2(cache, statement, statement.Binding.ExpiresAt.Add(time.Minute)); err != nil {
 		t.Fatalf("MarkSessionBindingUsedV2() first error = %v", err)
 	}
-	if err := MarkSessionBindingUsedV2(cache, statement); !errors.Is(err, ErrReplayDetected) {
+	if err := MarkSessionBindingUsedV2(cache, statement, statement.Binding.ExpiresAt.Add(time.Minute)); !errors.Is(err, ErrReplayDetected) {
 		t.Fatalf("MarkSessionBindingUsedV2() replay error = %v, want %v", err, ErrReplayDetected)
 	}
 }
@@ -275,18 +291,78 @@ func TestMarkSessionBindingUsedV2RejectsReplay(t *testing.T) {
 func TestMarkSessionBindingUsedV2ClassifiesReplayStoreFailure(t *testing.T) {
 	statement := testSessionBindingStatementV2(time.Unix(1_700_000_000, 0))
 	cache := &v2RecordingReplayCache{fail: true}
-	err := MarkSessionBindingUsedV2(cache, statement)
+	err := MarkSessionBindingUsedV2(cache, statement, statement.Binding.ExpiresAt.Add(time.Minute))
 	if !errors.Is(err, ErrReplayUnavailable) {
 		t.Fatalf("MarkSessionBindingUsedV2() error = %v, want %v", err, ErrReplayUnavailable)
 	}
 }
 
-type v2RecordingReplayCache struct {
-	seen map[string]struct{}
-	fail bool
+func TestMarkSessionBindingUsedV2RetainsThroughLaterProofOrChallengeExpiry(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0)
+	tests := []struct {
+		name             string
+		proofExpiresAt   time.Time
+		challengeExpires time.Time
+		want             time.Time
+	}{
+		{name: "challenge later", proofExpiresAt: now.Add(time.Minute), challengeExpires: now.Add(10 * time.Minute), want: now.Add(10 * time.Minute)},
+		{name: "proof later", proofExpiresAt: now.Add(10 * time.Minute), challengeExpires: now.Add(time.Minute), want: now.Add(10 * time.Minute)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			statement := testSessionBindingStatementV2(now)
+			statement.Binding.ExpiresAt = tt.proofExpiresAt
+			cache := &v2RecordingReplayCache{seen: make(map[string]struct{})}
+			if err := MarkSessionBindingUsedV2(cache, statement, tt.challengeExpires); err != nil {
+				t.Fatal(err)
+			}
+			if !cache.expiresAt.Equal(tt.want) {
+				t.Fatalf("replay retention = %v, want %v", cache.expiresAt, tt.want)
+			}
+		})
+	}
 }
 
-func (cache *v2RecordingReplayCache) MarkUsed(key string, _ time.Time) error {
+func TestMarkSessionBindingUsedV2RequiresChallengeExpiry(t *testing.T) {
+	statement := testSessionBindingStatementV2(time.Unix(1_700_000_000, 0))
+	cache := &v2RecordingReplayCache{seen: make(map[string]struct{})}
+	if err := MarkSessionBindingUsedV2(cache, statement, time.Time{}); !errors.Is(err, ErrMissingAcceptanceInputV2) {
+		t.Fatalf("MarkSessionBindingUsedV2() error = %v, want %v", err, ErrMissingAcceptanceInputV2)
+	}
+}
+
+func TestMarkSessionBindingUsedV2RequiresProofExpiry(t *testing.T) {
+	statement := testSessionBindingStatementV2(time.Unix(1_700_000_000, 0))
+	challengeExpiresAt := statement.Binding.ExpiresAt
+	statement.Binding.ExpiresAt = time.Time{}
+	cache := &v2RecordingReplayCache{seen: make(map[string]struct{})}
+	if err := MarkSessionBindingUsedV2(cache, statement, challengeExpiresAt); !errors.Is(err, ErrMissingBinding) {
+		t.Fatalf("MarkSessionBindingUsedV2() error = %v, want %v", err, ErrMissingBinding)
+	}
+}
+
+func TestMarkSessionBindingUsedV2RejectsReplayAfterProofBeforeChallengeExpiry(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0)
+	statement := testSessionBindingStatementV2(now)
+	statement.Binding.ExpiresAt = now.Add(time.Minute)
+	challengeExpiresAt := now.Add(10 * time.Minute)
+	cache := &v2ExpiringReplayCache{now: now, seen: make(map[string]time.Time)}
+	if err := MarkSessionBindingUsedV2(cache, statement, challengeExpiresAt); err != nil {
+		t.Fatal(err)
+	}
+	cache.now = now.Add(2 * time.Minute)
+	if err := MarkSessionBindingUsedV2(cache, statement, challengeExpiresAt); !errors.Is(err, ErrReplayDetected) {
+		t.Fatalf("replay between proof and challenge expiry error = %v, want %v", err, ErrReplayDetected)
+	}
+}
+
+type v2RecordingReplayCache struct {
+	seen      map[string]struct{}
+	expiresAt time.Time
+	fail      bool
+}
+
+func (cache *v2RecordingReplayCache) MarkUsed(key string, expiresAt time.Time) error {
 	if cache.fail {
 		return errors.New("store unavailable")
 	}
@@ -294,6 +370,20 @@ func (cache *v2RecordingReplayCache) MarkUsed(key string, _ time.Time) error {
 		return ErrReplayDetected
 	}
 	cache.seen[key] = struct{}{}
+	cache.expiresAt = expiresAt
+	return nil
+}
+
+type v2ExpiringReplayCache struct {
+	now  time.Time
+	seen map[string]time.Time
+}
+
+func (cache *v2ExpiringReplayCache) MarkUsed(key string, expiresAt time.Time) error {
+	if retainedUntil, ok := cache.seen[key]; ok && cache.now.Before(retainedUntil) {
+		return ErrReplayDetected
+	}
+	cache.seen[key] = expiresAt
 	return nil
 }
 
@@ -313,6 +403,7 @@ func testBindingV2(now time.Time) BindingV2 {
 func testVerifiedGrantV2(now time.Time) VerifiedGrantV2 {
 	return VerifiedGrantV2{
 		VerifiedGrant: VerifiedGrant{
+			JWTID:           "grant-v2-1",
 			Issuer:          "policy-authority",
 			IssuerKey:       "authority-key",
 			Audience:        "agent-b",
@@ -337,6 +428,7 @@ func testVerifiedGrantV2(now time.Time) VerifiedGrantV2 {
 
 func testSessionBindingStatementV2(now time.Time) VerifiedSessionBindingStatementV2 {
 	return VerifiedSessionBindingStatementV2{
+		JWTID:     "proof-v2-1",
 		GrantHash: "grant-hash",
 		Audience:  "agent-b",
 		SignerKey: "agent-a-key",

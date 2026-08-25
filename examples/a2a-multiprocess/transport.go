@@ -87,6 +87,15 @@ func newHTTPClient(tlsConfig *tls.Config) *http.Client {
 	}
 }
 
+func serverWriteTimeout(opts options, role string) time.Duration {
+	if role == "agent-b" && effectiveWorkflow(opts.workflow) == workflowLLMConversation {
+		// The selected Agent B runtime has a 20-second request limit. Keep the
+		// authenticated A2A response open long enough for that bounded call.
+		return 30 * time.Second
+	}
+	return 10 * time.Second
+}
+
 func serveTLS(ctx context.Context, opts options, role string, clientAuth tls.ClientAuthType, handler http.Handler, out outputWriter) error {
 	config, err := loadServerTLS(opts.stateDir, role, clientAuth)
 	if err != nil {
@@ -112,7 +121,7 @@ func serveTLS(ctx context.Context, opts options, role string, clientAuth tls.Cli
 		Handler:           handler,
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
-		WriteTimeout:      10 * time.Second,
+		WriteTimeout:      serverWriteTimeout(opts, role),
 		IdleTimeout:       30 * time.Second,
 	}
 	serveErrors := make(chan error, 1)

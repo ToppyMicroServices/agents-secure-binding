@@ -1,0 +1,31 @@
+{
+  "schema": "urn:asb:a2a-multihost-deployment:v1",
+  "deployment_id": "asb-multihost-example-v1",
+  "binding_profile": "draft06-v2",
+  "attestation": {
+    "mode": "simulation",
+    "platform": "auto"
+  },
+  "endpoints": {
+    "manager": {
+      "url": "https://manager.asb.example:8443",
+      "listen": "0.0.0.0:8443"
+    },
+    "attester": {
+      "url": "https://attester.asb.example:8444",
+      "listen": "0.0.0.0:8444"
+    },
+    "verifier": {
+      "url": "https://verifier.asb.example:8445",
+      "listen": "0.0.0.0:8445"
+    },
+    "replay": {
+      "url": "https://replay.asb.example:8446",
+      "listen": "0.0.0.0:8446"
+    },
+    "agent-b": {
+      "url": "https://agent-b.asb.example:8447",
+      "listen": "0.0.0.0:8447"
+    }
+  }
+}

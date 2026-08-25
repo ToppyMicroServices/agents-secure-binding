@@ -20,6 +20,8 @@ const (
 
 	bindingProfileV1         = "v1"
 	bindingProfileDraft06V2  = "draft06-v2"
+	workflowSecurityTest     = "security-test"
+	workflowLLMConversation  = "llm-conversation"
 	v2EndpointRole           = "client-tls-endpoint"
 	v2InteractionType        = "agent-to-agent"
 	v2ProtocolID             = "urn:agents-secure-binding:a2a-http-json:v2"
@@ -178,6 +180,23 @@ type problem struct {
 	Status int    `json:"status"`
 	Detail string `json:"detail,omitempty"`
 	Reason string `json:"reason,omitempty"`
+}
+
+type a2aErrorResponse struct {
+	Error a2aErrorStatus `json:"error"`
+}
+
+type a2aErrorStatus struct {
+	Code    int              `json:"code"`
+	Status  string           `json:"status"`
+	Message string           `json:"message"`
+	Details []a2aErrorDetail `json:"details"`
+}
+
+type a2aErrorDetail struct {
+	Type   string `json:"@type"`
+	Reason string `json:"reason"`
+	Domain string `json:"domain"`
 }
 
 type attestationResultClaims struct {

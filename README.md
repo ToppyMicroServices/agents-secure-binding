@@ -1,13 +1,19 @@
 # Agents Secure Binding
 
-Agents Secure Binding is a verifier-side acceptance profile and implementation
-repository for binding an Agent identity to the session, context, attestation
-facts, and local policy under which it is accepted.
+**Verified interaction for independently operated AI Agents.**
 
-A verifier accepts an Agent only when a verified authority grant,
-holder-of-key proof, accepted TLS or exported-authenticator session, freshness
-and replay state, any required attestation result, and verifier-local policy
-all describe the same intended interaction.
+Agents Secure Binding (ASB) lets Agent runtimes exchange LLM-generated messages
+through a verified boundary. The receiver authenticates the sending Agent,
+binds the exact request to the accepted session, checks its authority and
+replay state, and only then releases the request to a local model or tool.
+
+The LLM is not the security principal. It generates content; ASB decides which
+Agent sent it, what that Agent may do, and whether the interaction is fresh and
+intended. Model choice remains separate from identity and authority.
+
+ASB is also the verifier-side acceptance profile and Go implementation behind
+that boundary. A verifier accepts an Agent only when its grant, proof, session,
+attestation facts, and local policy describe the same interaction.
 
 The primary failure class is context diversion: accepting cryptographically
 valid material for a different service, tenant, Agent, task, delegation, or
@@ -21,6 +27,45 @@ non-Split-Knowledge protected-change consumer. See
 [`docs/API_COMPATIBILITY.md`](docs/API_COMPATIBILITY.md) and
 [`docs/production-deployment-profile.md`](docs/production-deployment-profile.md).
 
+## Secure LLM-to-LLM Conversation
+
+The product-candidate `llm-conversation` workflow connects two separately
+configured OpenAI-compatible models:
+
+```text
+Agent A + LLM A
+      |
+      | exact, bound A2A request
+      v
+ASB boundary: mTLS + grant + session + attestation + policy + replay
+      |
+      v
+Agent B + LLM B
+```
+
+Agent A's model writes the request. Agent B calls its model only after the
+request passes ASB verification. The two model endpoints and API keys are
+configured independently, so they may use different servers or providers.
+
+```sh
+make a2a-test
+./build/asb-a2a-test \
+  --workflow llm-conversation \
+  --prompt-file ./prompt.txt \
+  --agent-a-llm-url https://provider-a.example \
+  --agent-a-llm-model model-a \
+  --agent-b-llm-url https://provider-b.example \
+  --agent-b-llm-model model-b
+```
+
+Set provider keys with `ASB_AGENT_A_LLM_API_KEY` and
+`ASB_AGENT_B_LLM_API_KEY`, preferably through a secret manager. The default
+demo launches separate processes on one host. An experimental multi-host mode
+generates per-role credential bundles and linked run evidence, but no physical
+multi-host or independent-vendor run is claimed. Reverse-direction ASB binding
+is also outside the verified product surface. See the
+[multiprocess guide](examples/a2a-multiprocess/README.md) for the exact scope.
+
 ## Acceptance Contract
 
 The verifier evaluates one ordered contract:
@@ -30,7 +75,9 @@ The verifier evaluates one ordered contract:
 3. Check freshness, nonce, and replay state.
 4. Bind any required attestation result to the same session.
 5. Compare authenticated observed values with verifier-local expected policy.
-6. Commit one-shot replay state before returning the accepted identity.
+6. Commit one-shot replay state before returning the accepted identity. A
+   non-idempotent application can reserve its stable operation in the same
+   transaction.
 
 The core implementation is centered on `pkg/clients`, `pkg/atls`, and
 `pkg/atls/identitypolicy`. `pkg/agtp` contains reference adapters for JWT/JWS,
@@ -47,6 +94,8 @@ slice.
   v2 profile for the multiprocess A2A demonstration.
 - `docs/live-red-team-report.md`: current live-style red-team evidence and
   evaluation boundaries.
+- `docs/a2a-security-testkit-v1.md`: candidate self-contained A2A security
+  binding test surface and result contract.
 - `docs/API_COMPATIBILITY.md`: supported v1 API and compatibility policy.
 - `docs/production-deployment-profile.md`: fixed production choices for trust,
   revocation, attestation, distributed replay, and exact action binding.
@@ -59,9 +108,16 @@ slice.
 - `pkg/clients`, `pkg/atls`, and `pkg/atls/identitypolicy`: Direct-Agent
   acceptance implementation.
 - `pkg/production`: supported attested and software-only fail-closed
-  compositions and Redis/Valkey replay adapter.
+  compositions, plus TLS Redis/Valkey replay and shared operation/result
+  adapters.
 - `pkg/authorityquorum`: generic k-of-n authority approval binding with an
   atomic consume contract and a reduced, secret-free projection.
+- `pkg/operationjournal`: durable application-operation reservation and state,
+  including atomic replay acceptance and optional opaque result persistence.
+- `interop/draft06-v2`: standard-library Python verifiers for the v2 context
+  vector and full HTTP/JWS fixture. OpenSSL checks the fixture's three ES256
+  signatures. This is same-repository, second-language evidence, not a complete
+  interoperability claim.
 - `docs/authority-quorum-binding-v1.md`: authority-slot, policy rotation,
   revocation, session interruption, and external release boundary.
 - `examples/protected-change-consumer`: independent HTTPS application consumer
@@ -160,21 +216,43 @@ not change generated protobuf sources.
 
 See `docs/live-red-team-report.md` for the evidence matrix.
 
-## Agent-to-Agent Demonstration
+## A2A Interaction Lab
 
-Run the multiprocess A2A 1.0 demonstration:
+The packaged binary is both a runnable two-Agent lab and a self-contained
+Direct-Agent v1 security test kit candidate:
 
 ```sh
-go run ./examples/a2a-multiprocess
+make a2a-test
+./build/asb-a2a-test
 ```
 
-It separates Manager, Attester, Verifier, durable Replay Store, Agent A, and
-Agent B into operating-system processes. The same binary has a Docker Compose
-topology and an optional fail-closed SNP/TDX hardware mode. See the
-[multiprocess demonstration guide](examples/a2a-multiprocess/README.md) for the
-protocol subset, trust boundaries, Docker command, hardware prerequisites, and
-negative scenarios. The guide also shows how to select the separate
-draft-06-inspired v2 profile; the no-flag behavior remains v1.
+It starts Manager, Attester, Verifier, durable Replay Store, Agent A, and Agent
+B as separate processes. The default suite runs eight ASB binding scenarios
+over the A2A 1.0 HTTP+JSON Send Message surface.
+
+Print JSON or write a report file:
+
+```sh
+./build/asb-a2a-test --format json
+./build/asb-a2a-test --report ./asb-a2a-report.json
+```
+
+Reports follow the versioned
+[`a2a-security-test-report-v1` JSON Schema](schemas/a2a-security-test-report-v1.schema.json).
+This is an ASB binding tester, not a general A2A conformance suite. External
+target mode is not implemented. Text and JSON reports, including the optional
+two-model conversation, also work with the separate experimental `draft06-v2`
+profile.
+
+The v2 test data also includes a fixed
+[HTTP/JWS wire fixture](examples/a2a-multiprocess/testdata/README.md) and an
+[independently implemented Python verifier](interop/draft06-v2/README.md) for
+the fixed contexts and full fixture. Their claim boundaries are stated with the
+fixtures.
+
+See the [test-kit candidate](docs/a2a-security-testkit-v1.md) and
+[multiprocess guide](examples/a2a-multiprocess/README.md) for the scenario list,
+conversation limits, Docker topology, and hardware prerequisites.
 
 The smaller software-only binding demonstration remains available:
 

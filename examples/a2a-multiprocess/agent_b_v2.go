@@ -18,23 +18,43 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/thinksyncs/agents-secure-binding/pkg/atls/identitypolicy"
 	"github.com/thinksyncs/agents-secure-binding/pkg/clients"
+	"github.com/thinksyncs/agents-secure-binding/pkg/llmruntime"
+	"github.com/thinksyncs/agents-secure-binding/pkg/operationjournal"
 )
 
 type agentBServerV2 struct {
 	managerKey          any
 	agentKey            any
 	verifierKey         any
-	replay              identitypolicy.ReplayCache
+	operationClient     *httpOperationJournalClientV2
 	challenges          *challengeStoreV2
 	allowSimulation     bool
 	expectedMeasurement string
 	publicURL           string
 	clock               func() time.Time
+	generator           llmruntime.Generator
+}
+
+type preparedConversationInputV2 struct {
+	text                 string
+	textSHA256           string
+	bindingContextSHA256 string
 }
 
 func runAgentBV2(ctx context.Context, opts options, out outputWriter) error {
 	if opts.replayURL == "" {
 		return fmt.Errorf("replay URL is required")
+	}
+	var generator llmruntime.Generator
+	if effectiveWorkflow(opts.workflow) == workflowLLMConversation {
+		if err := validateAgentBConversationOptions(opts); err != nil {
+			return err
+		}
+		configuredGenerator, generationErr := newConversationGenerator(opts.agentBLLMURL, opts.agentBLLMModel, opts.agentBAPIKeyEnv, opts.allowInsecureLLMLoopback)
+		if generationErr != nil {
+			return fmt.Errorf("configure Agent B LLM: %w", generationErr)
+		}
+		generator = configuredGenerator
 	}
 	dir := roleDirectory(opts.stateDir, "agent-b")
 	managerKey, err := loadPublicKey(filepath.Join(dir, managerPublicFile))
@@ -49,18 +69,20 @@ func runAgentBV2(ctx context.Context, opts options, out outputWriter) error {
 	if err != nil {
 		return err
 	}
+	resultSealer, err := loadResultSealerV2(filepath.Join(dir, resultSealingKeyFileV2))
+	if err != nil {
+		return err
+	}
 	replayTLS, err := loadClientTLS(opts.stateDir, "agent-b", opts.replayURL)
 	if err != nil {
 		return err
 	}
 	server := &agentBServerV2{
 		managerKey: managerKey, agentKey: agentKey, verifierKey: verifierKey,
-		replay: identitypolicy.NewSetNXReplayCache(ctx, &httpSetNXStore{
-			client: newHTTPClient(replayTLS), url: opts.replayURL,
-		}),
-		challenges: newChallengeStoreV2(), allowSimulation: opts.allowSimulation,
+		operationClient: &httpOperationJournalClientV2{client: newHTTPClient(replayTLS), url: opts.replayURL, sealer: resultSealer},
+		challenges:      newChallengeStoreV2(), allowSimulation: opts.allowSimulation,
 		expectedMeasurement: opts.expectedMeasurementHex, publicURL: opts.publicURL,
-		clock: func() time.Time { return time.Now().UTC() },
+		clock: func() time.Time { return time.Now().UTC() }, generator: generator,
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
@@ -167,6 +189,12 @@ func (s *agentBServerV2) handleMessage(w http.ResponseWriter, r *http.Request) {
 		writeProblem(w, http.StatusForbidden, "message-policy", "Message policy rejected", "exact target resource or operation does not match verifier policy")
 		return
 	}
+	operationReservation, err := applicationOperationV2(request, contexts)
+	if err != nil {
+		writeProblem(w, http.StatusForbidden, "message-policy", "Message policy rejected", "stable operation identity could not be derived")
+		return
+	}
+	operationSession := newOperationSessionV2(r.Context(), s.operationClient, operationReservation)
 	sbo, err := decodeSBOV2(request.Message.Metadata[securityBindingExtensionV2])
 	if err != nil {
 		writeProblem(w, http.StatusForbidden, "security-binding", "Security binding rejected", "Security Binding Object is missing or malformed")
@@ -213,38 +241,73 @@ func (s *agentBServerV2) handleMessage(w http.ResponseWriter, r *http.Request) {
 		writeProblem(w, http.StatusForbidden, "binding-context", "Binding context rejected", "request, target, grant, or accepted TLS binding does not match")
 		return
 	}
+	var preparedConversation preparedConversationInputV2
+	if s.generator != nil {
+		preparedConversation, err = prepareConversationInputV2(request, expected)
+		if err != nil {
+			writeProblem(w, http.StatusBadRequest, "invalid-llm-input", "Invalid LLM input", "the bound request does not contain valid model input")
+			return
+		}
+	}
 	now := s.now()
-	_, err = clients.VerifySessionIdentityJWTV2(sbo.Grant, sbo.Binding, clients.SessionIdentityJWTOptionsV2{
+	endpointCredentialExpiresAt, err := acceptedPeerCredentialExpiryV2(r.TLS, now)
+	if err != nil {
+		writeProblem(w, http.StatusForbidden, "client-identity", "Client identity rejected", "accepted peer credential lifetime is unavailable")
+		return
+	}
+	verification, err := clients.VerifySessionIdentityJWTV2(sbo.Grant, sbo.Binding, clients.SessionIdentityJWTOptionsV2{
 		Grant: grantVerifyOptions,
 		SessionBinding: clients.JWTVerifyOptions{
 			ExpectedIssuer: demoAgentIssuer, ExpectedAudience: demoAudience,
 			ValidMethods: []string{jwt.SigningMethodES256.Alg()}, LocalKeys: []clients.LocalKey{{KeyID: demoAgentKeyID, Key: s.agentKey}},
 		},
-		Policy: receiverPolicyV2(), ExpectedBinding: expected, ReplayCache: s.replay, Now: now,
-		AttestationVerifier: func(grant identitypolicy.VerifiedGrantV2, statement identitypolicy.VerifiedSessionBindingStatementV2, accepted identitypolicy.BindingV2) error {
+		Policy: receiverPolicyV2(), ExpectedBinding: expected, ReplayCache: operationSession, Now: now,
+		AcceptedProfile: identitypolicy.ProfileSelectionV2{
+			ProfileType: clients.TokenTypeSessionBinding, ProfileVersion: clients.ProfileVersionV2,
+			BindingProfile: bindingProfileDraft06V2, ProtocolID: v2ProtocolID,
+		},
+		Freshness: identitypolicy.FreshnessInputsV2{
+			EndpointCredentialExpiresAt: endpointCredentialExpiresAt,
+			EvidenceChallengeExpiresAt:  challengeRecord.expiresAt,
+			LocalPolicyExpiresAt:        now.Add(challengeLifetimeV2),
+		},
+		Clock: s.now,
+		AttestationVerifier: func(grant identitypolicy.VerifiedGrantV2, statement identitypolicy.VerifiedSessionBindingStatementV2, accepted identitypolicy.BindingV2) (identitypolicy.VerifiedAttestationResultV2, error) {
 			attestationClaims, err := parseAttestationResultV2(attestationToken, s.verifierKey, now)
 			if err != nil || attestationClaims.BinderSHA256 != accepted.AttestationBinderSHA256 {
-				return fmt.Errorf("attestation signature, profile, audience, or binder mismatch")
+				return identitypolicy.VerifiedAttestationResultV2{}, fmt.Errorf("attestation signature, profile, audience, or binder mismatch")
 			}
 			if err := s.validateAttestationPolicyV2(attestationClaims); err != nil {
-				return err
+				return identitypolicy.VerifiedAttestationResultV2{}, err
 			}
 			if statement.Binding.AttestationBinderSHA256 != attestationClaims.BinderSHA256 || accepted.AttestationBinderSHA256 != attestationClaims.BinderSHA256 {
-				return fmt.Errorf("attestation binder mismatch")
+				return identitypolicy.VerifiedAttestationResultV2{}, fmt.Errorf("attestation binder mismatch")
 			}
 			if attestationClaims.ExpiresAt == nil || !attestationClaims.ExpiresAt.Time.After(now) {
-				return fmt.Errorf("attestation result is not currently valid")
+				return identitypolicy.VerifiedAttestationResultV2{}, fmt.Errorf("attestation result is not currently valid")
 			}
 			if statement.Binding.IssuedAt.Unix() != sbo.IssuedAt || statement.Binding.ExpiresAt.Unix() != sbo.ExpiresAt {
-				return fmt.Errorf("wrapper and proof lifetimes differ")
+				return identitypolicy.VerifiedAttestationResultV2{}, fmt.Errorf("wrapper and proof lifetimes differ")
 			}
 			if err := validateChallengeBoundExpiryV2(statement.Binding.ExpiresAt.Unix(), challengeRecord.expiresAt); err != nil {
-				return err
+				return identitypolicy.VerifiedAttestationResultV2{}, err
 			}
 			if contexts.Resource != demoResource || contexts.Operation != demoOperation {
-				return fmt.Errorf("request does not select the exact local target")
+				return identitypolicy.VerifiedAttestationResultV2{}, fmt.Errorf("request does not select the exact local target")
 			}
-			return nil
+			return identitypolicy.VerifiedAttestationResultV2{
+				ProfileType:       attestationClaims.ProfileType,
+				ProfileVersion:    attestationClaims.ProfileVersion,
+				ResultID:          attestationClaims.ID,
+				Issuer:            attestationClaims.Issuer,
+				Subject:           attestationClaims.Subject,
+				SignerKeyID:       demoVerifierKeyID,
+				Audience:          attestationClaims.Audience[0],
+				AppraisalPolicyID: attestationClaims.AppraisalPolicyID,
+				BinderSHA256:      attestationClaims.BinderSHA256,
+				IssuedAt:          attestationClaims.IssuedAt.Time,
+				ExpiresAt:         attestationClaims.ExpiresAt.Time,
+			}, nil
 		},
 	})
 	if err != nil {
@@ -256,11 +319,112 @@ func (s *agentBServerV2) handleMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	challengeConsumed = true
-	writeJSON(w, http.StatusOK, a2aMediaType, a2aTaskResponse{Task: a2aTask{
-		ID: request.Message.TaskID, ContextID: request.Message.ContextID,
-		Status:    a2aTaskStatus{State: "TASK_STATE_COMPLETED", Timestamp: now.Format(time.RFC3339)},
-		Artifacts: []a2aArtifact{{ArtifactID: "artifact-summary-v2", Name: "Demonstration result", Parts: []a2aPart{{Text: "The authorized Agent B completed the draft-06 bound demonstration task.", MediaType: "text/plain"}}}},
-	}})
+	operationResult, err := operationSession.executeOnce(r.Context(), verification.Accepted.Expiry, s.now, func(ctx context.Context) (operationResultV2, error) {
+		var artifactText string
+		if s.generator == nil {
+			artifactText = "The authorized Agent B completed the draft-06 bound demonstration task."
+		} else {
+			generated, generationErr := s.generateAcceptedConversationArtifactV2(ctx, preparedConversation, request, verification.Accepted)
+			if generationErr != nil {
+				return operationResultV2{}, generationErr
+			}
+			artifactText = generated
+		}
+		return completedOperationResultV2(request, artifactText, s.now())
+	})
+	if err != nil {
+		var stateErr *operationStateErrorV2
+		var executionErr *operationExecutionErrorV2
+		switch {
+		case errors.Is(err, errOperationAcceptanceExpiredV2):
+			writeProblem(w, http.StatusForbidden, "accepted-assertion-expired", "Accepted assertion expired", "the accepted identity binding expired before operation start")
+		case errors.As(err, &stateErr):
+			writeOperationStatusErrorV2(w, stateErr.Record)
+		case errors.As(err, &executionErr):
+			writeProblem(w, http.StatusServiceUnavailable, "llm-unavailable", "LLM unavailable", "Agent B could not produce a model response; the operation is indeterminate")
+		default:
+			writeProblem(w, http.StatusServiceUnavailable, "operation-state", "Operation state unavailable", "durable operation state could not be updated")
+		}
+		return
+	}
+	writeOperationResultV2(w, operationResult)
+}
+
+func writeOperationStatusErrorV2(w http.ResponseWriter, record operationjournal.Record) {
+	reason := "operation-state"
+	title := "Operation already reserved"
+	detail := "the operation was not executed again"
+	switch record.State {
+	case operationjournal.StateRunning:
+		reason, title = "operation-running", "Operation is running"
+	case operationjournal.StateIndeterminate:
+		reason, title = "operation-indeterminate", "Operation result is indeterminate"
+	case operationjournal.StateSucceeded, operationjournal.StateFailed, operationjournal.StateCanceled:
+		reason, title = "operation-complete", "Operation is complete"
+	}
+	writeProblem(w, http.StatusConflict, reason, title, detail)
+}
+
+func prepareConversationInputV2(request a2aSendMessageRequest, expected identitypolicy.BindingV2) (preparedConversationInputV2, error) {
+	if len(request.Message.Parts) != 1 || request.Message.Parts[0].MediaType != "text/plain" || !validConversationText(request.Message.Parts[0].Text) {
+		return preparedConversationInputV2{}, fmt.Errorf("exactly one valid text/plain part is required")
+	}
+	if expected.BindingContextSHA256 == "" {
+		return preparedConversationInputV2{}, fmt.Errorf("accepted binding context is missing")
+	}
+	contexts, err := canonicalRequestContextsV2(request)
+	if err != nil || contexts.Resource != demoResource || contexts.Operation != demoOperation {
+		return preparedConversationInputV2{}, fmt.Errorf("request target is invalid")
+	}
+	text := request.Message.Parts[0].Text
+	return preparedConversationInputV2{
+		text:                 text,
+		textSHA256:           sha256String([]byte(text)),
+		bindingContextSHA256: expected.BindingContextSHA256,
+	}, nil
+}
+
+func (s *agentBServerV2) generateAcceptedConversationArtifactV2(ctx context.Context, prepared preparedConversationInputV2, request a2aSendMessageRequest, accepted identitypolicy.AcceptedAssertionV2) (string, error) {
+	if s == nil || s.generator == nil {
+		return "", fmt.Errorf("Agent B generator is unavailable")
+	}
+	if len(request.Message.Parts) != 1 || request.Message.Parts[0].Text != prepared.text ||
+		sha256String([]byte(request.Message.Parts[0].Text)) != prepared.textSHA256 || !validConversationText(prepared.text) {
+		return "", fmt.Errorf("prepared conversation input no longer matches the request")
+	}
+	profile := accepted.AcceptedProfile
+	if profile.ProfileType != clients.TokenTypeSessionBinding || profile.ProfileVersion != clients.ProfileVersionV2 ||
+		profile.BindingProfile != bindingProfileDraft06V2 || profile.ProtocolID != v2ProtocolID || accepted.Scope.Audience != demoAudience {
+		return "", fmt.Errorf("accepted profile does not authorize draft-06 conversation execution")
+	}
+	if prepared.bindingContextSHA256 == "" || accepted.Scope.BindingContextSHA256 != prepared.bindingContextSHA256 {
+		return "", fmt.Errorf("accepted assertion does not match the prepared request")
+	}
+	if accepted.ReplayCommit.State != identitypolicy.ReplayCommitStateCommittedV2 || accepted.ReplayCommit.RetainUntil.IsZero() ||
+		accepted.Expiry.IsZero() || accepted.ReplayCommit.RetainUntil.Before(accepted.Expiry) || !s.now().Before(accepted.Expiry) {
+		return "", fmt.Errorf("accepted replay commitment is unavailable or expired")
+	}
+	interaction := accepted.AcceptedInteraction
+	if interaction.Type != v2InteractionType || interaction.TaskID != demoTaskID || interaction.ThreadID != demoThreadID ||
+		interaction.IntentRef != demoIntent || accepted.AcceptedActor.ID != demoAgentIssuer {
+		return "", fmt.Errorf("accepted interaction does not authorize this conversation")
+	}
+	if accepted.AcceptedTarget == nil || accepted.AcceptedTarget.Resource != demoResource || accepted.AcceptedTarget.Operation != demoOperation {
+		return "", fmt.Errorf("accepted target does not authorize this conversation")
+	}
+	authorization := accepted.EffectiveAuthorization
+	if authorization.CapabilityRef != demoCapability || len(authorization.Scopes) != 1 || authorization.Scopes[0] != demoReadScope ||
+		len(authorization.Resources) != 1 || authorization.Resources[0] != demoResource {
+		return "", fmt.Errorf("effective authorization does not authorize this conversation")
+	}
+	generated, err := s.generator.Generate(ctx, llmruntime.Request{System: agentBSystemPrompt, Input: prepared.text})
+	if err != nil {
+		return "", err
+	}
+	if !validConversationText(generated.Text) {
+		return "", fmt.Errorf("Agent B generator returned invalid conversation text")
+	}
+	return generated.Text, nil
 }
 
 func (s *agentBServerV2) now() time.Time {
@@ -268,6 +432,26 @@ func (s *agentBServerV2) now() time.Time {
 		return s.clock().UTC()
 	}
 	return time.Now().UTC()
+}
+
+func acceptedPeerCredentialExpiryV2(state *tls.ConnectionState, now time.Time) (time.Time, error) {
+	if state == nil || len(state.PeerCertificates) == 0 || len(state.VerifiedChains) == 0 || len(state.VerifiedChains[0]) == 0 {
+		return time.Time{}, fmt.Errorf("verified peer certificate path is unavailable")
+	}
+	earliest := time.Time{}
+	for _, certificate := range state.VerifiedChains[0] {
+		if certificate == nil || certificate.NotAfter.IsZero() {
+			return time.Time{}, fmt.Errorf("verified peer certificate expiry is unavailable")
+		}
+		expiresAt := certificate.NotAfter.UTC()
+		if earliest.IsZero() || expiresAt.Before(earliest) {
+			earliest = expiresAt
+		}
+	}
+	if now.IsZero() || !now.Before(earliest) {
+		return time.Time{}, fmt.Errorf("verified peer certificate path is expired")
+	}
+	return earliest, nil
 }
 
 func (s *agentBServerV2) validateAttestationPolicyV2(claims *attestationResultClaims) error {

@@ -44,6 +44,22 @@ The following remain experimental or outside the supported product API:
 
 An exported Go identifier outside the supported list is not implicitly stable.
 
+## A2A Security Test Kit candidate
+
+The main branch contains an unreleased, self-contained ASB binding tester. Its
+default Direct-Agent v1 profile runs eight fixed scenarios and can emit a
+machine-readable report described by
+`schemas/a2a-security-test-report-v1.schema.json`. The candidate also includes
+strict report decoding and validation in `pkg/a2asecuritytest`.
+
+This surface is not part of the v1.1 compatibility promise. Until it is
+released as a supported product surface, its command flags, Go package, and
+report schema may change. The experimental multi-host runner can exercise a
+configured alternate Agent B that implements the fixed repository profile. It
+is not a general target scanner or A2A conformance suite, and `draft06-v2`
+remains experimental. The candidate `pkg/llmruntime` adapter and
+`llm-conversation` workflow are also outside the v1.1 compatibility promise.
+
 ## Compatibility rules
 
 Tags follow semantic versioning.

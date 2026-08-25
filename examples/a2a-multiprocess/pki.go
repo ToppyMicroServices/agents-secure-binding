@@ -19,14 +19,15 @@ import (
 )
 
 const (
-	caFile             = "ca.pem"
-	tlsCertFile        = "tls-cert.pem"
-	tlsKeyFile         = "tls-key.pem"
-	signingKeyFile     = "signing-key.pem"
-	managerPublicFile  = "manager-public.pem"
-	agentPublicFile    = "agent-public.pem"
-	verifierPublicFile = "verifier-public.pem"
-	simPublicFile      = "simulation-attester-public.pem"
+	caFile                 = "ca.pem"
+	tlsCertFile            = "tls-cert.pem"
+	tlsKeyFile             = "tls-key.pem"
+	signingKeyFile         = "signing-key.pem"
+	managerPublicFile      = "manager-public.pem"
+	agentPublicFile        = "agent-public.pem"
+	verifierPublicFile     = "verifier-public.pem"
+	simPublicFile          = "simulation-attester-public.pem"
+	resultSealingKeyFileV2 = "result-sealing.key"
 )
 
 type certificateSpec struct {
@@ -114,6 +115,13 @@ func bootstrapState(stateDir string) error {
 		return err
 	}
 	if err := writePublicKey(filepath.Join(roleDirectory(stateDir, "verifier"), simPublicFile), &simulationKey.PublicKey); err != nil {
+		return err
+	}
+	resultSealingKey := make([]byte, 32)
+	if _, err := rand.Read(resultSealingKey); err != nil {
+		return fmt.Errorf("generate Agent B result sealing key: %w", err)
+	}
+	if err := writeFile(filepath.Join(roleDirectory(stateDir, "agent-b"), resultSealingKeyFileV2), resultSealingKey, 0o600); err != nil {
 		return err
 	}
 	return nil
