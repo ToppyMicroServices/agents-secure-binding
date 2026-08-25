@@ -101,9 +101,9 @@ func orchestratorChildEnvironment(opts options, role string) ([]string, error) {
 		}
 		secretNames = append(secretNames, opts.agentAAPIKeyEnv, opts.agentBAPIKeyEnv)
 		switch role {
-		case "agent-a":
+		case demoAgentIssuer:
 			allowed = opts.agentAAPIKeyEnv
-		case "agent-b":
+		case demoAudience:
 			allowed = opts.agentBAPIKeyEnv
 		}
 	}

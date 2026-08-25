@@ -238,8 +238,14 @@ func TestDraft06V2FullWireEvidenceFixture(t *testing.T) {
 		t.Fatalf("verify complete fixture: %v", err)
 	}
 	if !reflect.DeepEqual(result.Accepted, fixture.Expected.AcceptedAssertion) {
-		got, _ := json.MarshalIndent(result.Accepted, "", "  ")
-		want, _ := json.MarshalIndent(fixture.Expected.AcceptedAssertion, "", "  ")
+		got, err := json.MarshalIndent(result.Accepted, "", "  ")
+		if err != nil {
+			t.Fatalf("marshal accepted assertion: %v", err)
+		}
+		want, err := json.MarshalIndent(fixture.Expected.AcceptedAssertion, "", "  ")
+		if err != nil {
+			t.Fatalf("marshal fixture assertion: %v", err)
+		}
 		t.Fatalf("accepted assertion differs\n got: %s\nwant: %s", got, want)
 	}
 	if _, err := clients.VerifySessionIdentityJWTV2(sbo.Grant, sbo.Binding, verifyOptions); !errors.Is(err, identitypolicy.ErrReplayDetected) {

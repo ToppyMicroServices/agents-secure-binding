@@ -215,9 +215,9 @@ func TestOperationSessionV2MarksExecutionFailureIndeterminate(t *testing.T) {
 		calls.Add(1)
 		return operationResultV2{}, errors.New("provider response was lost")
 	})
-	var executionErr *operationExecutionErrorV2
+	var executionErr *operationExecutionV2Error
 	if !errors.As(err, &executionErr) {
-		t.Fatalf("executeOnce() error = %v, want operationExecutionErrorV2", err)
+		t.Fatalf("executeOnce() error = %v, want operationExecutionV2Error", err)
 	}
 
 	retry := newOperationSessionV2(context.Background(), client, reservation)
@@ -228,7 +228,7 @@ func TestOperationSessionV2MarksExecutionFailureIndeterminate(t *testing.T) {
 		calls.Add(1)
 		return testOperationResultV2(t, "must not run"), nil
 	})
-	var stateErr *operationStateErrorV2
+	var stateErr *operationStateV2Error
 	if !errors.As(err, &stateErr) || stateErr.Record.State != operationjournal.StateIndeterminate {
 		t.Fatalf("retry executeOnce() error = %v, want INDETERMINATE state", err)
 	}

@@ -105,7 +105,7 @@ func (s *agentBServer) handleAgentCard(w http.ResponseWriter, r *http.Request) {
 		"securitySchemes":      map[string]any{"mutualTLS": map[string]any{"mtlsSecurityScheme": map[string]any{"description": "Demo CA-issued client certificate"}}},
 		"securityRequirements": []map[string]any{{"schemes": map[string]any{"mutualTLS": map[string]any{"list": []string{}}}}},
 		"skills":               []map[string]any{{"id": demoCapability, "name": "Summarize a referenced document", "description": "Summarizes one receiver-authorized document reference", "tags": []string{"demo"}}},
-		"defaultInputModes":    []string{"text/plain"}, "defaultOutputModes": []string{"text/plain"},
+		"defaultInputModes":    []string{plainTextMediaType}, "defaultOutputModes": []string{plainTextMediaType},
 	})
 }
 
@@ -218,7 +218,7 @@ func (s *agentBServer) handleMessage(w http.ResponseWriter, r *http.Request) {
 	}
 	artifactText := "The authorized Agent B completed the bound demonstration task."
 	if s.generator != nil {
-		if len(request.Message.Parts) != 1 || request.Message.Parts[0].MediaType != "text/plain" || !validConversationText(request.Message.Parts[0].Text) {
+		if len(request.Message.Parts) != 1 || request.Message.Parts[0].MediaType != plainTextMediaType || !validConversationText(request.Message.Parts[0].Text) {
 			writeASBA2AError(w, http.StatusBadRequest, "invalid-llm-input", "The verified request does not contain valid LLM input")
 			return
 		}
@@ -240,7 +240,7 @@ func (s *agentBServer) handleMessage(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, a2aMediaType, a2aTaskResponse{Task: a2aTask{
 		ID: taskID, ContextID: request.Message.ContextID,
 		Status:    a2aTaskStatus{State: "TASK_STATE_COMPLETED", Timestamp: time.Now().UTC().Format(time.RFC3339)},
-		Artifacts: []a2aArtifact{{ArtifactID: "artifact-summary-1", Name: "Demonstration result", Parts: []a2aPart{{Text: artifactText, MediaType: "text/plain"}}}},
+		Artifacts: []a2aArtifact{{ArtifactID: "artifact-summary-1", Name: "Demonstration result", Parts: []a2aPart{{Text: artifactText, MediaType: plainTextMediaType}}}},
 	}})
 }
 

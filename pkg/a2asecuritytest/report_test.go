@@ -90,7 +90,6 @@ func TestReportRejectsInconsistentResults(t *testing.T) {
 		},
 	}
 	for name, mutate := range tests {
-		name, mutate := name, mutate
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			report := validReport()
@@ -127,7 +126,6 @@ func TestDecodeReportRejectsUnsafeJSON(t *testing.T) {
 		"oversized":               {reader: bytes.NewReader(bytes.Repeat([]byte{' '}, MaxReportBytes+1))},
 	}
 	for name, test := range tests {
-		name, test := name, test
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			if _, err := DecodeReport(test.reader); !errors.Is(err, ErrInvalidReport) {

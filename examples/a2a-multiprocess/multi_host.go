@@ -37,7 +37,7 @@ const (
 
 var multiHostIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`)
 
-var multiHostServerRoles = []string{"manager", "attester", "verifier", "replay", "agent-b"}
+var multiHostServerRoles = []string{"manager", "attester", "verifier", "replay", demoAudience}
 
 // multiHostDeploymentV1 is an operator-supplied topology. It contains only
 // public origins and local listen addresses; credentials stay in role bundles.
@@ -248,12 +248,12 @@ func applyMultiHostDeployment(opts options, deployment multiHostDeploymentV1) op
 	opts.attesterURL = deployment.Endpoints["attester"].URL
 	opts.verifierURL = deployment.Endpoints["verifier"].URL
 	opts.replayURL = deployment.Endpoints["replay"].URL
-	opts.agentBURL = deployment.Endpoints["agent-b"].URL
-	opts.publicURL = deployment.Endpoints["agent-b"].URL
+	opts.agentBURL = deployment.Endpoints[demoAudience].URL
+	opts.publicURL = deployment.Endpoints[demoAudience].URL
 	if endpoint, ok := deployment.Endpoints[opts.role]; ok {
 		opts.listen = endpoint.Listen
 	}
-	if deployment.Attestation.Mode == modeSimulation && opts.role == "agent-b" {
+	if deployment.Attestation.Mode == modeSimulation && opts.role == demoAudience {
 		opts.allowSimulation = true
 	}
 	return opts
@@ -442,9 +442,9 @@ func buildMultiHostTrustManifest(stateDir string, deployment multiHostDeployment
 	keys := []struct {
 		use, keyID, path string
 	}{
-		{"agent-a-session-binding", demoAgentKeyID, filepath.Join(roleDirectory(stateDir, "agent-b"), agentPublicFile)},
-		{"manager-authority-grant", demoManagerKeyID, filepath.Join(roleDirectory(stateDir, "agent-b"), managerPublicFile)},
-		{"verifier-attestation-result", demoVerifierKeyID, filepath.Join(roleDirectory(stateDir, "agent-b"), verifierPublicFile)},
+		{"agent-a-session-binding", demoAgentKeyID, filepath.Join(roleDirectory(stateDir, demoAudience), agentPublicFile)},
+		{"manager-authority-grant", demoManagerKeyID, filepath.Join(roleDirectory(stateDir, demoAudience), managerPublicFile)},
+		{"verifier-attestation-result", demoVerifierKeyID, filepath.Join(roleDirectory(stateDir, demoAudience), verifierPublicFile)},
 		{"simulation-evidence", demoAttesterKeyID, filepath.Join(roleDirectory(stateDir, "verifier"), simPublicFile)},
 	}
 	for _, item := range keys {

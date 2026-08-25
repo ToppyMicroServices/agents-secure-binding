@@ -100,7 +100,7 @@ func parseFlags() options {
 	flag.StringVar(&opts.expectedMeasurementHex, "expected-measurement-hex", "", "required hardware measurement (SNP MEASUREMENT or TDX MRTD), hex encoded")
 	flag.BoolVar(&opts.allowSimulation, "allow-simulation", false, "allow explicitly marked simulation attestation results")
 	flag.StringVar(&opts.bindingProfile, "binding-profile", bindingProfileV1, "binding profile: v1 or draft06-v2")
-	flag.StringVar(&opts.reportFormat, "format", "text", "result format: text or json")
+	flag.StringVar(&opts.reportFormat, "format", reportFormatText, "result format: text or json")
 	flag.StringVar(&opts.reportFile, "report", "", "optional path for an atomic JSON report")
 	flag.StringVar(&opts.deploymentConfig, "deployment-config", "", "multi-host deployment JSON; supplies HTTPS endpoints, listen addresses, and the binding profile")
 	flag.StringVar(&opts.trustManifest, "trust-manifest", "", "multi-host non-secret trust manifest (defaults to <state-dir>/multihost-trust.json)")
@@ -142,17 +142,17 @@ func runRole(ctx context.Context, opts options, out outputWriter) error {
 			return fmt.Errorf("multi-host deployment config is used with explicit roles, not the loopback orchestrator")
 		}
 	}
-	if opts.deploymentEvidence != "" && (deployment == nil || (opts.role != "agent-a" && opts.role != "verify-evidence")) {
+	if opts.deploymentEvidence != "" && (deployment == nil || (opts.role != demoAgentIssuer && opts.role != roleVerifyEvidence)) {
 		return fmt.Errorf("deployment evidence requires --deployment-config and Agent A or verify-evidence role")
 	}
-	if opts.trustManifest != "" && (deployment == nil || (opts.role != "bootstrap" && !((opts.role == "agent-a" || opts.role == "verify-evidence") && opts.deploymentEvidence != ""))) {
+	if opts.trustManifest != "" && (deployment == nil || (opts.role != "bootstrap" && !((opts.role == demoAgentIssuer || opts.role == roleVerifyEvidence) && opts.deploymentEvidence != ""))) {
 		return fmt.Errorf("trust manifest is used only by multi-host bootstrap, Agent A evidence, or evidence verification")
 	}
 	opts.workflow = effectiveWorkflow(opts.workflow)
 	if opts.workflow != workflowSecurityTest && opts.workflow != workflowLLMConversation {
 		return fmt.Errorf("unsupported workflow %q", opts.workflow)
 	}
-	if opts.reportFormat != "text" && opts.reportFormat != "json" {
+	if opts.reportFormat != reportFormatText && opts.reportFormat != reportFormatJSON {
 		return fmt.Errorf("unsupported result format %q", opts.reportFormat)
 	}
 	switch opts.role {
@@ -171,11 +171,11 @@ func runRole(ctx context.Context, opts options, out outputWriter) error {
 		return runVerifier(ctx, opts, out)
 	case "replay":
 		return runReplayStore(ctx, opts, out)
-	case "agent-b":
+	case demoAudience:
 		return runAgentB(ctx, opts, out)
-	case "agent-a":
+	case demoAgentIssuer:
 		return runAgentA(ctx, opts, out)
-	case "verify-evidence":
+	case roleVerifyEvidence:
 		return verifyMultiHostRunEvidence(opts, out)
 	default:
 		return fmt.Errorf("unsupported role %q", opts.role)

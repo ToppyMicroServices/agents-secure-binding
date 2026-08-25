@@ -365,7 +365,7 @@ func newFakeChatRuntime(t *testing.T, model, apiKey, output string) *fakeChatRun
 		if request.Method != http.MethodPost || request.URL.Path != "/v1/chat/completions" {
 			t.Errorf("fake LLM request = %s %s, want POST /v1/chat/completions", request.Method, request.URL.Path)
 		}
-		if request.Header.Get("Content-Type") != "application/json" {
+		if request.Header.Get("Content-Type") != applicationJSONMediaType {
 			t.Errorf("fake LLM Content-Type = %q, want application/json", request.Header.Get("Content-Type"))
 		}
 		if body.Model != model {
@@ -375,7 +375,7 @@ func newFakeChatRuntime(t *testing.T, model, apiKey, output string) *fakeChatRun
 			t.Errorf("fake LLM received the wrong role API key")
 		}
 
-		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Type", applicationJSONMediaType)
 		response := map[string]any{
 			"id": "chatcmpl-fixture", "object": "chat.completion", "created": int64(1), "model": model,
 			"choices": []map[string]any{{
@@ -406,7 +406,7 @@ func (r *fakeChatRuntime) Requests() []recordedChatRequest {
 
 func assertChatRequest(t *testing.T, request recordedChatRequest, model, apiKey, system, input string) {
 	t.Helper()
-	if request.Method != http.MethodPost || request.Path != "/v1/chat/completions" || request.ContentType != "application/json" {
+	if request.Method != http.MethodPost || request.Path != "/v1/chat/completions" || request.ContentType != applicationJSONMediaType {
 		t.Fatalf("chat request transport = %s %s %q", request.Method, request.Path, request.ContentType)
 	}
 	if request.Authorization != "Bearer "+apiKey {

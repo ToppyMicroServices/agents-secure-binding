@@ -59,9 +59,11 @@ type pathLock struct {
 
 var pathLocks sync.Map
 
-var _ Store = (*FileStore)(nil)
-var _ AcceptanceStore = (*FileStore)(nil)
-var _ ResultStore = (*FileStore)(nil)
+var (
+	_ Store           = (*FileStore)(nil)
+	_ AcceptanceStore = (*FileStore)(nil)
+	_ ResultStore     = (*FileStore)(nil)
+)
 
 // OpenFileStore opens or prepares a versioned journal at path. The parent
 // directory is created with owner-only permissions when absent. Existing
