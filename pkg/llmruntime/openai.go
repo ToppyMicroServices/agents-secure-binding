@@ -192,8 +192,10 @@ func isLoopbackHost(host string) bool {
 	return address != nil && address.IsLoopback()
 }
 
-type lookupIPAddrFunc func(context.Context, string) ([]net.IPAddr, error)
-type dialContextFunc func(context.Context, string, string) (net.Conn, error)
+type (
+	lookupIPAddrFunc func(context.Context, string) ([]net.IPAddr, error)
+	dialContextFunc  func(context.Context, string, string) (net.Conn, error)
+)
 
 func loopbackDialContext(lookup lookupIPAddrFunc, dial dialContextFunc) dialContextFunc {
 	return func(ctx context.Context, network, address string) (net.Conn, error) {

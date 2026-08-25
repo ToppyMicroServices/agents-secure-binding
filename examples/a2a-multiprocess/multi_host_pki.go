@@ -36,7 +36,7 @@ func bootstrapMultiHostState(stateDir string, deployment multiHostDeploymentV1, 
 	} else if !os.IsNotExist(err) {
 		return fmt.Errorf("inspect trust manifest path: %w", err)
 	}
-	for _, role := range append([]string{"agent-a"}, multiHostServerRoles...) {
+	for _, role := range append([]string{demoAgentIssuer}, multiHostServerRoles...) {
 		if pathWithin(trustManifestPath, roleDirectory(stateDir, role)) {
 			return fmt.Errorf("trust manifest must be outside role credential directories")
 		}
@@ -102,13 +102,13 @@ func replaceTLSCredentialsForMultiHost(stateDir string, deployment multiHostDepl
 	}
 	caPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: caDER})
 
-	roles := append([]string{"agent-a"}, multiHostServerRoles...)
+	roles := append([]string{demoAgentIssuer}, multiHostServerRoles...)
 	for index, role := range roles {
 		commonName := role
 		switch role {
-		case "agent-a":
+		case demoAgentIssuer:
 			commonName = demoAgentIssuer
-		case "agent-b":
+		case demoAudience:
 			commonName = demoAudience
 		}
 		var dnsNames []string

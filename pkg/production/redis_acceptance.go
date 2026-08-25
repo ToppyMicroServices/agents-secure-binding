@@ -20,14 +20,22 @@ import (
 )
 
 const (
-	redisOperationRecordSchema = "urn:asb:operation-journal:redis:v1"
-	redisSealedResultSchema    = "urn:asb:sealed-result:redis:v1"
-	maxRedisNamespaceBytes     = 128
-	maxRedisRecordReplyBytes   = 16 << 10
-	maxRedisResultReplyBytes   = 512 << 10
-	maxRedisReplayTTL          = 365 * 24 * time.Hour
-	maxSafeJSONInteger         = uint64(1<<53 - 1)
-	maxUnixMillis              = int64(253402300799999) // 9999-12-31T23:59:59.999Z
+	redisOperationRecordSchema          = "urn:asb:operation-journal:redis:v1"
+	redisSealedResultSchema             = "urn:asb:sealed-result:redis:v1"
+	maxRedisNamespaceBytes              = 128
+	maxRedisRecordReplyBytes            = 16 << 10
+	maxRedisResultReplyBytes            = 512 << 10
+	maxRedisReplayTTL                   = 365 * 24 * time.Hour
+	maxSafeJSONInteger                  = uint64(1<<53 - 1)
+	maxUnixMillis                       = int64(253402300799999) // 9999-12-31T23:59:59.999Z
+	redisJournalStatusCreated           = "CREATED"
+	redisJournalStatusReplayReserved    = "REPLAY_RESERVED"
+	redisJournalStatusUpdated           = "UPDATED"
+	redisJournalStatusIdempotent        = "IDEMPOTENT"
+	redisJournalStatusCompleted         = "COMPLETED"
+	redisJournalStatusConflict          = "CONFLICT"
+	redisJournalStatusInvalidTransition = "INVALID_TRANSITION"
+	redisJournalStatusCorrupt           = "CORRUPT"
 )
 
 // RedisAcceptanceStore is a shared Redis/Valkey operation journal for Agent B
@@ -50,8 +58,10 @@ type RedisAcceptanceStore struct {
 	MaxReplayTTL time.Duration
 }
 
-var _ operationjournal.AcceptanceStore = (*RedisAcceptanceStore)(nil)
-var _ operationjournal.ResultStore = (*RedisAcceptanceStore)(nil)
+var (
+	_ operationjournal.AcceptanceStore = (*RedisAcceptanceStore)(nil)
+	_ operationjournal.ResultStore     = (*RedisAcceptanceStore)(nil)
+)
 
 // Validate checks the local Redis/Valkey safety configuration without dialing
 // the backend.
@@ -100,11 +110,11 @@ func (s *RedisAcceptanceStore) Reserve(ctx context.Context, request operationjou
 	if err := journalStatusError(reply.status); err != nil {
 		return operationjournal.Record{}, false, err
 	}
-	if reply.status != "CREATED" && reply.status != "EXISTING" {
+	if reply.status != redisJournalStatusCreated && reply.status != "EXISTING" {
 		return operationjournal.Record{}, false, operationjournal.ErrUnavailable
 	}
 	record, err := decodeRedisJournalRecord(reply.parts, request.OperationID, request.RequestDigest)
-	return record, reply.status == "CREATED", err
+	return record, reply.status == redisJournalStatusCreated, err
 }
 
 func (s *RedisAcceptanceStore) ReserveAcceptance(ctx context.Context, request operationjournal.AcceptanceReservation) (operationjournal.Record, bool, error) {
@@ -134,11 +144,11 @@ func (s *RedisAcceptanceStore) ReserveAcceptance(ctx context.Context, request op
 	if err := journalStatusError(reply.status); err != nil {
 		return operationjournal.Record{}, false, err
 	}
-	if reply.status != "CREATED" && reply.status != "REPLAY_RESERVED" {
+	if reply.status != redisJournalStatusCreated && reply.status != redisJournalStatusReplayReserved {
 		return operationjournal.Record{}, false, operationjournal.ErrUnavailable
 	}
 	record, err := decodeRedisJournalRecord(reply.parts, request.Operation.OperationID, request.Operation.RequestDigest)
-	return record, reply.status == "CREATED", err
+	return record, reply.status == redisJournalStatusCreated, err
 }
 
 func (s *RedisAcceptanceStore) Lookup(ctx context.Context, operationID, requestDigest string) (operationjournal.Record, error) {
@@ -171,7 +181,7 @@ func (s *RedisAcceptanceStore) MarkRunning(ctx context.Context, operationID, req
 	if err := journalStatusError(reply.status); err != nil {
 		return operationjournal.Record{}, false, err
 	}
-	if reply.status != "UPDATED" && reply.status != "IDEMPOTENT" {
+	if reply.status != redisJournalStatusUpdated && reply.status != redisJournalStatusIdempotent {
 		return operationjournal.Record{}, false, operationjournal.ErrUnavailable
 	}
 	record, err := decodeRedisJournalRecord(reply.parts, operationID, requestDigest)
@@ -181,7 +191,7 @@ func (s *RedisAcceptanceStore) MarkRunning(ctx context.Context, operationID, req
 	if record.State != operationjournal.StateRunning {
 		return operationjournal.Record{}, false, operationjournal.ErrUnavailable
 	}
-	return record, reply.status == "UPDATED", nil
+	return record, reply.status == redisJournalStatusUpdated, nil
 }
 
 func (s *RedisAcceptanceStore) MarkIndeterminate(ctx context.Context, operationID, requestDigest string) (operationjournal.Record, error) {
@@ -196,7 +206,7 @@ func (s *RedisAcceptanceStore) MarkIndeterminate(ctx context.Context, operationI
 	if err := journalStatusError(reply.status); err != nil {
 		return operationjournal.Record{}, err
 	}
-	if reply.status != "UPDATED" && reply.status != "IDEMPOTENT" {
+	if reply.status != redisJournalStatusUpdated && reply.status != redisJournalStatusIdempotent {
 		return operationjournal.Record{}, operationjournal.ErrUnavailable
 	}
 	record, err := decodeRedisJournalRecord(reply.parts, operationID, requestDigest)
@@ -223,7 +233,7 @@ func (s *RedisAcceptanceStore) Finalize(ctx context.Context, final operationjour
 	if err := journalStatusError(reply.status); err != nil {
 		return operationjournal.Record{}, err
 	}
-	if reply.status != "UPDATED" && reply.status != "IDEMPOTENT" {
+	if reply.status != redisJournalStatusUpdated && reply.status != redisJournalStatusIdempotent {
 		return operationjournal.Record{}, operationjournal.ErrUnavailable
 	}
 	record, err := decodeRedisJournalRecord(reply.parts, final.OperationID, final.RequestDigest)
@@ -271,7 +281,7 @@ func (s *RedisAcceptanceStore) FinalizeWithResult(ctx context.Context, final ope
 	if err := journalStatusError(reply.status); err != nil {
 		return operationjournal.Record{}, err
 	}
-	if reply.status != "COMPLETED" && reply.status != "IDEMPOTENT" {
+	if reply.status != redisJournalStatusCompleted && reply.status != redisJournalStatusIdempotent {
 		return operationjournal.Record{}, operationjournal.ErrUnavailable
 	}
 	record, err := decodeRedisJournalRecord(reply.parts, final.OperationID, final.RequestDigest)
@@ -419,7 +429,7 @@ func parseRedisJournalReply(payload string) (redisJournalReply, error) {
 
 func redisJournalWriteStatus(status string) bool {
 	switch status {
-	case "CREATED", "REPLAY_RESERVED", "UPDATED", "COMPLETED":
+	case redisJournalStatusCreated, redisJournalStatusReplayReserved, redisJournalStatusUpdated, redisJournalStatusCompleted:
 		return true
 	default:
 		return false
@@ -428,19 +438,19 @@ func redisJournalWriteStatus(status string) bool {
 
 func journalStatusError(status string) error {
 	switch status {
-	case "CREATED", "EXISTING", "REPLAY_RESERVED", "FOUND", "UPDATED", "IDEMPOTENT", "COMPLETED", "FOUND_RESULT":
+	case redisJournalStatusCreated, "EXISTING", redisJournalStatusReplayReserved, "FOUND", redisJournalStatusUpdated, redisJournalStatusIdempotent, redisJournalStatusCompleted, "FOUND_RESULT":
 		return nil
 	case "REPLAY":
 		return operationjournal.ErrReplay
-	case "CONFLICT":
+	case redisJournalStatusConflict:
 		return operationjournal.ErrConflict
 	case "NOT_FOUND", "NO_RESULT":
 		return operationjournal.ErrNotFound
 	case "INVALID", "EXPIRED", "TTL_TOO_LONG":
 		return operationjournal.ErrInvalidRecord
-	case "INVALID_TRANSITION":
+	case redisJournalStatusInvalidTransition:
 		return operationjournal.ErrInvalidTransition
-	case "CORRUPT":
+	case redisJournalStatusCorrupt:
 		return operationjournal.ErrUnavailable
 	default:
 		return operationjournal.ErrUnavailable

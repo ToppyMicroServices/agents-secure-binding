@@ -74,21 +74,21 @@ func newTestRunReporter(opts options, out outputWriter) (*testRunReporter, error
 }
 
 func (r *testRunReporter) printConversationHeader(attestationMode string) {
-	if r.format != "text" {
+	if r.format != reportFormatText {
 		return
 	}
-	r.writeText("ASB A2A LLM Conversation: %s\n", r.report.Profile)
-	r.writeText("processes: Manager, Attester (%s), Verifier, durable Replay Store, Agent B, Agent A\n", attestationMode)
-	r.writeText("Agent A text is bound before delivery; Agent B is called only after acceptance\n\n")
+	r.writeTextf("ASB A2A LLM Conversation: %s\n", r.report.Profile)
+	r.writeTextf("processes: Manager, Attester (%s), Verifier, durable Replay Store, Agent B, Agent A\n", attestationMode)
+	r.writeTextf("Agent A text is bound before delivery; Agent B is called only after acceptance\n\n")
 }
 
 func (r *testRunReporter) printHeader(attestationMode string) {
-	if r.format != "text" {
+	if r.format != reportFormatText {
 		return
 	}
-	r.writeText("ASB A2A Security Test Kit: %s\n", r.report.Profile)
-	r.writeText("processes: Manager, Attester (%s), Verifier, durable Replay Store, Agent B, Agent A\n", attestationMode)
-	r.writeText("transport: TLS 1.3 mutual authentication; application: A2A HTTP+JSON Send Message subset\n\n")
+	r.writeTextf("ASB A2A Security Test Kit: %s\n", r.report.Profile)
+	r.writeTextf("processes: Manager, Attester (%s), Verifier, durable Replay Store, Agent B, Agent A\n", attestationMode)
+	r.writeTextf("transport: TLS 1.3 mutual authentication; application: A2A HTTP+JSON Send Message subset\n\n")
 }
 
 func (r *testRunReporter) record(id, name, risk string, result a2aResult, expectedStatus int, expectedReason string) error {
@@ -103,12 +103,12 @@ func (r *testRunReporter) record(id, name, risk string, result a2aResult, expect
 		ID: id, Name: name, Risk: risk,
 		Expected: expected, Observed: observed, Status: status,
 	})
-	if r.format == "text" {
-		r.writeText("[%s] %-24s %-5s status=%d risk=%s", status, name, expected.Decision, result.status, risk)
+	if r.format == reportFormatText {
+		r.writeTextf("[%s] %-24s %-5s status=%d risk=%s", status, name, expected.Decision, result.status, risk)
 		if result.reason != "" {
-			r.writeText(" reason=%s", result.reason)
+			r.writeTextf(" reason=%s", result.reason)
 		}
-		r.writeText("\n")
+		r.writeTextf("\n")
 	}
 	if status == a2asecuritytest.StatusFail {
 		return fmt.Errorf("scenario %q: status=%d reason=%q, want status=%d reason=%q", name, result.status, result.reason, expectedStatus, expectedReason)
@@ -156,13 +156,13 @@ func (r *testRunReporter) finish() error {
 			return err
 		}
 	}
-	if r.format == "json" {
+	if r.format == reportFormatJSON {
 		if _, err := r.out.Write(payload); err != nil {
 			return fmt.Errorf("write JSON report: %w", err)
 		}
 	} else {
-		r.writeText("\nsummary: %d/%d expected decisions observed\n", r.report.Summary.Passed, r.report.Summary.Total)
-		r.writeText("report contains decisions only; grants, bindings, evidence, and private keys were not logged\n")
+		r.writeTextf("\nsummary: %d/%d expected decisions observed\n", r.report.Summary.Passed, r.report.Summary.Total)
+		r.writeTextf("report contains decisions only; grants, bindings, evidence, and private keys were not logged\n")
 	}
 	return r.outputError
 }
@@ -236,7 +236,7 @@ func writeReportAtomically(path string, payload []byte) error {
 	return nil
 }
 
-func (r *testRunReporter) writeText(format string, values ...any) {
+func (r *testRunReporter) writeTextf(format string, values ...any) {
 	if r.outputError != nil {
 		return
 	}

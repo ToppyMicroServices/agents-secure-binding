@@ -12,6 +12,8 @@ import (
 	"time"
 )
 
+const testAttestationBinderSHA256V2 = "attestation-binder"
+
 func TestPrepareAssertionV2UsesEarliestApplicableExpiry(t *testing.T) {
 	now := time.Unix(1_700_000_000, 0).UTC()
 	tests := map[string]struct {
@@ -56,7 +58,7 @@ func TestPrepareAssertionV2UsesEarliestApplicableExpiry(t *testing.T) {
 		},
 		"attestation result": {
 			configure: func(_ *VerifiedGrantV2, statement *VerifiedSessionBindingStatementV2, inputs *AcceptanceInputsV2) {
-				statement.Binding.AttestationBinderSHA256 = "attestation-binder"
+				statement.Binding.AttestationBinderSHA256 = testAttestationBinderSHA256V2
 				result := testVerifiedAttestationResultV2(now, statement.Binding.AttestationBinderSHA256)
 				result.ExpiresAt = now.Add(time.Minute)
 				inputs.AttestationResult = &result
@@ -124,7 +126,7 @@ func TestPrepareAssertionV2RejectsAttestationForAnotherActor(t *testing.T) {
 	now := time.Unix(1_700_000_000, 0).UTC()
 	grant := testVerifiedGrantV2(now)
 	statement := testSessionBindingStatementV2(now)
-	statement.Binding.AttestationBinderSHA256 = "attestation-binder"
+	statement.Binding.AttestationBinderSHA256 = testAttestationBinderSHA256V2
 	assertion, err := NewAssertionFromSessionBindingV2(grant, statement, now)
 	if err != nil {
 		t.Fatal(err)
@@ -220,7 +222,7 @@ func TestCommitPreparedAssertionV2ReservesNonceThroughAcceptanceWindow(t *testin
 	now := time.Unix(1_700_000_000, 0).UTC()
 	grant := testVerifiedGrantV2(now)
 	statement := testSessionBindingStatementV2(now)
-	statement.Binding.AttestationBinderSHA256 = "attestation-binder"
+	statement.Binding.AttestationBinderSHA256 = testAttestationBinderSHA256V2
 	result := testVerifiedAttestationResultV2(now, statement.Binding.AttestationBinderSHA256)
 	result.ExpiresAt = now.Add(30 * time.Second)
 	inputs := testAcceptanceInputsV2(now, &result)

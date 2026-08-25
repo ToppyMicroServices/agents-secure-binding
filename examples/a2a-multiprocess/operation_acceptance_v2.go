@@ -94,23 +94,23 @@ type operationSessionV2 struct {
 	committed   bool
 }
 
-type operationStateErrorV2 struct {
+type operationStateV2Error struct {
 	Record operationjournal.Record
 }
 
-func (e *operationStateErrorV2) Error() string {
+func (e *operationStateV2Error) Error() string {
 	return fmt.Sprintf("operation is already in state %s", e.Record.State)
 }
 
-type operationExecutionErrorV2 struct {
+type operationExecutionV2Error struct {
 	Err error
 }
 
-func (e *operationExecutionErrorV2) Error() string {
+func (e *operationExecutionV2Error) Error() string {
 	return fmt.Sprintf("accepted operation execution failed: %v", e.Err)
 }
 
-func (e *operationExecutionErrorV2) Unwrap() error { return e.Err }
+func (e *operationExecutionV2Error) Unwrap() error { return e.Err }
 
 func newOperationSessionV2(ctx context.Context, client *httpOperationJournalClientV2, reservation operationjournal.Reservation) *operationSessionV2 {
 	return &operationSessionV2{ctx: ctx, client: client, reservation: reservation}
@@ -159,11 +159,11 @@ func (s *operationSessionV2) executeOnce(ctx context.Context, acceptedUntil time
 			}
 			return result, nil
 		}
-		return operationResultV2{}, &operationStateErrorV2{Record: record}
+		return operationResultV2{}, &operationStateV2Error{Record: record}
 	}
 	now = clock()
 	if now.IsZero() || !now.Before(acceptedUntil) {
-		transitionCtx, cancel := context.WithTimeout(context.Background(), operationTransitionTimeoutV2)
+		transitionCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), operationTransitionTimeoutV2)
 		defer cancel()
 		if _, err := s.client.finalize(transitionCtx, operationjournal.Finalization{
 			OperationID: s.reservation.OperationID, RequestDigest: s.reservation.RequestDigest,
@@ -176,24 +176,24 @@ func (s *operationSessionV2) executeOnce(ctx context.Context, acceptedUntil time
 
 	result, executionErr := execute(ctx)
 	if executionErr != nil {
-		transitionCtx, cancel := context.WithTimeout(context.Background(), operationTransitionTimeoutV2)
+		transitionCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), operationTransitionTimeoutV2)
 		defer cancel()
 		if _, err := s.client.markIndeterminate(transitionCtx, s.reservation); err != nil {
 			return operationResultV2{}, fmt.Errorf("%w: record indeterminate operation: %v", operationjournal.ErrUnavailable, err)
 		}
-		return operationResultV2{}, &operationExecutionErrorV2{Err: executionErr}
+		return operationResultV2{}, &operationExecutionV2Error{Err: executionErr}
 	}
 	sealed, err := s.client.sealResult(s.reservation, result)
 	if err != nil {
-		transitionCtx, cancel := context.WithTimeout(context.Background(), operationTransitionTimeoutV2)
+		transitionCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), operationTransitionTimeoutV2)
 		defer cancel()
 		if _, transitionErr := s.client.markIndeterminate(transitionCtx, s.reservation); transitionErr != nil {
 			return operationResultV2{}, fmt.Errorf("%w: seal result: %v; record indeterminate operation: %v", operationjournal.ErrUnavailable, err, transitionErr)
 		}
-		return operationResultV2{}, &operationExecutionErrorV2{Err: err}
+		return operationResultV2{}, &operationExecutionV2Error{Err: err}
 	}
 
-	transitionCtx, cancel := context.WithTimeout(context.Background(), operationTransitionTimeoutV2)
+	transitionCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), operationTransitionTimeoutV2)
 	defer cancel()
 	if _, err := s.client.complete(transitionCtx, operationjournal.Finalization{
 		OperationID: s.reservation.OperationID, RequestDigest: s.reservation.RequestDigest,
@@ -365,7 +365,7 @@ func (c *httpOperationJournalClientV2) post(ctx context.Context, path string, in
 		var remote problem
 		_ = json.NewDecoder(io.LimitReader(response.Body, operationStoreMaxBodySizeV2)).Decode(&remote)
 		switch remote.Reason {
-		case "replay-detected":
+		case replayDetectedReason:
 			return identitypolicy.ErrReplayDetected
 		case "operation-conflict":
 			return operationjournal.ErrConflict
@@ -517,7 +517,7 @@ func requireOperationStorePeerV2(w http.ResponseWriter, r *http.Request) bool {
 func writeOperationStoreErrorV2(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, operationjournal.ErrReplay):
-		writeProblem(w, http.StatusConflict, "replay-detected", "Replay detected", "the verifier nonce is already reserved")
+		writeProblem(w, http.StatusConflict, replayDetectedReason, "Replay detected", "the verifier nonce is already reserved")
 	case errors.Is(err, operationjournal.ErrConflict):
 		writeProblem(w, http.StatusConflict, "operation-conflict", "Operation conflict", "the operation ID is bound to another request")
 	case errors.Is(err, operationjournal.ErrNotFound):

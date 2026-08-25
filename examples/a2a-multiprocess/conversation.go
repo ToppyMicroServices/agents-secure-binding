@@ -127,7 +127,7 @@ func runAgentAConversation(ctx context.Context, opts options, out outputWriter) 
 	if err != nil {
 		return err
 	}
-	if opts.reportFormat == "text" {
+	if opts.reportFormat == reportFormatText {
 		fmt.Fprintf(out, "\nAgent A -> Agent B:\n%s\n\nAgent B -> Agent A:\n%s\n", generated.Text, responseText)
 	}
 	return nil
@@ -242,7 +242,7 @@ func runAgentAConversationV2(ctx context.Context, opts options, out outputWriter
 	if err != nil {
 		return err
 	}
-	if opts.reportFormat == "text" {
+	if opts.reportFormat == reportFormatText {
 		fmt.Fprintf(out, "\nAgent A -> Agent B:\n%s\n\nAgent B -> Agent A:\n%s\n", generated.Text, responseText)
 	}
 	return nil
@@ -268,7 +268,7 @@ func completedConversationText(response a2aTaskResponse) (string, error) {
 		return "", fmt.Errorf("Agent B must return exactly one text artifact")
 	}
 	part := task.Artifacts[0].Parts[0]
-	if part.MediaType != "text/plain" || !validConversationText(part.Text) {
+	if part.MediaType != plainTextMediaType || !validConversationText(part.Text) {
 		return "", fmt.Errorf("Agent B returned invalid conversation text")
 	}
 	return part.Text, nil
@@ -283,7 +283,7 @@ func completedConversationTextV2(response a2aTaskResponse) (string, error) {
 		return "", fmt.Errorf("Agent B must return exactly one text artifact")
 	}
 	part := task.Artifacts[0].Parts[0]
-	if part.MediaType != "text/plain" || !validConversationText(part.Text) {
+	if part.MediaType != plainTextMediaType || !validConversationText(part.Text) {
 		return "", fmt.Errorf("Agent B returned invalid conversation text")
 	}
 	return part.Text, nil

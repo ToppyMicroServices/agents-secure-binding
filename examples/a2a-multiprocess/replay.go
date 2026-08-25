@@ -39,6 +39,7 @@ func runReplayStore(ctx context.Context, opts options, out outputWriter) error {
 	if err != nil {
 		return err
 	}
+	//nolint:contextcheck // Preserve OpenFileStore's non-cancelable startup behavior.
 	operationStore, err := openAcceptanceStoreV2(opts)
 	if err != nil {
 		return fmt.Errorf("open v2 acceptance store: %w", err)

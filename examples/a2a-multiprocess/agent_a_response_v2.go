@@ -153,7 +153,8 @@ func validateAgentCardHTTPResponseV2(response *http.Response) error {
 
 func validateAgentCardMutualTLSV2(schemes map[string]json.RawMessage, requirements []struct {
 	Schemes map[string]json.RawMessage `json:"schemes"`
-}) error {
+},
+) error {
 	rawScheme, ok := schemes["mutualTLS"]
 	if !ok {
 		return fmt.Errorf("Agent B card does not advertise the required mutualTLS security scheme")

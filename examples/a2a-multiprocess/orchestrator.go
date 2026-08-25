@@ -33,7 +33,7 @@ func runOrchestrator(ctx context.Context, opts options, out outputWriter) (runEr
 	}
 	agentStarted := false
 	defer func() {
-		if runErr == nil || agentStarted || (opts.reportFormat != "json" && opts.reportFile == "") {
+		if runErr == nil || agentStarted || (opts.reportFormat != reportFormatJSON && opts.reportFile == "") {
 			return
 		}
 		reporter, err := newTestRunReporter(opts, out)
@@ -92,7 +92,7 @@ func runOrchestrator(ctx context.Context, opts options, out outputWriter) (runEr
 			return "", err
 		}
 		processes = append(processes, process)
-		if opts.reportFormat == "text" {
+		if opts.reportFormat == reportFormatText {
 			fmt.Fprintf(out, "started %-8s pid=%d endpoint=%s\n", name, process.cmd.Process.Pid, rawURL)
 		}
 		return rawURL, nil

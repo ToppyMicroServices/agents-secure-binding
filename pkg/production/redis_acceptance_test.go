@@ -376,10 +376,10 @@ func (b *testRedisJournalBackend) reserve(keys, args []string) (string, bool, er
 	if raw, ok := b.values[keys[0]]; ok {
 		record, err := testDecodeRedisRecord(raw)
 		if err != nil {
-			return "CORRUPT", false, nil
+			return redisJournalStatusCorrupt, false, nil
 		}
 		if record.RequestDigest != args[0] {
-			return "CONFLICT", false, nil
+			return redisJournalStatusConflict, false, nil
 		}
 		return "EXISTING\n" + raw, false, nil
 	}
@@ -409,10 +409,10 @@ func (b *testRedisJournalBackend) reserveAcceptance(keys, args []string) (string
 	if exists {
 		record, err := testDecodeRedisRecord(raw)
 		if err != nil {
-			return "CORRUPT", false, nil
+			return redisJournalStatusCorrupt, false, nil
 		}
 		if record.RequestDigest != args[0] {
-			return "CONFLICT", false, nil
+			return redisJournalStatusConflict, false, nil
 		}
 	} else {
 		raw = b.newRecord(args[0])
@@ -444,7 +444,7 @@ func (b *testRedisJournalBackend) transition(keys, args []string, from, to opera
 		return "IDEMPOTENT\n" + raw, false, nil
 	}
 	if record.State != from {
-		return "INVALID_TRANSITION", false, nil
+		return redisJournalStatusInvalidTransition, false, nil
 	}
 	now := time.Now().UTC().UnixMilli()
 	if now < record.UpdatedAtMillis {
@@ -474,12 +474,12 @@ func (b *testRedisJournalBackend) finalize(keys, args []string) (string, bool, e
 		if record.State == state && record.OutcomeDigest == args[2] {
 			return "IDEMPOTENT\n" + raw, false, nil
 		}
-		return "CONFLICT", false, nil
+		return redisJournalStatusConflict, false, nil
 	}
 	if record.State == operationjournal.StateAccepted && state != operationjournal.StateCanceled {
-		return "INVALID_TRANSITION", false, nil
+		return redisJournalStatusInvalidTransition, false, nil
 	}
-	return b.completeRecord(keys[0], record, state, args[2], "UPDATED")
+	return b.completeRecord(keys[0], record, state, args[2], redisJournalStatusUpdated)
 }
 
 func (b *testRedisJournalBackend) finalizeResult(keys, args []string) (string, bool, error) {
@@ -495,16 +495,16 @@ func (b *testRedisJournalBackend) finalizeResult(keys, args []string) (string, b
 		if record.OutcomeDigest == args[1] && hasResult && existingResult == args[2] {
 			return "IDEMPOTENT\n" + raw, false, nil
 		}
-		return "CONFLICT", false, nil
+		return redisJournalStatusConflict, false, nil
 	}
 	if record.State.Terminal() {
-		return "CONFLICT", false, nil
+		return redisJournalStatusConflict, false, nil
 	}
 	if hasResult {
-		return "CORRUPT", false, nil
+		return redisJournalStatusCorrupt, false, nil
 	}
 	if record.State != operationjournal.StateRunning && record.State != operationjournal.StateIndeterminate {
-		return "INVALID_TRANSITION", false, nil
+		return redisJournalStatusInvalidTransition, false, nil
 	}
 	b.values[keys[1]] = args[2]
 	response, _, err := b.completeRecord(keys[0], record, operationjournal.StateSucceeded, args[1], "COMPLETED")
@@ -517,7 +517,7 @@ func (b *testRedisJournalBackend) lookupResult(keys, args []string) (string, boo
 		return status, false, nil
 	}
 	if record.State != operationjournal.StateSucceeded || record.OutcomeDigest == "" {
-		return "INVALID_TRANSITION", false, nil
+		return redisJournalStatusInvalidTransition, false, nil
 	}
 	result, ok := b.values[keys[1]]
 	if !ok {
@@ -528,7 +528,7 @@ func (b *testRedisJournalBackend) lookupResult(keys, args []string) (string, boo
 
 func (b *testRedisJournalBackend) exact(keys, args []string) (redisJournalRecord, string, string) {
 	if len(keys) != 1 || len(args) != 1 {
-		return redisJournalRecord{}, "", "CORRUPT"
+		return redisJournalRecord{}, "", redisJournalStatusCorrupt
 	}
 	raw, ok := b.values[keys[0]]
 	if !ok {
@@ -536,10 +536,10 @@ func (b *testRedisJournalBackend) exact(keys, args []string) (redisJournalRecord
 	}
 	record, err := testDecodeRedisRecord(raw)
 	if err != nil {
-		return redisJournalRecord{}, "", "CORRUPT"
+		return redisJournalRecord{}, "", redisJournalStatusCorrupt
 	}
 	if record.RequestDigest != args[0] {
-		return redisJournalRecord{}, "", "CONFLICT"
+		return redisJournalRecord{}, "", redisJournalStatusConflict
 	}
 	return record, raw, ""
 }

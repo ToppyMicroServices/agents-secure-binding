@@ -114,7 +114,7 @@ func (s *agentBServerV2) handleAgentCard(w http.ResponseWriter, r *http.Request)
 		"securitySchemes":      map[string]any{"mutualTLS": map[string]any{"mtlsSecurityScheme": map[string]any{"description": "Demo CA-issued client certificate"}}},
 		"securityRequirements": []map[string]any{{"schemes": map[string]any{"mutualTLS": map[string]any{"list": []string{}}}}},
 		"skills":               []map[string]any{{"id": demoCapability, "name": "Summarize a referenced document", "description": "Summarizes one receiver-authorized document reference", "tags": []string{"demo"}}},
-		"defaultInputModes":    []string{"text/plain"}, "defaultOutputModes": []string{"text/plain"},
+		"defaultInputModes":    []string{plainTextMediaType}, "defaultOutputModes": []string{plainTextMediaType},
 	})
 }
 
@@ -127,7 +127,7 @@ func (s *agentBServerV2) handleChallenge(w http.ResponseWriter, r *http.Request)
 		writeProblem(w, http.StatusForbidden, "direct-tls-required", "Direct TLS endpoint required", err.Error())
 		return
 	}
-	if r.Header.Get("A2A-Version") != a2aVersion || r.Header.Get("Content-Type") != "application/json" {
+	if r.Header.Get("A2A-Version") != a2aVersion || r.Header.Get("Content-Type") != applicationJSONMediaType {
 		writeProblem(w, http.StatusBadRequest, "challenge-request", "Challenge request rejected", "A2A version or media type mismatch")
 		return
 	}
@@ -145,7 +145,7 @@ func (s *agentBServerV2) handleChallenge(w http.ResponseWriter, r *http.Request)
 		writeProblem(w, http.StatusServiceUnavailable, "challenge-unavailable", "Challenge unavailable", "challenge state could not be issued")
 		return
 	}
-	writeJSON(w, http.StatusOK, "application/json", challenge)
+	writeJSON(w, http.StatusOK, applicationJSONMediaType, challenge)
 }
 
 func (s *agentBServerV2) handleMessage(w http.ResponseWriter, r *http.Request) {
@@ -333,8 +333,8 @@ func (s *agentBServerV2) handleMessage(w http.ResponseWriter, r *http.Request) {
 		return completedOperationResultV2(request, artifactText, s.now())
 	})
 	if err != nil {
-		var stateErr *operationStateErrorV2
-		var executionErr *operationExecutionErrorV2
+		var stateErr *operationStateV2Error
+		var executionErr *operationExecutionV2Error
 		switch {
 		case errors.Is(err, errOperationAcceptanceExpiredV2):
 			writeProblem(w, http.StatusForbidden, "accepted-assertion-expired", "Accepted assertion expired", "the accepted identity binding expired before operation start")
@@ -366,7 +366,7 @@ func writeOperationStatusErrorV2(w http.ResponseWriter, record operationjournal.
 }
 
 func prepareConversationInputV2(request a2aSendMessageRequest, expected identitypolicy.BindingV2) (preparedConversationInputV2, error) {
-	if len(request.Message.Parts) != 1 || request.Message.Parts[0].MediaType != "text/plain" || !validConversationText(request.Message.Parts[0].Text) {
+	if len(request.Message.Parts) != 1 || request.Message.Parts[0].MediaType != plainTextMediaType || !validConversationText(request.Message.Parts[0].Text) {
 		return preparedConversationInputV2{}, fmt.Errorf("exactly one valid text/plain part is required")
 	}
 	if expected.BindingContextSHA256 == "" {
