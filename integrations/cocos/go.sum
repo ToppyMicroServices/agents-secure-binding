@@ -32,8 +32,8 @@ github.com/ToppyMicroServices/agents-secure-binding/modules/attestation/snp v0.1
 github.com/ToppyMicroServices/agents-secure-binding/modules/attestation/snp v0.1.1/go.mod h1:o/yL1/qAYpePrDvbaTW+TiLTTDsn7PxktNhTkwQNGNI=
 github.com/ToppyMicroServices/agents-secure-binding/modules/attestation/tdx v0.1.2 h1:F9UeNGMuDTtlTGqkp1rRupcMOkLzrkuIi/pCsb9H7MY=
 github.com/ToppyMicroServices/agents-secure-binding/modules/attestation/tdx v0.1.2/go.mod h1:RqFUUq6L6uqxR1L8pqA5CG1+JJfD1G6idK5ilsNqDvs=
-github.com/ToppyMicroServices/agents-secure-binding/v2 v2.0.0-rc.1 h1:D+V58MRptxwex35rHwEwjqSaDSJIG0ZXuFbnhNd+J2Y=
-github.com/ToppyMicroServices/agents-secure-binding/v2 v2.0.0-rc.1/go.mod h1:fnwelpUCT2/u5LEf5Mkw4tusswWZnoSaA368EXMdNCo=
+github.com/ToppyMicroServices/agents-secure-binding/v2 v2.0.0-rc.2 h1:bXvd/mADiTnf8OEacUWiYX5srYwIoRnPmDqgJYaTn4Q=
+github.com/ToppyMicroServices/agents-secure-binding/v2 v2.0.0-rc.2/go.mod h1:FjszjT18ZL9UdjkesX9H3+dK3TIWhS1FSFUJEb8GiQg=
 github.com/VividCortex/gohistogram v1.0.0 h1:6+hBz+qvs0JOrrNhhmR7lFxo5sINxBCGXrdtl/UvroE=
 github.com/VividCortex/gohistogram v1.0.0/go.mod h1:Pf5mBqqDxYaXu3hDrrU+w6nw50o/4+TcAqDqk/vUH7g=
 github.com/beorn7/perks v1.0.1 h1:VlbKKnNfV8bJzeqoa4cOKqO6bYr3WgKZxO8Z16+hsOM=
