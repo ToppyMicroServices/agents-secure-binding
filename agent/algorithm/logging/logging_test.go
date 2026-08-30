@@ -6,11 +6,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/agent/events/mocks"
+	mglog "github.com/ToppyMicroServices/agents-secure-binding/v2/internal/runtime/logging"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/manager"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
-	"github.com/thinksyncs/agents-secure-binding/agent/events/mocks"
-	mglog "github.com/thinksyncs/agents-secure-binding/internal/runtime/logging"
-	"github.com/thinksyncs/agents-secure-binding/pkg/manager"
 )
 
 func TestStdoutWrite(t *testing.T) {

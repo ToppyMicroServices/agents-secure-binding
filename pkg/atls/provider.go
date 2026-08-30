@@ -11,10 +11,10 @@ import (
 	"crypto/x509"
 	"fmt"
 
-	"github.com/thinksyncs/agents-secure-binding/pkg/atls/ea"
-	eaattestation "github.com/thinksyncs/agents-secure-binding/pkg/atls/eaattestation"
-	asbattestation "github.com/thinksyncs/agents-secure-binding/pkg/attestation"
-	attestationclient "github.com/thinksyncs/agents-secure-binding/pkg/clients/grpc/attestation"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/atls/ea"
+	eaattestation "github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/atls/eaattestation"
+	asbattestation "github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/attestation"
+	attestationclient "github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/clients/grpc/attestation"
 )
 
 // CertificateProvider builds leaf extensions for accepted aTLS call sites.

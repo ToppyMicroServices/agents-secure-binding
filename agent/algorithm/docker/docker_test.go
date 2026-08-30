@@ -7,8 +7,8 @@ import (
 	"os"
 	"testing"
 
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/agent/events/mocks"
 	"github.com/stretchr/testify/assert"
-	"github.com/thinksyncs/agents-secure-binding/agent/events/mocks"
 )
 
 // TestNewAlgorithm tests the NewAlgorithm function.

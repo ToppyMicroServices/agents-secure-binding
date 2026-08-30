@@ -4,9 +4,17 @@ Release blockers and evidence limits for the public draft.
 
 ## Repository Identity
 
-Resolved for public v0.5: the repository name, Go module path, imports,
-protobuf `go_package` options, examples, and local documentation use
-`github.com/thinksyncs/agents-secure-binding`.
+The canonical repository is moving to
+`github.com/ToppyMicroServices/agents-secure-binding`. Because the published
+release line has reached `v1.1.1`, the breaking namespace migration uses the
+Go module path `github.com/ToppyMicroServices/agents-secure-binding/v2` and
+requires a v2 release. A v0.6.0 release would incorrectly move the published
+version backwards.
+
+The module declaration, internal imports, protobuf `go_package` options,
+examples, and local documentation must use the v2 module path before that
+release. Repository links, schema identifiers, and Git remotes use the
+canonical repository URL without `/v2`.
 
 ## Recorded CI and Red-Team Status
 

@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package attestation_agent;
 
-option go_package = "github.com/thinksyncs/agents-secure-binding/internal/proto/attestation-agent;attestation_agent";
+option go_package = "github.com/ToppyMicroServices/agents-secure-binding/v2/internal/proto/attestation-agent;attestation_agent";
 
 // Get the primary evidence from the guest.
 message GetEvidenceRequest {

@@ -347,7 +347,7 @@ const file_internal_proto_attestation_v1_attestation_proto_rawDesc = "" +
 	"\x12AttestationService\x12[\n" +
 	"\x10FetchAttestation\x12\".attestation.v1.AttestationRequest\x1a#.attestation.v1.AttestationResponse\x12[\n" +
 	"\x10FetchRawEvidence\x12\".attestation.v1.AttestationRequest\x1a#.attestation.v1.RawEvidenceResponse\x12X\n" +
-	"\x0fFetchAzureToken\x12!.attestation.v1.AzureTokenRequest\x1a\".attestation.v1.AzureTokenResponseBWZUgithub.com/thinksyncs/agents-secure-binding/internal/proto/attestation/v1;attestationb\x06proto3"
+	"\x0fFetchAzureToken\x12!.attestation.v1.AzureTokenRequest\x1a\".attestation.v1.AzureTokenResponseBbZ`github.com/ToppyMicroServices/agents-secure-binding/v2/internal/proto/attestation/v1;attestationb\x06proto3"
 
 var (
 	file_internal_proto_attestation_v1_attestation_proto_rawDescOnce sync.Once

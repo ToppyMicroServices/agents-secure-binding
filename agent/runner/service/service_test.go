@@ -12,10 +12,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/agent/algorithm/docker"
+	pb "github.com/ToppyMicroServices/agents-secure-binding/v2/agent/runner"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/thinksyncs/agents-secure-binding/agent/algorithm/docker"
-	pb "github.com/thinksyncs/agents-secure-binding/agent/runner"
 )
 
 // MockEventService is a mock implementation of events.Service.

@@ -24,8 +24,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/clients"
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/thinksyncs/agents-secure-binding/pkg/clients"
 )
 
 type a2aConnection struct {

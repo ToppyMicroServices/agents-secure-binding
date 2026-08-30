@@ -8,8 +8,8 @@ import (
 	"crypto/x509"
 	"os"
 
-	"github.com/thinksyncs/agents-secure-binding/internal/errors"
-	"github.com/thinksyncs/agents-secure-binding/pkg/attestation"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/internal/errors"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/attestation"
 )
 
 // Security represents the type of TLS security configuration.

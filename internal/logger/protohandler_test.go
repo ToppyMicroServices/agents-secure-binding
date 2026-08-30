@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/agent/cvms"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/internal/errors"
 	"github.com/stretchr/testify/assert"
-	"github.com/thinksyncs/agents-secure-binding/agent/cvms"
-	"github.com/thinksyncs/agents-secure-binding/internal/errors"
 )
 
 type failedWriter struct{}

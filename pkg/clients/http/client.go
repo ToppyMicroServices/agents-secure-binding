@@ -11,9 +11,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/thinksyncs/agents-secure-binding/pkg/atls"
-	"github.com/thinksyncs/agents-secure-binding/pkg/clients"
-	"github.com/thinksyncs/agents-secure-binding/pkg/tls"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/atls"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/clients"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/tls"
 )
 
 type Client interface {

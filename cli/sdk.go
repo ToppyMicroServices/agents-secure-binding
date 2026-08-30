@@ -5,14 +5,14 @@ package cli
 import (
 	"context"
 
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/manager"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/attestation/cmdconfig"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/clients"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/clients/grpc"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/clients/grpc/agent"
+	managergrpc "github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/clients/grpc/manager"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/sdk"
 	"github.com/spf13/cobra"
-	"github.com/thinksyncs/agents-secure-binding/manager"
-	"github.com/thinksyncs/agents-secure-binding/pkg/attestation/cmdconfig"
-	"github.com/thinksyncs/agents-secure-binding/pkg/clients"
-	"github.com/thinksyncs/agents-secure-binding/pkg/clients/grpc"
-	"github.com/thinksyncs/agents-secure-binding/pkg/clients/grpc/agent"
-	managergrpc "github.com/thinksyncs/agents-secure-binding/pkg/clients/grpc/manager"
-	"github.com/thinksyncs/agents-secure-binding/pkg/sdk"
 )
 
 var Verbose bool

@@ -11,9 +11,9 @@ import (
 	"os/exec"
 	"sync"
 
-	"github.com/thinksyncs/agents-secure-binding/agent/algorithm"
-	"github.com/thinksyncs/agents-secure-binding/agent/algorithm/logging"
-	"github.com/thinksyncs/agents-secure-binding/agent/events"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/agent/algorithm"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/agent/algorithm/logging"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/agent/events"
 )
 
 var execCommand = exec.Command

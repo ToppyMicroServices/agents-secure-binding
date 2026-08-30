@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/thinksyncs/agents-secure-binding/pkg/atls/identitypolicy"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/atls/identitypolicy"
 )
 
 type replaySnapshot struct {

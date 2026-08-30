@@ -7,7 +7,7 @@ import (
 	"encoding/hex"
 	"fmt"
 
-	attestationpb "github.com/thinksyncs/agents-secure-binding/internal/proto/attestation/v1"
+	attestationpb "github.com/ToppyMicroServices/agents-secure-binding/v2/internal/proto/attestation/v1"
 )
 
 func (s *service) FetchRawEvidence(ctx context.Context, req *attestationpb.AttestationRequest) (*attestationpb.RawEvidenceResponse, error) {

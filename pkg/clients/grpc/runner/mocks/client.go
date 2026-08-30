@@ -10,8 +10,8 @@ package mocks
 import (
 	"context"
 
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/agent/runner"
 	mock "github.com/stretchr/testify/mock"
-	"github.com/thinksyncs/agents-secure-binding/agent/runner"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 

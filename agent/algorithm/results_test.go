@@ -6,8 +6,8 @@ import (
 	"os"
 	"testing"
 
-	"github.com/thinksyncs/agents-secure-binding/agent/algorithm"
-	"github.com/thinksyncs/agents-secure-binding/internal"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/agent/algorithm"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/internal"
 )
 
 func TestZipDirectory(t *testing.T) {

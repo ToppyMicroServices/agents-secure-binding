@@ -13,9 +13,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/agent"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/agent/mocks"
 	"github.com/stretchr/testify/assert"
-	"github.com/thinksyncs/agents-secure-binding/agent"
-	"github.com/thinksyncs/agents-secure-binding/agent/mocks"
 )
 
 func setupTest(t *testing.T) (*slog.Logger, *mocks.Service, string, []byte) {

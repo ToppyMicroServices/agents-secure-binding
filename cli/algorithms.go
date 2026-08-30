@@ -7,10 +7,10 @@ import (
 	"encoding/pem"
 	"os"
 
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/agent/algorithm"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/agent/algorithm/python"
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
-	"github.com/thinksyncs/agents-secure-binding/agent/algorithm"
-	"github.com/thinksyncs/agents-secure-binding/agent/algorithm/python"
 	"google.golang.org/grpc/metadata"
 )
 

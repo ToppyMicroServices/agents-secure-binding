@@ -17,7 +17,7 @@ import (
 	"testing"
 	"time"
 
-	attestation "github.com/thinksyncs/agents-secure-binding/pkg/atls/eaattestation"
+	attestation "github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/atls/eaattestation"
 )
 
 func selfSignedCert(t *testing.T) tls.Certificate {

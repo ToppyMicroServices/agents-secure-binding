@@ -5,9 +5,9 @@ package manager
 import (
 	"testing"
 
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/internal/errors"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/clients"
 	"github.com/stretchr/testify/assert"
-	"github.com/thinksyncs/agents-secure-binding/internal/errors"
-	"github.com/thinksyncs/agents-secure-binding/pkg/clients"
 )
 
 func TestNewManagerClient(t *testing.T) {

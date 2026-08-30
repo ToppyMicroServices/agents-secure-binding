@@ -5,7 +5,7 @@ package events
 import (
 	"encoding/json"
 
-	"github.com/thinksyncs/agents-secure-binding/agent/cvms"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/agent/cvms"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 

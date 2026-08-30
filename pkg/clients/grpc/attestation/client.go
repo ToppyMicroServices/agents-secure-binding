@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"time"
 
-	attestation_v1 "github.com/thinksyncs/agents-secure-binding/internal/proto/attestation/v1"
-	"github.com/thinksyncs/agents-secure-binding/pkg/attestation"
+	attestation_v1 "github.com/ToppyMicroServices/agents-secure-binding/v2/internal/proto/attestation/v1"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/attestation"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )

@@ -17,13 +17,13 @@ import (
 	"strings"
 	"time"
 
+	qemu "github.com/ToppyMicroServices/agents-secure-binding/v2/manager/qemu"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/attestation"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/attestation/tdx"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/attestation/vtpm"
 	sevsnppb "github.com/google/go-sev-guest/proto/sevsnp"
 	tdxabi "github.com/google/go-tdx-guest/abi"
 	tdxpb "github.com/google/go-tdx-guest/proto/tdx"
-	qemu "github.com/thinksyncs/agents-secure-binding/manager/qemu"
-	"github.com/thinksyncs/agents-secure-binding/pkg/attestation"
-	"github.com/thinksyncs/agents-secure-binding/pkg/attestation/tdx"
-	"github.com/thinksyncs/agents-secure-binding/pkg/attestation/vtpm"
 	"google.golang.org/protobuf/proto"
 )
 

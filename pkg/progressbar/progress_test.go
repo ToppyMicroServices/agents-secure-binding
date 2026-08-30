@@ -10,11 +10,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/agent"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/agent/mocks"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/internal/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
-	"github.com/thinksyncs/agents-secure-binding/agent"
-	"github.com/thinksyncs/agents-secure-binding/agent/mocks"
-	"github.com/thinksyncs/agents-secure-binding/internal/errors"
 )
 
 func TestNew(t *testing.T) {

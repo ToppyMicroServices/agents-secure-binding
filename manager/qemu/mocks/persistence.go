@@ -8,8 +8,8 @@
 package mocks
 
 import (
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/manager/qemu"
 	mock "github.com/stretchr/testify/mock"
-	"github.com/thinksyncs/agents-secure-binding/manager/qemu"
 )
 
 // NewPersistence creates a new instance of Persistence. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.

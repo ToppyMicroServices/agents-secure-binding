@@ -25,7 +25,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/thinksyncs/agents-secure-binding/pkg/operationjournal"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/operationjournal"
 )
 
 func TestRedisAcceptanceStoreCoordinatesReplicasAndResultsOverTLS(t *testing.T) {

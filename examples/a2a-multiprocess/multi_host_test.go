@@ -12,7 +12,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/thinksyncs/agents-secure-binding/pkg/a2asecuritytest"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/a2asecuritytest"
 )
 
 const multiHostExamplePath = "testdata/multihost-deployment.example.json"

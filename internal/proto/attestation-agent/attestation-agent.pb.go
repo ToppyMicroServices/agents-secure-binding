@@ -609,7 +609,7 @@ const file_internal_proto_attestation_agent_attestation_agent_proto_rawDesc = ""
 	"\x18ExtendRuntimeMeasurement\x122.attestation_agent.ExtendRuntimeMeasurementRequest\x1a3.attestation_agent.ExtendRuntimeMeasurementResponse\"\x00\x12a\n" +
 	"\fBindInitData\x12&.attestation_agent.BindInitDataRequest\x1a'.attestation_agent.BindInitDataResponse\"\x00\x12[\n" +
 	"\n" +
-	"GetTeeType\x12$.attestation_agent.GetTeeTypeRequest\x1a%.attestation_agent.GetTeeTypeResponse\"\x00B`Z^github.com/thinksyncs/agents-secure-binding/internal/proto/attestation-agent;attestation_agentb\x06proto3"
+	"GetTeeType\x12$.attestation_agent.GetTeeTypeRequest\x1a%.attestation_agent.GetTeeTypeResponse\"\x00BkZigithub.com/ToppyMicroServices/agents-secure-binding/v2/internal/proto/attestation-agent;attestation_agentb\x06proto3"
 
 var (
 	file_internal_proto_attestation_agent_attestation_agent_proto_rawDescOnce sync.Once

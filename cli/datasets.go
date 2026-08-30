@@ -9,11 +9,11 @@ import (
 	"os"
 	"path"
 
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/agent"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/internal"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/internal/errors"
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
-	"github.com/thinksyncs/agents-secure-binding/agent"
-	"github.com/thinksyncs/agents-secure-binding/internal"
-	"github.com/thinksyncs/agents-secure-binding/internal/errors"
 	"google.golang.org/grpc/metadata"
 )
 

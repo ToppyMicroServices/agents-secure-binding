@@ -11,7 +11,7 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/thinksyncs/agents-secure-binding/manager"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/manager"
 )
 
 var _ manager.Service = (*loggingMiddleware)(nil)

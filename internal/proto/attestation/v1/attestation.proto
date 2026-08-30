@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package attestation.v1;
 
-option go_package = "github.com/thinksyncs/agents-secure-binding/internal/proto/attestation/v1;attestation";
+option go_package = "github.com/ToppyMicroServices/agents-secure-binding/v2/internal/proto/attestation/v1;attestation";
 
 service AttestationService {
   rpc FetchAttestation (AttestationRequest) returns (AttestationResponse);

@@ -19,8 +19,9 @@ The primary failure class is context diversion: accepting cryptographically
 valid material for a different service, tenant, Agent, task, delegation, or
 authority boundary than the verifier intended.
 
-Release `v1.1.0` defines the supported verifier product surface for the
-Direct-Agent v1 profile. It provides distinct attested and software-only
+Release `v1.1.1` is the latest release in the supported v1 verifier product
+line for the Direct-Agent v1 profile. It provides distinct attested and
+software-only
 production compositions covering role-separated trust keys, revocation, exact
 TLS/action binding, TLS-protected distributed replay, and a concrete
 non-Split-Knowledge protected-change consumer. See
@@ -313,8 +314,11 @@ for Agents Secure Binding.
 The repository keeps the Apache-2.0 license and retained upstream notices. See
 `ATTRIBUTION.md`.
 
-Repository identity note: the public repository name and Go module path are
-both `github.com/thinksyncs/agents-secure-binding`.
+Repository identity note: the canonical public repository is
+`github.com/ToppyMicroServices/agents-secure-binding`, and the next major Go
+module path is `github.com/ToppyMicroServices/agents-secure-binding/v2`.
+The Go module major version is independent of the Direct-Agent wire-profile
+version.
 
 ## Verification Commands
 

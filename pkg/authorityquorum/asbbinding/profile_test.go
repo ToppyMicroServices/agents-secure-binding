@@ -11,9 +11,9 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/thinksyncs/agents-secure-binding/pkg/atls/identitypolicy"
-	"github.com/thinksyncs/agents-secure-binding/pkg/authorityquorum"
-	"github.com/thinksyncs/agents-secure-binding/pkg/clients"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/atls/identitypolicy"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/authorityquorum"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/clients"
 )
 
 const testAudience = "reveal.example"

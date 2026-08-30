@@ -10,7 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/thinksyncs/agents-secure-binding/internal/runtime/server"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/internal/runtime/server"
 )
 
 type runtimeServer struct {

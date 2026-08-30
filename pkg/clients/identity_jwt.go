@@ -16,8 +16,8 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/atls/identitypolicy"
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/thinksyncs/agents-secure-binding/pkg/atls/identitypolicy"
 )
 
 var (

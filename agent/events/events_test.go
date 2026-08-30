@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/agent/cvms"
 	"github.com/stretchr/testify/assert"
-	"github.com/thinksyncs/agents-secure-binding/agent/cvms"
 )
 
 func TestSendEventSuccess(t *testing.T) {

@@ -18,7 +18,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/thinksyncs/agents-secure-binding/pkg/a2asecuritytest"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/a2asecuritytest"
 	"gopkg.in/yaml.v3"
 )
 

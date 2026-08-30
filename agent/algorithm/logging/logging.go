@@ -8,7 +8,7 @@ import (
 	"io"
 	"log/slog"
 
-	"github.com/thinksyncs/agents-secure-binding/agent/events"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/agent/events"
 )
 
 var (

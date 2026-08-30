@@ -14,10 +14,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/attestation"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/attestation/tdx"
 	"github.com/golang-jwt/jwt/v5"
 	sevclient "github.com/google/go-sev-guest/client"
-	"github.com/thinksyncs/agents-secure-binding/pkg/attestation"
-	"github.com/thinksyncs/agents-secure-binding/pkg/attestation/tdx"
 	"google.golang.org/protobuf/proto"
 )
 

@@ -14,7 +14,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/thinksyncs/agents-secure-binding/pkg/clients"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/clients"
 )
 
 const principalDigestDomain = "ASB-AUTHORITY-QUORUM-PRINCIPAL-v1"

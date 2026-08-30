@@ -7,9 +7,9 @@ import (
 	"errors"
 	"testing"
 
+	attestation_agent "github.com/ToppyMicroServices/agents-secure-binding/v2/internal/proto/attestation-agent"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/internal/proto/attestation-agent/mocks"
 	"github.com/stretchr/testify/mock"
-	attestation_agent "github.com/thinksyncs/agents-secure-binding/internal/proto/attestation-agent"
-	"github.com/thinksyncs/agents-secure-binding/internal/proto/attestation-agent/mocks"
 )
 
 func TestNewProviderRejectsRemotePlaintextTCP(t *testing.T) {

@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
+	pb "github.com/ToppyMicroServices/agents-secure-binding/v2/agent/runner"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	pb "github.com/thinksyncs/agents-secure-binding/agent/runner"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/emptypb"
 )

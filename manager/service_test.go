@@ -13,15 +13,15 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/internal/errors"
+	mglog "github.com/ToppyMicroServices/agents-secure-binding/v2/internal/runtime/logging"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/manager/qemu"
+	persistenceMocks "github.com/ToppyMicroServices/agents-secure-binding/v2/manager/qemu/mocks"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/manager/vm"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/manager/vm/mocks"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
-	"github.com/thinksyncs/agents-secure-binding/internal/errors"
-	mglog "github.com/thinksyncs/agents-secure-binding/internal/runtime/logging"
-	"github.com/thinksyncs/agents-secure-binding/manager/qemu"
-	persistenceMocks "github.com/thinksyncs/agents-secure-binding/manager/qemu/mocks"
-	"github.com/thinksyncs/agents-secure-binding/manager/vm"
-	"github.com/thinksyncs/agents-secure-binding/manager/vm/mocks"
 	"github.com/veraison/corim/corim"
 )
 

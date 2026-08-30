@@ -15,10 +15,10 @@ import (
 	"crypto/x509"
 	"net"
 
-	"github.com/thinksyncs/agents-secure-binding/pkg/atls/ea"
-	eaattestation "github.com/thinksyncs/agents-secure-binding/pkg/atls/eaattestation"
-	"github.com/thinksyncs/agents-secure-binding/pkg/atls/identitypolicy"
-	internaltransport "github.com/thinksyncs/agents-secure-binding/pkg/atls/internal_transport"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/atls/ea"
+	eaattestation "github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/atls/eaattestation"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/atls/identitypolicy"
+	internaltransport "github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/atls/internal_transport"
 )
 
 type Conn = internaltransport.Conn

@@ -10,7 +10,7 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/thinksyncs/agents-secure-binding/agent/cvms"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/agent/cvms"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/peer"
