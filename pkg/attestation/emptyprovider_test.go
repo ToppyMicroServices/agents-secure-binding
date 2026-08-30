@@ -6,9 +6,9 @@ package attestation
 import (
 	"testing"
 
+	asb "github.com/ToppyMicroServices/agents-secure-binding/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	asb "github.com/thinksyncs/agents-secure-binding"
 )
 
 func TestEmptyProvider_Attestation(t *testing.T) {

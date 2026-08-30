@@ -18,22 +18,22 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/agent/algorithm"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/agent/algorithm/python"
+	agentevents "github.com/ToppyMicroServices/agents-secure-binding/v2/agent/events"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/agent/events/mocks"
+	runnerpb "github.com/ToppyMicroServices/agents-secure-binding/v2/agent/runner"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/agent/statemachine"
+	smmocks "github.com/ToppyMicroServices/agents-secure-binding/v2/agent/statemachine/mocks"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/internal/errors"
+	mglog "github.com/ToppyMicroServices/agents-secure-binding/v2/internal/runtime/logging"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/attestation"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/attestation/vtpm"
+	runnermocks "github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/clients/grpc/runner/mocks"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/oci"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
-	"github.com/thinksyncs/agents-secure-binding/agent/algorithm"
-	"github.com/thinksyncs/agents-secure-binding/agent/algorithm/python"
-	agentevents "github.com/thinksyncs/agents-secure-binding/agent/events"
-	"github.com/thinksyncs/agents-secure-binding/agent/events/mocks"
-	runnerpb "github.com/thinksyncs/agents-secure-binding/agent/runner"
-	"github.com/thinksyncs/agents-secure-binding/agent/statemachine"
-	smmocks "github.com/thinksyncs/agents-secure-binding/agent/statemachine/mocks"
-	"github.com/thinksyncs/agents-secure-binding/internal/errors"
-	mglog "github.com/thinksyncs/agents-secure-binding/internal/runtime/logging"
-	"github.com/thinksyncs/agents-secure-binding/pkg/attestation"
-	"github.com/thinksyncs/agents-secure-binding/pkg/attestation/vtpm"
-	runnermocks "github.com/thinksyncs/agents-secure-binding/pkg/clients/grpc/runner/mocks"
-	"github.com/thinksyncs/agents-secure-binding/pkg/oci"
 	"golang.org/x/crypto/sha3"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/protobuf/types/known/emptypb"
@@ -598,7 +598,7 @@ func TestStopComputation(t *testing.T) {
 
 			// Use real dirs for test
 			// algorithm.DatasetsDir refers to global var?
-			// "github.com/thinksyncs/agents-secure-binding/agent/algorithm"
+			// "github.com/ToppyMicroServices/agents-secure-binding/v2/agent/algorithm"
 			// It uses hardcoded path "datasets" and "results" in current dir.
 			// Tests create them in current dir.
 

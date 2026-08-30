@@ -1,0 +1,53 @@
+name: ASB Core Boundary
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/asb-core.yaml"
+      - "go.mod"
+      - "go.sum"
+      - "Makefile"
+      - "scripts/check-asb-core-boundary.sh"
+      - "scripts/check-attestation-v2-boundary.sh"
+      - "pkg/atls/**"
+      - "pkg/agtp/**"
+      - "pkg/clients/**"
+      - "pkg/tls/**"
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/asb-core.yaml"
+      - "go.mod"
+      - "go.sum"
+      - "Makefile"
+      - "scripts/check-asb-core-boundary.sh"
+      - "scripts/check-attestation-v2-boundary.sh"
+      - "pkg/atls/**"
+      - "pkg/agtp/**"
+      - "pkg/clients/**"
+      - "pkg/tls/**"
+
+permissions:
+  contents: read
+
+jobs:
+  boundary:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    env:
+      GOWORK: "off"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: 1.26.6
+          cache-dependency-path: go.sum
+      - run: go mod verify
+      - run: make check-attestation-v2-boundary
+      - run: make test-asb-core

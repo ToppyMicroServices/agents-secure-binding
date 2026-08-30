@@ -8,9 +8,9 @@ import (
 	"os/exec"
 	"testing"
 
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/manager/vm/mocks"
+	pkgmanager "github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/manager"
 	"github.com/stretchr/testify/assert"
-	"github.com/thinksyncs/agents-secure-binding/manager/vm/mocks"
-	pkgmanager "github.com/thinksyncs/agents-secure-binding/pkg/manager"
 )
 
 const testComputationID = "test-computation"

@@ -3,9 +3,9 @@
 package manager
 
 import (
-	"github.com/thinksyncs/agents-secure-binding/manager"
-	"github.com/thinksyncs/agents-secure-binding/pkg/clients"
-	"github.com/thinksyncs/agents-secure-binding/pkg/clients/grpc"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/manager"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/clients"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/clients/grpc"
 )
 
 // NewManagerClient creates new manager gRPC client instance.

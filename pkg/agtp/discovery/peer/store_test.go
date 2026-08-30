@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/thinksyncs/agents-secure-binding/pkg/agtp/discovery"
-	"github.com/thinksyncs/agents-secure-binding/pkg/atls/identitypolicy"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/agtp/discovery"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/atls/identitypolicy"
 )
 
 func TestStateStoreRoundTripAndCorruption(t *testing.T) {

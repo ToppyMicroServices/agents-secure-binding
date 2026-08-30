@@ -10,10 +10,10 @@ import (
 	"os/exec"
 	"testing"
 
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/agent/algorithm/logging"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/agent/events/mocks"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
-	"github.com/thinksyncs/agents-secure-binding/agent/algorithm/logging"
-	"github.com/thinksyncs/agents-secure-binding/agent/events/mocks"
 )
 
 func TestNewAlgorithm(t *testing.T) {

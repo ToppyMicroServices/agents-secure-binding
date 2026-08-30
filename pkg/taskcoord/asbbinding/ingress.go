@@ -21,11 +21,11 @@ import (
 	"time"
 	"unicode/utf8"
 
-	eaattestation "github.com/thinksyncs/agents-secure-binding/pkg/atls/eaattestation"
-	"github.com/thinksyncs/agents-secure-binding/pkg/atls/identitypolicy"
-	"github.com/thinksyncs/agents-secure-binding/pkg/clients"
-	"github.com/thinksyncs/agents-secure-binding/pkg/taskcoord"
-	"github.com/thinksyncs/agents-secure-binding/schemas"
+	eaattestation "github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/atls/eaattestation"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/atls/identitypolicy"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/clients"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/taskcoord"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/schemas"
 )
 
 const (

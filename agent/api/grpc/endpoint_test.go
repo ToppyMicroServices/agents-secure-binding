@@ -7,10 +7,10 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/agent"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/agent/mocks"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/attestation"
 	"github.com/stretchr/testify/mock"
-	"github.com/thinksyncs/agents-secure-binding/agent"
-	"github.com/thinksyncs/agents-secure-binding/agent/mocks"
-	"github.com/thinksyncs/agents-secure-binding/pkg/attestation"
 	"golang.org/x/crypto/sha3"
 )
 

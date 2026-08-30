@@ -11,9 +11,9 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/thinksyncs/agents-secure-binding/agent"
-	"github.com/thinksyncs/agents-secure-binding/pkg/attestation"
-	"github.com/thinksyncs/agents-secure-binding/pkg/attestation/vtpm"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/agent"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/attestation"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/attestation/vtpm"
 )
 
 var _ agent.Service = (*loggingMiddleware)(nil)

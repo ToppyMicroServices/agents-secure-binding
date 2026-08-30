@@ -16,8 +16,8 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/atls/identitypolicy"
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/thinksyncs/agents-secure-binding/pkg/atls/identitypolicy"
 )
 
 var (
@@ -55,7 +55,7 @@ var (
 	ErrMissingIssuedAt            = errors.New("binding jwt v2: missing issued-at time")
 	ErrMissingTargetField         = errors.New("binding jwt v2: missing target field")
 	ErrMissingAttestationBinder   = errors.New("binding jwt v2: missing locally expected attestation binder")
-	ErrMissingAttestationVerifier = errors.New("binding jwt v2: missing attestation verifier")
+	ErrMissingAttestationVerifier = errors.New("attestation verifier is required")
 )
 
 const (

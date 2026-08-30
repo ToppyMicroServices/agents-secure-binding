@@ -1,0 +1,240 @@
+name: Attestation Release Gate
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Pre-tag gate to run
+        required: true
+        default: all
+        type: choice
+        options:
+          - all
+          - root
+          - snp
+          - tdx
+          - cocos
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/attestation-release-gate.yaml"
+      - ".github/workflows/attestation-modules.yaml"
+      - "Makefile"
+      - "go.mod"
+      - "go.sum"
+      - "go.work"
+      - "go.work.sum"
+      - "integrations/cocos/**"
+      - "modules/attestation/**"
+      - "pkg/atls/**"
+      - "pkg/agtp/**"
+      - "pkg/attestation/**"
+      - "pkg/clients/**"
+      - "pkg/tls/**"
+      - "scripts/check-asb-core-boundary.sh"
+      - "scripts/check-attestation-*.sh"
+      - "scripts/check-cocos-release.sh"
+  push:
+    tags:
+      - "v*"
+      - "modules/attestation/snp/v*"
+      - "modules/attestation/tdx/v*"
+      - "integrations/cocos/v*"
+
+permissions:
+  contents: read
+
+jobs:
+  verify-release-state:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      GOWORK: "off"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version: 1.26.6
+          cache-dependency-path: |
+            go.sum
+            integrations/cocos/go.sum
+            modules/attestation/snp/go.sum
+            modules/attestation/tdx/go.sum
+      - name: Run pre-tag gates or verify tagged module
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PREFLIGHT_TARGET: ${{ inputs.target || 'all' }}
+        run: |
+          set -euo pipefail
+
+          numeric_identifier='(0|[1-9][0-9]*)'
+          prerelease_identifier='(0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)'
+          root_version_re="^v2\\.${numeric_identifier}\\.${numeric_identifier}(-${prerelease_identifier}(\\.${prerelease_identifier})*)?$"
+          nested_version_re="^v0\\.${numeric_identifier}\\.${numeric_identifier}(-${prerelease_identifier}(\\.${prerelease_identifier})*)?$"
+
+          reject_replacements() {
+            local directory=$1
+            if (cd "$directory" && GOWORK=off go mod edit -json) |
+              grep -Eq '"Replace"[[:space:]]*:[[:space:]]*\['; then
+              echo "release blocked: $directory/go.mod contains a replacement" >&2
+              return 1
+            fi
+          }
+
+          run_root_gate() {
+            make check-attestation-release
+          }
+
+          run_nested_gate() {
+            local module=$1
+            local directory="modules/attestation/$module"
+            local expected="github.com/ToppyMicroServices/agents-secure-binding/modules/attestation/$module"
+            local actual
+
+            reject_replacements "$directory"
+            actual=$(cd "$directory" && go list -m -f '{{.Path}}')
+            test "$actual" = "$expected"
+            (
+              cd "$directory"
+              go mod tidy -diff
+              go mod verify
+              go test -race -count=1 ./...
+              go vet ./...
+            )
+          }
+
+          run_cocos_development_gate() {
+            (
+              cd integrations/cocos
+              go mod tidy -diff
+              go mod verify
+              go test -race -count=1 ./...
+              go vet ./...
+            )
+          }
+
+          run_cocos_release_gate() {
+            make check-cocos-release
+            (
+              cd integrations/cocos
+              go test -race -count=1 ./...
+              go vet ./...
+            )
+          }
+
+          run_preflight() {
+            case "$1" in
+              all)
+                run_root_gate
+                run_nested_gate snp
+                run_nested_gate tdx
+                run_cocos_development_gate
+                ;;
+              root) run_root_gate ;;
+              snp) run_nested_gate snp ;;
+              tdx) run_nested_gate tdx ;;
+              cocos) run_cocos_development_gate ;;
+              *)
+                echo "unsupported pre-tag target: $1" >&2
+                return 1
+                ;;
+            esac
+          }
+
+          if [[ "$GITHUB_EVENT_NAME" != "push" ]]; then
+            unset GH_TOKEN
+            run_preflight "$PREFLIGHT_TARGET"
+            exit 0
+          fi
+
+          tag=$GITHUB_REF_NAME
+          case "$tag" in
+            modules/attestation/snp/v*)
+              module=snp
+              kind=nested
+              version=${tag##*/}
+              [[ "$version" =~ $nested_version_re ]] || {
+                echo "SNP module tag must contain an exact v0 semantic version" >&2
+                exit 1
+              }
+              ;;
+            modules/attestation/tdx/v*)
+              module=tdx
+              kind=nested
+              version=${tag##*/}
+              [[ "$version" =~ $nested_version_re ]] || {
+                echo "TDX module tag must contain an exact v0 semantic version" >&2
+                exit 1
+              }
+              ;;
+            integrations/cocos/v*)
+              kind=cocos
+              version=${tag##*/}
+              [[ "$version" =~ $nested_version_re ]] || {
+                echo "Cocos integration tag must contain an exact v0 semantic version" >&2
+                exit 1
+              }
+              ;;
+            v*)
+              kind=root
+              version=$tag
+              [[ "$version" =~ $root_version_re ]] || {
+                echo "root tag must contain an exact v2 semantic version" >&2
+                exit 1
+              }
+              ;;
+            *)
+              echo "unsupported release tag: $tag" >&2
+              exit 1
+              ;;
+          esac
+
+          ref_json=$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${tag}")
+          if [[ $(jq -r '.object.type' <<<"$ref_json") != "tag" ]]; then
+            echo "release blocked: $tag is not an annotated tag" >&2
+            exit 1
+          fi
+
+          tag_object_sha=$(jq -r '.object.sha' <<<"$ref_json")
+          tag_json=$(gh api "repos/${GITHUB_REPOSITORY}/git/tags/${tag_object_sha}")
+          if [[ $(jq -r '.tag' <<<"$tag_json") != "$tag" ]]; then
+            echo "release blocked: signed tag name does not match pushed ref $tag" >&2
+            exit 1
+          fi
+          if [[ $(jq -r '.verification.verified' <<<"$tag_json") != "true" ]]; then
+            reason=$(jq -r '.verification.reason // "unknown"' <<<"$tag_json")
+            echo "release blocked: GitHub did not verify the tag signature ($reason)" >&2
+            exit 1
+          fi
+          if [[ $(jq -r '.object.type' <<<"$tag_json") != "commit" ]]; then
+            echo "release blocked: annotated tag does not point directly to a commit" >&2
+            exit 1
+          fi
+
+          target_sha=$(jq -r '.object.sha' <<<"$tag_json")
+          commit_json=$(gh api "repos/${GITHUB_REPOSITORY}/commits/${target_sha}")
+          if [[ $(jq -r '.commit.verification.verified' <<<"$commit_json") != "true" ]]; then
+            reason=$(jq -r '.commit.verification.reason // "unknown"' <<<"$commit_json")
+            echo "release blocked: GitHub did not verify the target commit signature ($reason)" >&2
+            exit 1
+          fi
+
+          unset GH_TOKEN
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          if ! git merge-base --is-ancestor "$target_sha" refs/remotes/origin/main; then
+            echo "release blocked: tag target is not reachable from origin/main" >&2
+            exit 1
+          fi
+          if [[ $(git rev-parse HEAD) != "$target_sha" ]]; then
+            echo "release blocked: checkout does not match the verified tag target" >&2
+            exit 1
+          fi
+
+          case "$kind" in
+            root) run_root_gate ;;
+            nested) run_nested_gate "$module" ;;
+            cocos) run_cocos_release_gate ;;
+          esac

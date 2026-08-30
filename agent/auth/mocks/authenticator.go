@@ -10,8 +10,8 @@ package mocks
 import (
 	"context"
 
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/agent/auth"
 	mock "github.com/stretchr/testify/mock"
-	"github.com/thinksyncs/agents-secure-binding/agent/auth"
 )
 
 // NewAuthenticator creates a new instance of Authenticator. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.

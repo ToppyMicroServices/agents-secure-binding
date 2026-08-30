@@ -12,8 +12,8 @@ import (
 	"net"
 	"time"
 
-	"github.com/thinksyncs/agents-secure-binding/internal/runtime/netguard"
-	"github.com/thinksyncs/agents-secure-binding/internal/runtime/server"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/internal/runtime/netguard"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/internal/runtime/server"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"

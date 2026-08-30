@@ -15,7 +15,7 @@ import (
 	"os"
 	"sync"
 
-	"github.com/thinksyncs/agents-secure-binding/pkg/atls"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/atls"
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
 )

@@ -4,15 +4,21 @@
 package tdx
 
 import (
+	"encoding/hex"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/attestation"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/attestation/corimgen"
+	"github.com/google/go-tdx-guest/abi"
 	"github.com/google/go-tdx-guest/proto/checkconfig"
+	"github.com/google/go-tdx-guest/proto/tdx"
+	tdxtestdata "github.com/google/go-tdx-guest/testing/testdata"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/thinksyncs/agents-secure-binding/pkg/attestation"
 	"github.com/veraison/corim/comid"
 	"github.com/veraison/corim/corim"
 	"github.com/veraison/swid"
@@ -366,6 +372,27 @@ func TestVerifier_VerifTeeAttestation(t *testing.T) {
 	}
 }
 
+func TestVerifyAttestationWithPolicyBindsReportData(t *testing.T) {
+	quoteAny, err := abi.QuoteToProto(tdxtestdata.RawQuote)
+	require.NoError(t, err)
+	quote, ok := quoteAny.(*tdx.QuoteV4)
+	require.True(t, ok)
+	expected := append([]byte(nil), quote.GetTdQuoteBody().GetReportData()...)
+	policy := &checkconfig.Config{
+		RootOfTrust: &checkconfig.RootOfTrust{},
+		Policy: &checkconfig.Policy{
+			HeaderPolicy:      &checkconfig.HeaderPolicy{},
+			TdQuoteBodyPolicy: &checkconfig.TDQuoteBodyPolicy{},
+		},
+	}
+
+	require.NoError(t, VerifyAttestationWithPolicy(tdxtestdata.RawQuote, expected, policy))
+	expected[0] ^= 0xff
+	err = VerifyAttestationWithPolicy(tdxtestdata.RawQuote, expected, policy)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "REPORT_DATA")
+}
+
 func TestVerifier_VerifVTpmAttestation(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -632,59 +659,232 @@ func TestReadTDXAttestationPolicy(t *testing.T) {
 	}
 }
 
-func TestVerifier_VerifyWithCoRIM(t *testing.T) {
-	v := verifier{}
+func tdxCoRIMTestQuote(t *testing.T) ([]byte, *tdx.TDQuoteBody) {
+	t.Helper()
+	report := append([]byte(nil), tdxtestdata.RawQuote...)
+	parsed, err := abi.QuoteToProto(report)
+	require.NoError(t, err)
+	quoteV4, ok := parsed.(*tdx.QuoteV4)
+	require.True(t, ok)
+	require.NotNil(t, quoteV4.GetTdQuoteBody())
+	return report, quoteV4.GetTdQuoteBody()
+}
 
-	// 1. Report too small
-	err := v.VerifyWithCoRIM([]byte("small"), &corim.UnsignedCorim{})
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "TDX report too small")
+func tdxCoRIMMeasurement(t *testing.T, key uint64, digest []byte) comid.Measurement {
+	t.Helper()
+	measurement, err := comid.NewUintMeasurement(key)
+	require.NoError(t, err)
+	require.NotNil(t, measurement.AddDigest(swid.Sha384, append([]byte(nil), digest...)))
+	return *measurement
+}
 
-	// 2. No tags in CoRIM
-	report := make([]byte, 160)
-	err = v.VerifyWithCoRIM(report, &corim.UnsignedCorim{})
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "no matching reference value found in CoRIM for TDX")
-
-	// 3. With non-comid tag
-	manifest := &corim.UnsignedCorim{
-		Tags: []corim.Tag{corim.Tag("not-a-comid")},
+func allTDXCoRIMMeasurements(t *testing.T, body *tdx.TDQuoteBody) []comid.Measurement {
+	t.Helper()
+	measurements := []comid.Measurement{
+		tdxCoRIMMeasurement(t, corimgen.TDXMRTDMKey, body.GetMrTd()),
+		tdxCoRIMMeasurement(t, corimgen.TDXMRSEAMMKey, body.GetMrSeam()),
 	}
-	err = v.VerifyWithCoRIM(report, manifest)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "no matching reference value found in CoRIM for TDX")
-
-	// 4. With invalid comid tag
-	manifest = &corim.UnsignedCorim{
-		Tags: []corim.Tag{append(corim.ComidTag, []byte("invalid")...)},
+	require.Len(t, body.GetRtmrs(), 4)
+	for index, rtmr := range body.GetRtmrs() {
+		measurements = append(measurements, tdxCoRIMMeasurement(t, corimgen.TDXRTMR0MKey+uint64(index), rtmr))
 	}
-	err = v.VerifyWithCoRIM(report, manifest)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "failed to parse CoMID from tag")
+	return measurements
+}
 
-	// 5. Successful MRTD match
-	mrtd := make([]byte, 48)
-	for i := range mrtd {
-		mrtd[i] = byte(i + 1)
-	}
-	copy(report[112:160], mrtd)
-
-	c := comid.NewComid().
+func tdxCoRIMManifest(measurements ...comid.Measurement) *corim.UnsignedCorim {
+	tag := comid.NewComid().
 		SetTagIdentity("tdx-test-tag", 0).
 		AddReferenceValue(comid.ReferenceValue{
 			Environment: comid.Environment{
 				Class:    comid.NewClassOID(comid.TestOID),
 				Instance: comid.MustNewUEIDInstance(comid.TestUEID),
 			},
-			Measurements: *comid.NewMeasurements().
-				AddMeasurement(comid.MustNewUUIDMeasurement(comid.TestUUID).AddDigest(swid.Sha3_384, mrtd)),
+			Measurements: measurements,
 		})
+	manifest := corim.NewUnsignedCorim()
+	manifest.AddComid(*tag)
+	return manifest
+}
 
-	unsignedCorim := corim.NewUnsignedCorim()
-	unsignedCorim.AddComid(*c)
+func TestVerifier_VerifyWithCoRIM(t *testing.T) {
+	v := verifier{}
 
-	err = v.VerifyWithCoRIM(report, unsignedCorim)
-	assert.NoError(t, err)
+	err := v.VerifyWithCoRIM([]byte("small"), &corim.UnsignedCorim{})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to parse TDX quote")
+
+	report, body := tdxCoRIMTestQuote(t)
+	err = v.VerifyWithCoRIM(report, &corim.UnsignedCorim{})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "missing the required MRTD")
+
+	err = v.VerifyWithCoRIM(report, &corim.UnsignedCorim{
+		Tags: []corim.Tag{corim.Tag("not-a-comid")},
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "missing the required MRTD")
+
+	err = v.VerifyWithCoRIM(report, &corim.UnsignedCorim{
+		Tags: []corim.Tag{append(corim.ComidTag, []byte("invalid")...)},
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to parse CoMID from tag")
+
+	require.NoError(t, v.VerifyWithCoRIM(report, tdxCoRIMManifest(
+		tdxCoRIMMeasurement(t, corimgen.TDXMRTDMKey, body.GetMrTd()),
+	)))
+	require.NoError(t, v.VerifyWithCoRIM(report, tdxCoRIMManifest(allTDXCoRIMMeasurements(t, body)...)))
+}
+
+func TestVerifier_VerifyWithGeneratedTDXCoRIM(t *testing.T) {
+	report, body := tdxCoRIMTestQuote(t)
+	rtmrs := make([]string, 0, len(body.GetRtmrs()))
+	for _, rtmr := range body.GetRtmrs() {
+		rtmrs = append(rtmrs, hex.EncodeToString(rtmr))
+	}
+	payload, err := corimgen.GenerateCoRIM(corimgen.Options{
+		Platform:    "tdx",
+		Measurement: hex.EncodeToString(body.GetMrTd()),
+		MrSeam:      hex.EncodeToString(body.GetMrSeam()),
+		RTMRs:       strings.Join(rtmrs, ","),
+	})
+	require.NoError(t, err)
+
+	var manifest corim.UnsignedCorim
+	require.NoError(t, manifest.FromCBOR(payload))
+	require.NoError(t, (verifier{}).VerifyWithCoRIM(report, &manifest))
+}
+
+func TestVerifier_VerifyWithCoRIMRejectsFieldMismatch(t *testing.T) {
+	v := verifier{}
+	report, body := tdxCoRIMTestQuote(t)
+	tests := []struct {
+		name             string
+		measurementIndex int
+		field            string
+	}{
+		{name: "mrtd", measurementIndex: 0, field: "MRTD"},
+		{name: "mrseam", measurementIndex: 1, field: "MRSEAM"},
+		{name: "rtmr0", measurementIndex: 2, field: "RTMR0"},
+		{name: "rtmr1", measurementIndex: 3, field: "RTMR1"},
+		{name: "rtmr2", measurementIndex: 4, field: "RTMR2"},
+		{name: "rtmr3", measurementIndex: 5, field: "RTMR3"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			measurements := allTDXCoRIMMeasurements(t, body)
+			digest := (*measurements[test.measurementIndex].Val.Digests)[0].HashValue
+			digest[0] ^= 0xff
+			err := v.VerifyWithCoRIM(report, tdxCoRIMManifest(measurements...))
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), test.field+" measurement does not match")
+		})
+	}
+}
+
+func TestVerifier_VerifyWithCoRIMDoesNotTreatOtherFieldsAsMRTD(t *testing.T) {
+	v := verifier{}
+	report, body := tdxCoRIMTestQuote(t)
+	for _, test := range []struct {
+		name  string
+		key   uint64
+		field string
+	}{
+		{name: "mrseam", key: corimgen.TDXMRSEAMMKey, field: "MRSEAM"},
+		{name: "rtmr0", key: corimgen.TDXRTMR0MKey, field: "RTMR0"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			manifest := tdxCoRIMManifest(tdxCoRIMMeasurement(t, test.key, body.GetMrTd()))
+			err := v.VerifyWithCoRIM(report, manifest)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), test.field+" measurement does not match")
+		})
+	}
+}
+
+func TestVerifier_VerifyWithCoRIMRejectsInvalidKeys(t *testing.T) {
+	v := verifier{}
+	report, body := tdxCoRIMTestQuote(t)
+	mrtd := tdxCoRIMMeasurement(t, corimgen.TDXMRTDMKey, body.GetMrTd())
+
+	t.Run("unknown", func(t *testing.T) {
+		unknown := tdxCoRIMMeasurement(t, corimgen.TDXRTMR0MKey+4, body.GetMrTd())
+		err := v.VerifyWithCoRIM(report, tdxCoRIMManifest(mrtd, unknown))
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "unknown TDX CoRIM measurement key")
+	})
+
+	t.Run("duplicate", func(t *testing.T) {
+		duplicate := tdxCoRIMMeasurement(t, corimgen.TDXMRTDMKey, body.GetMrTd())
+		err := v.VerifyWithCoRIM(report, tdxCoRIMManifest(mrtd, duplicate))
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "duplicate TDX CoRIM measurement key")
+	})
+
+	t.Run("unkeyed", func(t *testing.T) {
+		unkeyed := tdxCoRIMMeasurement(t, corimgen.TDXMRTDMKey, body.GetMrTd())
+		unkeyed.Key = nil
+		err := v.VerifyWithCoRIM(report, tdxCoRIMManifest(unkeyed))
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "measurement key is required")
+	})
+
+	t.Run("non-integer", func(t *testing.T) {
+		nonInteger := *comid.MustNewUUIDMeasurement(comid.TestUUID).AddDigest(swid.Sha384, body.GetMrTd())
+		err := v.VerifyWithCoRIM(report, tdxCoRIMManifest(mrtd, nonInteger))
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "must be an unsigned integer")
+	})
+}
+
+func TestVerifier_VerifyWithCoRIMRejectsMultipleReferenceProfiles(t *testing.T) {
+	report, body := tdxCoRIMTestQuote(t)
+	measurement := tdxCoRIMMeasurement(t, corimgen.TDXMRTDMKey, body.GetMrTd())
+	reference := comid.ReferenceValue{
+		Environment:  comid.Environment{Class: comid.NewClassOID(comid.TestOID)},
+		Measurements: comid.Measurements{measurement},
+	}
+	tag := comid.NewComid().
+		SetTagIdentity("tdx-multiple-reference-values", 0).
+		AddReferenceValue(reference).
+		AddReferenceValue(reference)
+	manifest := corim.NewUnsignedCorim()
+	manifest.AddComid(*tag)
+
+	err := (verifier{}).VerifyWithCoRIM(report, manifest)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "exactly one reference-value profile")
+}
+
+func TestVerifier_VerifyWithCoRIMRejectsUnsupportedValuesAndDigests(t *testing.T) {
+	v := verifier{}
+	report, body := tdxCoRIMTestQuote(t)
+
+	t.Run("svn", func(t *testing.T) {
+		measurement := tdxCoRIMMeasurement(t, corimgen.TDXMRTDMKey, body.GetMrTd())
+		measurement.SetSVN(1)
+		err := v.VerifyWithCoRIM(report, tdxCoRIMManifest(measurement))
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "unsupported measurement values")
+	})
+
+	t.Run("multiple digests", func(t *testing.T) {
+		measurement := tdxCoRIMMeasurement(t, corimgen.TDXMRTDMKey, body.GetMrTd())
+		second := append([]byte(nil), body.GetMrTd()...)
+		second[0] ^= 0xff
+		require.NotNil(t, measurement.AddDigest(swid.Sha384, second))
+		err := v.VerifyWithCoRIM(report, tdxCoRIMManifest(measurement))
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "exactly one digest")
+	})
+
+	t.Run("wrong algorithm", func(t *testing.T) {
+		measurement := comid.MustNewUintMeasurement(corimgen.TDXMRTDMKey)
+		require.NotNil(t, measurement.AddDigest(swid.Sha3_384, body.GetMrTd()))
+		err := v.VerifyWithCoRIM(report, tdxCoRIMManifest(*measurement))
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "must use SHA-384")
+	})
 }
 
 func TestVerifier_VerifyEAT(t *testing.T) {

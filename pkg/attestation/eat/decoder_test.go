@@ -141,6 +141,15 @@ func TestDecodeCBOR(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name: "Plain CBOR rejected when verification is requested",
+			args: args{
+				token:     payload,
+				verifyKey: &privateKey.PublicKey,
+			},
+			wantErr:     true,
+			expectedErr: ErrSignedCBORRequired.Error(),
+		},
+		{
 			name: "Invalid COSE signature",
 			args: args{
 				token: cborToken,
@@ -178,6 +187,32 @@ func TestDecodeCBOR(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestDecodeVerifiedCBORRequiresSignatureAndKey(t *testing.T) {
+	claims := &EATClaims{Nonce: []byte("test-nonce")}
+	payload, err := cbor.Marshal(claims)
+	require.NoError(t, err)
+
+	privateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+	signer, err := cose.NewSigner(cose.AlgorithmES256, privateKey)
+	require.NoError(t, err)
+	msg := cose.NewSign1Message()
+	msg.Payload = payload
+	require.NoError(t, msg.Sign(rand.Reader, nil, signer))
+	token, err := msg.MarshalCBOR()
+	require.NoError(t, err)
+
+	got, err := DecodeVerifiedCBOR(token, &privateKey.PublicKey)
+	require.NoError(t, err)
+	assert.Equal(t, claims.Nonce, got.Nonce)
+
+	_, err = DecodeVerifiedCBOR(token, nil)
+	assert.ErrorIs(t, err, ErrVerificationKeyRequired)
+
+	_, err = DecodeVerifiedCBOR(payload, &privateKey.PublicKey)
+	assert.ErrorIs(t, err, ErrSignedCBORRequired)
 }
 
 func TestDecodeAutoDetect(t *testing.T) {

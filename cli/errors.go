@@ -3,11 +3,11 @@
 package cli
 
 import (
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/agent/auth"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/internal/errors"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/clients/grpc/agent"
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
-	"github.com/thinksyncs/agents-secure-binding/agent/auth"
-	"github.com/thinksyncs/agents-secure-binding/internal/errors"
-	"github.com/thinksyncs/agents-secure-binding/pkg/clients/grpc/agent"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )

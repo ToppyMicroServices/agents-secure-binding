@@ -63,10 +63,10 @@ cocos-cli policy create-corim snp [flags]
 **Flags:**
 - `--measurement` (optional): Measurement/Launch Digest (hex string, defaults to zero if not provided)
 - `--policy` (optional): SNP policy flags (default: 0)
-- `--svn` (optional): Security Version Number/TCB (default: 0)
+- `--svn` (optional): Exact SNP guest SVN; omitted when zero
 - `--product` (optional): Processor product name (default: "Milan")
-- `--host-data` (optional): Host data (hex string)
-- `--launch-tcb` (optional): Minimum launch TCB (default: 0)
+- `--host-data` (optional): Exact 32-byte host data (64 hex characters)
+- `--launch-tcb` (optional): Component-wise minimum launch TCB; omitted when zero
 - `--output` (optional): Output file path (default: stdout)
 
 **Examples:**
@@ -92,7 +92,7 @@ Generate with host data and launch TCB:
 ```bash
 cocos-cli policy create-corim snp \
   --measurement abc123... \
-  --host-data deadbeef \
+  --host-data 0000000000000000000000000000000000000000000000000000000000000000 \
   --launch-tcb 1 \
   --output snp-policy.corim
 ```
@@ -107,7 +107,6 @@ cocos-cli policy create-corim tdx [flags]
 
 **Flags:**
 - `--measurement` (optional): MRTD measurement (hex string, uses default if not provided)
-- `--svn` (optional): Security Version Number (default: 0)
 - `--rtmrs` (optional): Comma-separated RTMRs (hex)
 - `--mr-seam` (optional): MRSEAM (hex)
 - `--output` (optional): Output file path (default: stdout)
@@ -126,9 +125,11 @@ cocos-cli policy create-corim tdx \
   --measurement abc123def456... \
   --rtmrs rtmr0,rtmr1,rtmr2,rtmr3 \
   --mr-seam 789abc... \
-  --svn 2 \
   --output tdx-policy.corim
 ```
+
+TDX does not expose a scalar `--svn` flag. Configure the 16-byte
+`minimum_tee_tcb_svn` in the TDX platform JSON policy.
 
 ## Signing CoRIMs
 
@@ -167,7 +168,10 @@ The output file is a standard COSE_Sign1 message containing the CoRIM. It can be
 
 ## Output Format
 
-All commands output CoRIM in CBOR (Concise Binary Object Representation) format. By default, output is written to stdout, allowing for piping:
+All commands output CoRIM in CBOR (Concise Binary Object Representation)
+format. SNP and TDX fields use repository-local unsigned-integer CoMID keys;
+the keys are not IETF-assigned values or a general interoperability profile.
+By default, output is written to stdout, allowing for piping:
 
 ```bash
 # Pipe to file

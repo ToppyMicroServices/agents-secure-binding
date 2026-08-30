@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/thinksyncs/agents-secure-binding/internal/errors"
-	aa "github.com/thinksyncs/agents-secure-binding/internal/proto/attestation-agent"
-	"github.com/thinksyncs/agents-secure-binding/internal/runtime/netguard"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/internal/errors"
+	aa "github.com/ToppyMicroServices/agents-secure-binding/v2/internal/proto/attestation-agent"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/internal/runtime/netguard"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )

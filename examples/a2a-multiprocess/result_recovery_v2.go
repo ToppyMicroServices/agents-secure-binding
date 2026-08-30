@@ -16,7 +16,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/thinksyncs/agents-secure-binding/pkg/operationjournal"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/operationjournal"
 )
 
 const resultSealingKeyBytesV2 = 32

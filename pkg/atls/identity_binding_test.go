@@ -15,7 +15,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/thinksyncs/agents-secure-binding/pkg/atls/ea"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/atls/ea"
 )
 
 func TestIdentityBindingFromConnectionStateRejectsInvalidTLSState(t *testing.T) {

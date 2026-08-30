@@ -5,6 +5,8 @@ package main
 
 import (
 	"bytes"
+	"crypto/ecdsa"
+	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
@@ -17,33 +19,39 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ToppyMicroServices/agents-secure-binding/integrations/cocos/platformmodule"
+	qemu "github.com/ToppyMicroServices/agents-secure-binding/v2/manager/qemu"
+	eaattestation "github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/atls/eaattestation"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/attestation"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/attestation/eat"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/attestation/tdx"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/attestation/vtpm"
 	sevsnppb "github.com/google/go-sev-guest/proto/sevsnp"
 	tdxabi "github.com/google/go-tdx-guest/abi"
 	tdxpb "github.com/google/go-tdx-guest/proto/tdx"
-	qemu "github.com/thinksyncs/agents-secure-binding/manager/qemu"
-	"github.com/thinksyncs/agents-secure-binding/pkg/attestation"
-	"github.com/thinksyncs/agents-secure-binding/pkg/attestation/tdx"
-	"github.com/thinksyncs/agents-secure-binding/pkg/attestation/vtpm"
 	"google.golang.org/protobuf/proto"
 )
 
 const (
-	platformAuto    = "auto"
-	platformSNP     = "snp"
-	platformSNPvTPM = "snp-vtpm"
-	platformTDX     = "tdx"
-	reportDataSize  = 64
+	platformSNP    = "snp"
+	platformTDX    = "tdx"
+	reportDataSize = 64
 )
 
 var errChallengeMismatch = errors.New("attestation evidence is not bound to verifier challenge")
 
 type runOptions struct {
-	Platform             string
-	VMPL                 uint
-	ExpectedHostDataHex  string
-	RequireKernelHashes  bool
-	KernelHashesEvidence bool
-	EvidenceDir          string
+	Platform                string
+	VMPL                    uint
+	ExpectedHostDataHex     string
+	RequireKernelHashes     bool
+	KernelHashesEvidence    bool
+	EvidenceDir             string
+	CoRIMPolicyPath         string
+	PlatformPolicyPath      string
+	CoRIMPublicKeyPath      string
+	EATIssuer               string
+	RequireFullVerification bool
 }
 
 type extractedEvidence struct {
@@ -60,16 +68,23 @@ type runSummary struct {
 	ChallengeBSHA256       string `json:"challenge_b_sha256"`
 	HostDataSHA256         string `json:"host_data_sha256,omitempty"`
 	AppraisalContractCheck bool   `json:"appraisal_contract_check"`
+	FullModuleVerification bool   `json:"full_module_verification"`
+	EATPublicKeySHA256     string `json:"eat_public_key_sha256,omitempty"`
 }
 
 func main() {
 	opts := runOptions{}
-	flag.StringVar(&opts.Platform, "platform", platformAuto, "attestation platform: auto, snp, snp-vtpm, or tdx")
+	flag.StringVar(&opts.Platform, "platform", platformSNP, "attestation platform: snp or tdx")
 	flag.UintVar(&opts.VMPL, "vmpl", 0, "SEV-SNP VM privilege level")
 	flag.StringVar(&opts.ExpectedHostDataHex, "expected-host-data-hex", "", "expected SEV-SNP HostData as hex")
 	flag.BoolVar(&opts.RequireKernelHashes, "require-kernel-hashes", false, "require external evidence that kernel-hashes=on was used")
 	flag.BoolVar(&opts.KernelHashesEvidence, "kernel-hashes-evidence", false, "runner-provided evidence that kernel-hashes=on was used")
 	flag.StringVar(&opts.EvidenceDir, "evidence-dir", "", "directory for non-sensitive evidence fingerprints")
+	flag.StringVar(&opts.CoRIMPolicyPath, "corim-policy", "", "path to the local CoRIM reference-value policy")
+	flag.StringVar(&opts.PlatformPolicyPath, "platform-policy", "", "path to the go-sev/go-tdx verification policy JSON")
+	flag.StringVar(&opts.CoRIMPublicKeyPath, "corim-public-key", "", "optional P-256 public key for a signed CoRIM")
+	flag.StringVar(&opts.EATIssuer, "eat-issuer", "hardware-attestation-qualification", "expected issuer for the in-process signed EAT fixture")
+	flag.BoolVar(&opts.RequireFullVerification, "require-full-verification", false, "fail unless the complete signed-EAT and platform verifier path succeeds")
 	flag.Parse()
 
 	summary, err := run(opts)
@@ -93,7 +108,7 @@ func run(opts runOptions) (*runSummary, error) {
 	}
 
 	switch platform {
-	case platformSNP, platformSNPvTPM:
+	case platformSNP:
 		return runSEVSNP(platform, opts)
 	case platformTDX:
 		if opts.ExpectedHostDataHex != "" || opts.RequireKernelHashes {
@@ -108,22 +123,7 @@ func run(opts runOptions) (*runSummary, error) {
 func resolvePlatform(requested string) (string, error) {
 	normalized := strings.ToLower(strings.TrimSpace(requested))
 	switch normalized {
-	case "", platformAuto:
-		switch attestation.CCPlatform() {
-		case attestation.SNP:
-			return platformSNP, nil
-		case attestation.SNPvTPM:
-			return platformSNPvTPM, nil
-		case attestation.TDX:
-			return platformTDX, nil
-		case attestation.Azure:
-			return "", fmt.Errorf("Azure MAA runtime fetch is disabled in this repository; use a direct SEV-SNP or TDX runner")
-		case attestation.NoCC:
-			return "", fmt.Errorf("no confidential-computing attestation device detected")
-		default:
-			return "", fmt.Errorf("detected confidential-computing platform is not supported by this gate")
-		}
-	case platformSNP, platformSNPvTPM, platformTDX:
+	case platformSNP, platformTDX:
 		return normalized, nil
 	default:
 		return "", fmt.Errorf("unsupported attestation platform %q", requested)
@@ -131,8 +131,21 @@ func resolvePlatform(requested string) (string, error) {
 }
 
 func runSEVSNP(platform string, opts runOptions) (*runSummary, error) {
+	if err := prepareSEVSNPCertificateCache(opts.VMPL, vtpm.FetchSEVCertificates); err != nil {
+		return nil, err
+	}
 	provider := vtpm.NewProvider(false, opts.VMPL)
 	return exerciseTEE(platform, provider.TeeAttestation, extractSEVSNPEvidence, opts)
+}
+
+func prepareSEVSNPCertificateCache(vmpl uint, fetch func(uint) error) error {
+	if fetch == nil {
+		return fmt.Errorf("bootstrap SEV-SNP certificate cache: fetch function is nil")
+	}
+	if err := fetch(vmpl); err != nil {
+		return fmt.Errorf("bootstrap SEV-SNP certificate cache from AMD KDS: %w", err)
+	}
+	return nil
 }
 
 func exerciseTEE(
@@ -188,9 +201,11 @@ func exerciseTEE(
 	}
 
 	appraisalChecked := false
+	fullModuleVerified := false
+	eatPublicKeySHA256 := ""
 	hostDataHash := ""
 	if opts.ExpectedHostDataHex != "" || opts.RequireKernelHashes {
-		if platform != platformSNP && platform != platformSNPvTPM {
+		if platform != platformSNP {
 			return nil, fmt.Errorf("SEV-SNP appraisal contract requested for non-SNP platform %q", platform)
 		}
 		if opts.ExpectedHostDataHex != "" && len(parsedA.HostData) == 0 {
@@ -221,6 +236,14 @@ func exerciseTEE(
 			hostDataHash = sha256Hex(parsedA.HostData)
 		}
 	}
+	if opts.RequireFullVerification || opts.CoRIMPolicyPath != "" || opts.PlatformPolicyPath != "" {
+		fingerprint, err := verifyFullModulePath(platform, evidenceA, evidenceB, challengeA, challengeB, opts)
+		if err != nil {
+			return nil, err
+		}
+		fullModuleVerified = true
+		eatPublicKeySHA256 = fingerprint
+	}
 
 	summary := &runSummary{
 		TimestampUTC:           time.Now().UTC().Format(time.RFC3339),
@@ -231,11 +254,112 @@ func exerciseTEE(
 		ChallengeBSHA256:       sha256Hex(challengeB),
 		HostDataSHA256:         hostDataHash,
 		AppraisalContractCheck: appraisalChecked,
+		FullModuleVerification: fullModuleVerified,
+		EATPublicKeySHA256:     eatPublicKeySHA256,
 	}
 	if err := writeSummary(opts.EvidenceDir, summary); err != nil {
 		return nil, err
 	}
 	return summary, nil
+}
+
+func verifyFullModulePath(platform string, evidenceA, evidenceB, challengeA, challengeB []byte, opts runOptions) (string, error) {
+	if strings.TrimSpace(opts.CoRIMPolicyPath) == "" || strings.TrimSpace(opts.PlatformPolicyPath) == "" {
+		return "", fmt.Errorf("full module verification requires --corim-policy and --platform-policy")
+	}
+	issuer := strings.TrimSpace(opts.EATIssuer)
+	if issuer == "" {
+		return "", fmt.Errorf("full module verification requires a non-empty --eat-issuer")
+	}
+	signingKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		return "", fmt.Errorf("generate qualification EAT key: %w", err)
+	}
+	config := platformmodule.VerifierConfig{
+		Platform:           platformmodule.Platform(platform),
+		PolicyPath:         opts.CoRIMPolicyPath,
+		EATVerificationKey: &signingKey.PublicKey,
+		ExpectedIssuer:     issuer,
+	}
+	if path := strings.TrimSpace(opts.CoRIMPublicKeyPath); path != "" {
+		config.CoRIMVerificationKey, err = eat.LoadVerificationKey(path)
+		if err != nil {
+			return "", fmt.Errorf("load CoRIM verification key: %w", err)
+		}
+	}
+	platformType := attestation.NoCC
+	switch platform {
+	case platformSNP:
+		platformType = attestation.SNP
+		config.SNPVerificationOptions, config.SNPValidationOptions, err = platformmodule.LoadSNPPlatformPolicy(opts.PlatformPolicyPath)
+	case platformTDX:
+		platformType = attestation.TDX
+		config.TDXPolicy, err = platformmodule.LoadTDXPlatformPolicy(opts.PlatformPolicyPath)
+	default:
+		return "", fmt.Errorf("full module verification is available only for direct SNP or TDX")
+	}
+	if err != nil {
+		return "", err
+	}
+	verifier, err := platformmodule.NewEvidenceVerifier(config)
+	if err != nil {
+		return "", fmt.Errorf("construct %s verifier: %w", platform, err)
+	}
+
+	bindingA, nonceA, err := qualificationBinding(challengeA)
+	if err != nil {
+		return "", err
+	}
+	bindingB, nonceB, err := qualificationBinding(challengeB)
+	if err != nil {
+		return "", err
+	}
+	tokenA, err := qualificationEAT(evidenceA, nonceA, platformType, signingKey, issuer)
+	if err != nil {
+		return "", err
+	}
+	tokenB, err := qualificationEAT(evidenceB, nonceB, platformType, signingKey, issuer)
+	if err != nil {
+		return "", err
+	}
+	if err := verifier.VerifyEvidence(tokenA, bindingA); err != nil {
+		return "", fmt.Errorf("verify %s module evidence A: %w", platform, err)
+	}
+	if err := verifier.VerifyEvidence(tokenB, bindingB); err != nil {
+		return "", fmt.Errorf("verify %s module evidence B: %w", platform, err)
+	}
+	if err := verifier.VerifyEvidence(tokenA, bindingB); err == nil {
+		return "", fmt.Errorf("%s module accepted session A EAT for session B binding", platform)
+	}
+	fingerprint, err := eat.VerificationKeyFingerprint(&signingKey.PublicKey)
+	if err != nil {
+		return "", err
+	}
+	return fingerprint, nil
+}
+
+func qualificationBinding(reportData []byte) (eaattestation.EvidenceBinding, []byte, error) {
+	var binding eaattestation.EvidenceBinding
+	if len(reportData) != len(binding.ReportData) {
+		return binding, nil, fmt.Errorf("qualification REPORT_DATA length is %d, expected %d", len(reportData), len(binding.ReportData))
+	}
+	copy(binding.ReportData[:], reportData)
+	if _, err := rand.Read(binding.Nonce[:]); err != nil {
+		return binding, nil, fmt.Errorf("generate qualification EAT nonce: %w", err)
+	}
+	return binding, append([]byte(nil), binding.Nonce[:]...), nil
+}
+
+func qualificationEAT(evidence, nonce []byte, platformType attestation.PlatformType, signingKey *ecdsa.PrivateKey, issuer string) ([]byte, error) {
+	claims, err := eat.NewEATClaims(evidence, nonce, platformType)
+	if err != nil {
+		return nil, fmt.Errorf("create qualification EAT claims: %w", err)
+	}
+	token, err := eat.EncodeToCBOR(claims, signingKey, issuer)
+	if err != nil {
+		return nil, fmt.Errorf("sign qualification EAT: %w", err)
+	}
+	return token, nil
 }
 
 func newReportData(context string) ([]byte, error) {

@@ -7,9 +7,9 @@ import (
 	"encoding/json"
 	"log/slog"
 
-	"github.com/thinksyncs/agents-secure-binding/agent/events"
-	logpb "github.com/thinksyncs/agents-secure-binding/agent/log"
-	logclient "github.com/thinksyncs/agents-secure-binding/pkg/clients/grpc/log"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/agent/events"
+	logpb "github.com/ToppyMicroServices/agents-secure-binding/v2/agent/log"
+	logclient "github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/clients/grpc/log"
 )
 
 type adapter struct {

@@ -11,9 +11,10 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/thinksyncs/agents-secure-binding/pkg/atls"
-	"github.com/thinksyncs/agents-secure-binding/pkg/atls/ea"
-	"github.com/thinksyncs/agents-secure-binding/pkg/atls/identitypolicy"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/atls"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/atls/ea"
+	eaattestation "github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/atls/eaattestation"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/atls/identitypolicy"
 )
 
 var (
@@ -21,6 +22,8 @@ var (
 	_ ClientConfiguration = (*StandardClientConfig)(nil)
 
 	ErrInvalidAttestationRequestContext = errors.New("invalid attestation request context")
+	ErrNilAttestedClientConfig          = errors.New("attested client configuration is nil")
+	ErrAttestedTLSRequiresHTTPS         = errors.New("attested HTTP client requires HTTPS")
 	ErrInvalidIdentityJWTConfig         = errors.New("invalid identity JWT config")
 )
 
@@ -35,14 +38,20 @@ type StandardClientConfig struct {
 	ClientCert   string        `env:"CLIENT_CERT"     envDefault:""`
 	ClientKey    string        `env:"CLIENT_KEY"      envDefault:""`
 	ServerCAFile string        `env:"SERVER_CA_CERTS" envDefault:""`
+	ServerName   string        `env:"SERVER_NAME"     envDefault:""`
 }
 
 // AttestedClientConfig represents a client configuration with attested TLS capabilities.
 type AttestedClientConfig struct {
 	StandardClientConfig
+	// AttestationPolicy is retained for compatibility with legacy callers.
+	// Generic clients do not load or interpret this platform policy path.
 	AttestationPolicy string `env:"ATTESTATION_POLICY" envDefault:""`
 	AttestedTLS       bool   `env:"ATTESTED_TLS"       envDefault:"false"`
 	ProductName       string `env:"PRODUCT_NAME"       envDefault:"Milan"`
+	// AttestationVerificationPolicy is supplied by the selected deployment
+	// module. The generic client does not select or construct a platform verifier.
+	AttestationVerificationPolicy eaattestation.VerificationPolicy `env:"-"`
 	// AttestationRequestContextHex, when set, is decoded from hex and used as
 	// the exported authenticator certificate_request_context. This lets the
 	// caller provide the background-check freshness value directly.
@@ -67,6 +76,21 @@ func (c AttestedClientConfig) Config() StandardClientConfig {
 
 func (c StandardClientConfig) Config() StandardClientConfig {
 	return c
+}
+
+// AsAttestedClientConfig normalizes both supported representations of an
+// attested client configuration. Callers must treat a nil config with ok=true
+// as ErrNilAttestedClientConfig rather than falling back to basic TLS.
+func AsAttestedClientConfig(cfg ClientConfiguration) (attested *AttestedClientConfig, ok bool) {
+	switch typed := cfg.(type) {
+	case AttestedClientConfig:
+		copy := typed
+		return &copy, true
+	case *AttestedClientConfig:
+		return typed, true
+	default:
+		return nil, false
+	}
 }
 
 func (c AttestedClientConfig) RequestContext() ([]byte, error) {

@@ -17,12 +17,12 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/internal/errors"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/manager/qemu"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/manager/vm"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/attestation/corimgen"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/manager"
 	"github.com/google/uuid"
-	"github.com/thinksyncs/agents-secure-binding/internal/errors"
-	"github.com/thinksyncs/agents-secure-binding/manager/qemu"
-	"github.com/thinksyncs/agents-secure-binding/manager/vm"
-	"github.com/thinksyncs/agents-secure-binding/pkg/attestation/corimgen"
-	"github.com/thinksyncs/agents-secure-binding/pkg/manager"
 )
 
 const (

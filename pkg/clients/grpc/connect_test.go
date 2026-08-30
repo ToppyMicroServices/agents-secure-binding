@@ -18,30 +18,23 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/internal/errors"
+	eaattestation "github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/atls/eaattestation"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/atls/identitypolicy"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/clients"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/tls"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/thinksyncs/agents-secure-binding/internal/errors"
-	"github.com/thinksyncs/agents-secure-binding/pkg/atls/identitypolicy"
-	"github.com/thinksyncs/agents-secure-binding/pkg/clients"
-	"github.com/thinksyncs/agents-secure-binding/pkg/tls"
 )
 
 func TestNewClient(t *testing.T) {
 	caCertFile, clientCertFile, clientKeyFile, err := createCertificatesFiles()
 	require.NoError(t, err)
 
-	policyFile, err := os.CreateTemp("", "attestation_policy.json")
-	require.NoError(t, err)
-	_, err = policyFile.WriteString("{}")
-	require.NoError(t, err)
-	err = policyFile.Close()
-	require.NoError(t, err)
-
 	t.Cleanup(func() {
 		os.Remove(caCertFile)
 		os.Remove(clientCertFile)
 		os.Remove(clientKeyFile)
-		os.Remove(policyFile.Name())
 	})
 
 	tests := []struct {
@@ -109,8 +102,8 @@ func TestNewClient(t *testing.T) {
 					ClientCert:   clientCertFile,
 					ClientKey:    clientKeyFile,
 				},
-				AttestedTLS:       true,
-				AttestationPolicy: policyFile.Name(),
+				AttestedTLS:                   true,
+				AttestationVerificationPolicy: grpcAttestationVerificationPolicy(),
 			},
 			wantErr: false,
 			err:     nil,
@@ -124,15 +117,15 @@ func TestNewClient(t *testing.T) {
 					ClientCert:   clientCertFile,
 					ClientKey:    clientKeyFile,
 				},
-				AttestedTLS:                  true,
-				AttestationPolicy:            policyFile.Name(),
-				AttestationRequestContextHex: "01020304",
+				AttestedTLS:                   true,
+				AttestationVerificationPolicy: grpcAttestationVerificationPolicy(),
+				AttestationRequestContextHex:  "01020304",
 			},
 			wantErr: false,
 			err:     nil,
 		},
 		{
-			name: "Failed agent client with aTLS",
+			name: "Failed agent client with aTLS and no verifier",
 			agentCfg: clients.AttestedClientConfig{
 				StandardClientConfig: clients.StandardClientConfig{
 					URL:          "localhost:7001",
@@ -140,11 +133,10 @@ func TestNewClient(t *testing.T) {
 					ClientCert:   clientCertFile,
 					ClientKey:    clientKeyFile,
 				},
-				AttestedTLS:       true,
-				AttestationPolicy: "no such file",
+				AttestedTLS: true,
 			},
 			wantErr: true,
-			err:     fmt.Errorf("failed to stat attestation policy file"),
+			err:     clients.ErrMissingAttestationVerifier,
 		},
 		{
 			name: "Failed agent client with invalid attestation request context",
@@ -155,9 +147,9 @@ func TestNewClient(t *testing.T) {
 					ClientCert:   clientCertFile,
 					ClientKey:    clientKeyFile,
 				},
-				AttestedTLS:                  true,
-				AttestationPolicy:            policyFile.Name(),
-				AttestationRequestContextHex: "xyz",
+				AttestedTLS:                   true,
+				AttestationVerificationPolicy: grpcAttestationVerificationPolicy(),
+				AttestationRequestContextHex:  "xyz",
 			},
 			wantErr: true,
 			err:     clients.ErrInvalidAttestationRequestContext,
@@ -216,6 +208,26 @@ func TestNewClient(t *testing.T) {
 	}
 }
 
+func TestConnect_ATLSPointerCannotBypassVerifier(t *testing.T) {
+	config := &clients.AttestedClientConfig{
+		StandardClientConfig: clients.StandardClientConfig{URL: "localhost:7001"},
+		AttestedTLS:          true,
+	}
+
+	conn, security, err := connect(config)
+	assert.ErrorIs(t, err, clients.ErrMissingAttestationVerifier)
+	assert.Nil(t, conn)
+	assert.Equal(t, tls.WithoutTLS, security)
+}
+
+func TestConnect_RejectsNilAttestedConfig(t *testing.T) {
+	var config *clients.AttestedClientConfig
+	conn, security, err := connect(config)
+	assert.ErrorIs(t, err, clients.ErrNilAttestedClientConfig)
+	assert.Nil(t, conn)
+	assert.Equal(t, tls.WithoutTLS, security)
+}
+
 func TestBuildATLSClientConfigCopiesIdentityBindingInputs(t *testing.T) {
 	grant := &identitypolicy.VerifiedGrant{
 		Issuer:          "manager-key-1",
@@ -240,6 +252,7 @@ func TestBuildATLSClientConfigCopiesIdentityBindingInputs(t *testing.T) {
 	replay := newGRPCReplayCache()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	agcfg := clients.AttestedClientConfig{
+		AttestationVerificationPolicy: grpcAttestationVerificationPolicy(),
 		IdentityPolicy: identitypolicy.Policy{
 			Require:  identitypolicy.Requirements{L3: true},
 			Expected: identitypolicy.Values{Service: "payments"},
@@ -253,6 +266,7 @@ func TestBuildATLSClientConfigCopiesIdentityBindingInputs(t *testing.T) {
 	atlsConfig, err := buildATLSClientConfig(agcfg, &stdtls.Config{})
 
 	require.NoError(t, err)
+	assert.Equal(t, agcfg.AttestationVerificationPolicy, atlsConfig.AttestationPolicy)
 	assert.Equal(t, agcfg.IdentityPolicy, atlsConfig.IdentityPolicy)
 	assert.Same(t, grant, atlsConfig.IdentityGrant)
 	assert.Same(t, binding, atlsConfig.IdentityBinding)
@@ -262,6 +276,7 @@ func TestBuildATLSClientConfigCopiesIdentityBindingInputs(t *testing.T) {
 
 func TestBuildATLSClientConfigWiresAGTPObservedIdentity(t *testing.T) {
 	agcfg := clients.AttestedClientConfig{
+		AttestationVerificationPolicy: grpcAttestationVerificationPolicy(),
 		IdentityPolicy: identitypolicy.Policy{
 			Require:  identitypolicy.Requirements{L3: true},
 			Expected: identitypolicy.Values{Service: "payments"},
@@ -331,6 +346,16 @@ func TestClientSecure(t *testing.T) {
 }
 
 type grpcReplayCache struct{}
+
+type grpcAcceptEvidenceVerifier struct{}
+
+func (grpcAcceptEvidenceVerifier) VerifyEvidence([]byte, eaattestation.EvidenceBinding) error {
+	return nil
+}
+
+func grpcAttestationVerificationPolicy() eaattestation.VerificationPolicy {
+	return eaattestation.VerificationPolicy{EvidenceVerifier: grpcAcceptEvidenceVerifier{}}
+}
 
 func newGRPCReplayCache() *grpcReplayCache {
 	return &grpcReplayCache{}

@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/thinksyncs/agents-secure-binding/agent/cvms"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/agent/cvms"
 )
 
 // Message represents a pending message with its timestamp.

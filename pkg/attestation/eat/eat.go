@@ -6,7 +6,7 @@ package eat
 import (
 	"errors"
 
-	"github.com/thinksyncs/agents-secure-binding/pkg/attestation"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/attestation"
 )
 
 // EATClaims represents the Entity Attestation Token claims following RFC 9711.

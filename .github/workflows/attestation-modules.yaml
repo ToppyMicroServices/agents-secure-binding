@@ -1,0 +1,122 @@
+name: Attestation Modules
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/attestation-modules.yaml"
+      - ".github/workflows/attestation-release-gate.yaml"
+      - "Makefile"
+      - "go.mod"
+      - "go.sum"
+      - "go.work"
+      - "go.work.sum"
+      - "integrations/cocos/**"
+      - "modules/attestation/**"
+      - "pkg/atls/**"
+      - "pkg/attestation/**"
+      - "scripts/check-attestation-*.sh"
+      - "scripts/check-cocos-release.sh"
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/attestation-modules.yaml"
+      - ".github/workflows/attestation-release-gate.yaml"
+      - "Makefile"
+      - "go.mod"
+      - "go.sum"
+      - "go.work"
+      - "go.work.sum"
+      - "integrations/cocos/**"
+      - "modules/attestation/**"
+      - "pkg/atls/**"
+      - "pkg/attestation/**"
+      - "scripts/check-attestation-*.sh"
+      - "scripts/check-cocos-release.sh"
+
+permissions:
+  contents: read
+
+jobs:
+  platform-module:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        module: [snp, tdx]
+    env:
+      GOWORK: "off"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: 1.26.6
+          cache-dependency-path: modules/attestation/${{ matrix.module }}/go.sum
+      - working-directory: modules/attestation/${{ matrix.module }}
+        run: |
+          if go mod edit -json | grep -Eq '"Replace"[[:space:]]*:[[:space:]]*\['; then
+            echo "release blocked: nested module go.mod contains a replacement" >&2
+            exit 1
+          fi
+          go mod tidy -diff
+          go mod verify
+      - working-directory: modules/attestation/${{ matrix.module }}
+        run: go test -race -count=1 ./...
+      - working-directory: modules/attestation/${{ matrix.module }}
+        run: go vet ./...
+
+  cocos-integration:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    env:
+      GOWORK: "off"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: 1.26.6
+          cache-dependency-path: integrations/cocos/go.sum
+      - working-directory: integrations/cocos
+        run: |
+          go mod tidy -diff
+          go mod verify
+      - working-directory: integrations/cocos
+        run: go test -race -count=1 ./...
+      - working-directory: integrations/cocos
+        run: go vet ./...
+
+  workspace:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: 1.26.6
+          cache-dependency-path: |
+            go.sum
+            go.work.sum
+            integrations/cocos/go.sum
+            modules/attestation/snp/go.sum
+            modules/attestation/tdx/go.sum
+      - name: Parse and test the development workspace
+        run: |
+          test "$(go env GOWORK)" = "$GITHUB_WORKSPACE/go.work"
+          go work edit -json >/dev/null
+          go list -m all >/dev/null
+          go test \
+            ./pkg/attestation/... \
+            ./modules/attestation/snp/... \
+            ./modules/attestation/tdx/... \
+            ./integrations/cocos/...

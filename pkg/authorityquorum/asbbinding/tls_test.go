@@ -18,8 +18,8 @@ import (
 	"testing"
 	"time"
 
-	eaattestation "github.com/thinksyncs/agents-secure-binding/pkg/atls/eaattestation"
-	"github.com/thinksyncs/agents-secure-binding/pkg/authorityquorum"
+	eaattestation "github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/atls/eaattestation"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/authorityquorum"
 )
 
 func TestBindingFromTLSDerivesVerifiedPeerBinding(t *testing.T) {

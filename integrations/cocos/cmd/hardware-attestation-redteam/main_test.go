@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	sevsnppb "github.com/google/go-sev-guest/proto/sevsnp"
@@ -56,8 +57,53 @@ func TestExtractSEVSNPEvidence(t *testing.T) {
 }
 
 func TestResolvePlatformRejectsUnsupportedInput(t *testing.T) {
-	if _, err := resolvePlatform("azure"); err == nil {
-		t.Fatal("resolvePlatform() accepted unsupported explicit platform")
+	for _, platform := range []string{"", "auto", "snp-vtpm", "vtpm", "azure"} {
+		if _, err := resolvePlatform(platform); err == nil {
+			t.Fatalf("resolvePlatform(%q) accepted unsupported platform", platform)
+		}
+	}
+}
+
+func TestPrepareSEVSNPCertificateCache(t *testing.T) {
+	called := false
+	if err := prepareSEVSNPCertificateCache(2, func(vmpl uint) error {
+		called = true
+		if vmpl != 2 {
+			t.Fatalf("VMPL = %d, want 2", vmpl)
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("prepareSEVSNPCertificateCache() error = %v", err)
+	}
+	if !called {
+		t.Fatal("prepareSEVSNPCertificateCache() did not fetch certificates")
+	}
+
+	err := prepareSEVSNPCertificateCache(0, func(uint) error { return errors.New("offline") })
+	if err == nil || !strings.Contains(err.Error(), "AMD KDS") {
+		t.Fatalf("prepareSEVSNPCertificateCache() error = %v, want AMD KDS context", err)
+	}
+}
+
+func TestFullModuleVerificationRequiresBothPolicies(t *testing.T) {
+	_, err := verifyFullModulePath(platformSNP, nil, nil, nil, nil, runOptions{})
+	if err == nil {
+		t.Fatal("verifyFullModulePath() accepted missing policy inputs")
+	}
+}
+
+func TestQualificationBindingCopiesReportDataAndCreatesNonce(t *testing.T) {
+	reportData := make([]byte, reportDataSize)
+	reportData[0] = 0x42
+	binding, nonce, err := qualificationBinding(reportData)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if binding.ReportData[0] != 0x42 || len(nonce) != len(binding.Nonce) {
+		t.Fatalf("unexpected qualification binding: report=%x nonce_len=%d", binding.ReportData[0], len(nonce))
+	}
+	if string(nonce) != string(binding.Nonce[:]) {
+		t.Fatal("returned nonce does not match binding nonce")
 	}
 }
 

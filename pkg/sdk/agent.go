@@ -16,11 +16,11 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/thinksyncs/agents-secure-binding/agent"
-	"github.com/thinksyncs/agents-secure-binding/agent/api/grpc"
-	"github.com/thinksyncs/agents-secure-binding/agent/auth"
-	"github.com/thinksyncs/agents-secure-binding/internal/errors"
-	"github.com/thinksyncs/agents-secure-binding/pkg/progressbar"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/agent"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/agent/api/grpc"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/agent/auth"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/internal/errors"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/progressbar"
 	"google.golang.org/grpc/metadata"
 )
 

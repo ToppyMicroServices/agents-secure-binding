@@ -2,9 +2,11 @@
 
 ## Supported Scope
 
-This repository is pre-1.0 and currently publishes security-profile drafts,
-tests, vectors, and implementation helpers. Security reports should target the
-current `main` branch and any tagged release that remains publicly referenced.
+This repository publishes a supported v1 verifier product surface together
+with experimental security-profile drafts, tests, vectors, and implementation
+helpers. Security reports should target the current `main` branch and any
+tagged release that remains within the support window documented in
+`docs/API_COMPATIBILITY.md`.
 
 ## Reporting a Vulnerability
 

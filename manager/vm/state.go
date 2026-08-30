@@ -6,7 +6,7 @@ import (
 	"errors"
 	"sync"
 
-	"github.com/thinksyncs/agents-secure-binding/pkg/manager"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/manager"
 )
 
 type sm struct {

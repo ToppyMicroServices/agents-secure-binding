@@ -28,9 +28,9 @@ import (
 	"testing"
 	"time"
 
+	attestation "github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/atls/eaattestation"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/atls/identitypolicy"
 	"github.com/golang-jwt/jwt/v5"
-	attestation "github.com/thinksyncs/agents-secure-binding/pkg/atls/eaattestation"
-	"github.com/thinksyncs/agents-secure-binding/pkg/atls/identitypolicy"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"

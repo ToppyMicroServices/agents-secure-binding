@@ -5,6 +5,7 @@ package internaltransport
 
 import (
 	"bytes"
+	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -19,9 +20,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/thinksyncs/agents-secure-binding/pkg/atls/ea"
-	eaattestation "github.com/thinksyncs/agents-secure-binding/pkg/atls/eaattestation"
-	"github.com/thinksyncs/agents-secure-binding/pkg/atls/identitypolicy"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/atls/ea"
+	eaattestation "github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/atls/eaattestation"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/atls/identitypolicy"
 )
 
 const testIdentityBindingNonce = "identity-binding-nonce"
@@ -42,6 +43,7 @@ func selfSignedCert(t *testing.T) tls.Certificate {
 		KeyUsage:     x509.KeyUsageDigitalSignature,
 		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 		DNSNames:     []string{"localhost"},
+		IPAddresses:  []net.IP{net.ParseIP("127.0.0.1")},
 	}
 
 	der, err := x509.CreateCertificate(rand.Reader, template, template, &priv.PublicKey, priv)
@@ -52,6 +54,74 @@ func selfSignedCert(t *testing.T) tls.Certificate {
 	return tls.Certificate{
 		Certificate: [][]byte{der},
 		PrivateKey:  priv,
+	}
+}
+
+func TestDialContextDerivesServerNameAndValidatesCA(t *testing.T) {
+	cert := selfSignedCert(t)
+	roots := x509.NewCertPool()
+	root, err := x509.ParseCertificate(cert.Certificate[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	roots.AddCert(root)
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+
+	serverResult := make(chan error, 1)
+	go func() {
+		raw, err := listener.Accept()
+		if err != nil {
+			serverResult <- err
+			return
+		}
+		serverTLS := tls.Server(raw, &tls.Config{
+			Certificates: []tls.Certificate{cert},
+			MinVersion:   tls.VersionTLS13,
+			MaxVersion:   tls.VersionTLS13,
+		})
+		conn, err := Server(serverTLS, &ServerConfig{Identity: cert})
+		if conn != nil {
+			_ = conn.Close()
+		}
+		serverResult <- err
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	conn, err := DialContext(ctx, "tcp", listener.Addr().String(), &ClientConfig{
+		TLSConfig: &tls.Config{
+			RootCAs:    roots,
+			MinVersion: tls.VersionTLS13,
+			MaxVersion: tls.VersionTLS13,
+		},
+		VerifyOptions: &x509.VerifyOptions{Roots: roots},
+	})
+	if err != nil {
+		t.Fatalf("DialContext() failed CA-validated handshake: %v", err)
+	}
+	_ = conn.Close()
+	if err := <-serverResult; err != nil {
+		t.Fatalf("server failed: %v", err)
+	}
+}
+
+func TestClientTLSConfigForTargetRequiresNameForUnix(t *testing.T) {
+	_, err := clientTLSConfigForTarget("unix", "/tmp/asb.sock", &tls.Config{MinVersion: tls.VersionTLS13})
+	if !errors.Is(err, ErrMissingTLSServerName) {
+		t.Fatalf("clientTLSConfigForTarget() error = %v, want ErrMissingTLSServerName", err)
+	}
+
+	config, err := clientTLSConfigForTarget("unix", "/tmp/asb.sock", &tls.Config{
+		MinVersion: tls.VersionTLS13,
+		ServerName: "agent.internal",
+	})
+	if err != nil || config.ServerName != "agent.internal" {
+		t.Fatalf("explicit unix server name = (%q, %v)", config.ServerName, err)
 	}
 }
 

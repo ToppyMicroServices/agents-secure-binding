@@ -5,9 +5,9 @@ package grpc
 import (
 	"context"
 
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/agent"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/attestation"
 	"github.com/go-kit/kit/endpoint"
-	"github.com/thinksyncs/agents-secure-binding/agent"
-	"github.com/thinksyncs/agents-secure-binding/pkg/attestation"
 )
 
 func algoEndpoint(svc agent.Service) endpoint.Endpoint {

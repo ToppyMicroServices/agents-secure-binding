@@ -4,10 +4,6 @@ package main
 
 import (
 	"context"
-	"crypto/sha256"
-	"crypto/sha512"
-	"crypto/x509"
-	"encoding/pem"
 	"fmt"
 	"log"
 	"log/slog"
@@ -16,27 +12,28 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/ToppyMicroServices/agents-secure-binding/integrations/cocos/evidencesource"
+	agentlogger "github.com/ToppyMicroServices/agents-secure-binding/integrations/cocos/internal/logger"
+	"github.com/ToppyMicroServices/agents-secure-binding/integrations/cocos/internal/platformselect"
+	mglog "github.com/ToppyMicroServices/agents-secure-binding/integrations/cocos/internal/runtime/logging"
+	"github.com/ToppyMicroServices/agents-secure-binding/integrations/cocos/internal/runtime/metrics"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/agent"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/agent/api"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/agent/cvms"
+	cvmsapi "github.com/ToppyMicroServices/agents-secure-binding/v2/agent/cvms/api/grpc"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/agent/cvms/server"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/agent/events"
+	logpb "github.com/ToppyMicroServices/agents-secure-binding/v2/agent/log"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/atls"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/attestation"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/clients"
+	pkggrpc "github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/clients/grpc"
+	attestation_client "github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/clients/grpc/attestation"
+	cvmsgrpc "github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/clients/grpc/cvm"
+	logclient "github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/clients/grpc/log"
+	runnerclient "github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/clients/grpc/runner"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/ingress"
 	"github.com/caarlos0/env/v11"
-	"github.com/thinksyncs/agents-secure-binding/agent"
-	"github.com/thinksyncs/agents-secure-binding/agent/api"
-	"github.com/thinksyncs/agents-secure-binding/agent/cvms"
-	cvmsapi "github.com/thinksyncs/agents-secure-binding/agent/cvms/api/grpc"
-	"github.com/thinksyncs/agents-secure-binding/agent/cvms/server"
-	"github.com/thinksyncs/agents-secure-binding/agent/events"
-	logpb "github.com/thinksyncs/agents-secure-binding/agent/log"
-	agentlogger "github.com/thinksyncs/agents-secure-binding/internal/logger"
-	mglog "github.com/thinksyncs/agents-secure-binding/internal/runtime/logging"
-	"github.com/thinksyncs/agents-secure-binding/internal/runtime/metrics"
-	"github.com/thinksyncs/agents-secure-binding/pkg/atls"
-	"github.com/thinksyncs/agents-secure-binding/pkg/attestation"
-	"github.com/thinksyncs/agents-secure-binding/pkg/attestation/azure"
-	"github.com/thinksyncs/agents-secure-binding/pkg/clients"
-	pkggrpc "github.com/thinksyncs/agents-secure-binding/pkg/clients/grpc"
-	attestation_client "github.com/thinksyncs/agents-secure-binding/pkg/clients/grpc/attestation"
-	cvmsgrpc "github.com/thinksyncs/agents-secure-binding/pkg/clients/grpc/cvm"
-	logclient "github.com/thinksyncs/agents-secure-binding/pkg/clients/grpc/log"
-	runnerclient "github.com/thinksyncs/agents-secure-binding/pkg/clients/grpc/runner"
-	"github.com/thinksyncs/agents-secure-binding/pkg/ingress"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -50,13 +47,7 @@ type config struct {
 	LogLevel                 string `env:"AGENT_LOG_LEVEL"              envDefault:"debug"`
 	Vmpl                     int    `env:"AGENT_VMPL"                   envDefault:"2"`
 	AgentGrpcHost            string `env:"AGENT_GRPC_HOST"              envDefault:"0.0.0.0"`
-	CAUrl                    string `env:"AGENT_CVM_CA_URL"             envDefault:""`
-	CVMId                    string `env:"AGENT_CVM_ID"                 envDefault:""`
-	CertsToken               string `env:"AGENT_CERTS_TOKEN"            envDefault:""`
-	AgentMaaURL              string `env:"AGENT_MAA_URL"                envDefault:"https://sharedeus2.eus2.attest.azure.net"`
-	AgentOSBuild             string `env:"AGENT_OS_BUILD"               envDefault:"UVC"`
-	AgentOSDistro            string `env:"AGENT_OS_DISTRO"              envDefault:"UVC"`
-	AgentOSType              string `env:"AGENT_OS_TYPE"                envDefault:"UVC"`
+	AttestationPlatform      string `env:"ASB_ATTESTATION_PLATFORM"     envDefault:"auto"`
 	AttestationServiceSocket string `env:"ATTESTATION_SERVICE_SOCKET" envDefault:"/run/agents-secure-binding/attestation.sock"`
 }
 
@@ -136,16 +127,13 @@ func main() {
 		}
 	})
 
-	ccPlatform := attestation.CCPlatform()
+	ccPlatform, err := platformselect.Resolve(cfg.AttestationPlatform)
+	if err != nil {
+		logger.Error(fmt.Sprintf("failed to select direct attestation platform: %s", err))
+		exitCode = 1
+		return
+	}
 	logger.Info(fmt.Sprintf("Detected confidential computing platform: %v", ccPlatform))
-
-	azureConfig := azure.NewEnvConfigFromAgent(
-		cfg.AgentOSBuild,
-		cfg.AgentOSType,
-		cfg.AgentOSDistro,
-		cfg.AgentMaaURL,
-	)
-	azure.InitializeDefaultMAAVars(azureConfig)
 
 	cvmGrpcConfig := clients.StandardClientConfig{}
 	if err := env.ParseWithOptions(&cvmGrpcConfig, env.Options{Prefix: envPrefixCVMGRPC}); err != nil {
@@ -210,12 +198,19 @@ func main() {
 	var certProvider atls.CertificateProvider
 	if ccPlatform != attestation.NoCC {
 		logger.Info(fmt.Sprintf("Initializing aTLS for platform %v with attestation service at %s", ccPlatform, cfg.AttestationServiceSocket))
-		certProvider, err = atls.NewProvider(attClient, ccPlatform, cfg.CertsToken, cfg.CVMId, nil)
-		if err != nil {
-			logger.Error(fmt.Sprintf("failed to create certificate provider for aTLS: %s. Continuing without attested TLS.", err))
-		} else {
-			logger.Info("Successfully created aTLS certificate provider")
+		evidenceSource, sourceErr := evidencesource.NewEvidenceSource(attClient, ccPlatform)
+		if sourceErr != nil {
+			logger.Error(fmt.Sprintf("failed to configure platform evidence source: %s", sourceErr))
+			exitCode = 1
+			return
 		}
+		certProvider, err = atls.NewProvider(evidenceSource)
+		if err != nil {
+			logger.Error(fmt.Sprintf("failed to create certificate provider for aTLS: %s", err))
+			exitCode = 1
+			return
+		}
+		logger.Info("Successfully created aTLS certificate provider")
 	} else {
 		logger.Warn("No Confidential Computing platform detected (NoCC). Certificate provider remains nil; aTLS will not be available for computations.")
 	}
@@ -262,39 +257,6 @@ func main() {
 		return mc.Process(ctx, cancel)
 	})
 
-	attest, certSerialNumber, err := attestationFromCert(ctx, cvmGrpcConfig.ClientCert, svc)
-	if err != nil {
-		logger.Error(fmt.Sprintf("failed to get attestation: %s", err))
-		exitCode = 1
-		return
-	}
-
-	if ccPlatform == attestation.Azure {
-		azureAttestationToken, azureCertSerialNumber, err := azureAttestationFromCert(ctx, cvmGrpcConfig.ClientCert, svc)
-		if err != nil {
-			logger.Error(fmt.Sprintf("failed to get attestation: %s", err))
-			exitCode = 1
-			return
-		}
-		cvmsQueue <- &cvms.ClientStreamMessage{
-			Message: &cvms.ClientStreamMessage_AzureAttestationToken{
-				AzureAttestationToken: &cvms.AzureAttestationToken{
-					File:             azureAttestationToken,
-					CertSerialNumber: azureCertSerialNumber,
-				},
-			},
-		}
-	}
-
-	cvmsQueue <- &cvms.ClientStreamMessage{
-		Message: &cvms.ClientStreamMessage_VTPMattestationReport{
-			VTPMattestationReport: &cvms.AttestationResponse{
-				File:             attest,
-				CertSerialNumber: certSerialNumber,
-			},
-		},
-	}
-
 	if err := g.Wait(); err != nil {
 		logger.Error(fmt.Sprintf("%s service terminated: %s", svcName, err))
 	}
@@ -308,55 +270,4 @@ func newService(ctx context.Context, logger *slog.Logger, eventSvc events.Servic
 	svc = api.MetricsMiddleware(svc, counter, latency)
 
 	return svc
-}
-
-func attestationFromCert(ctx context.Context, certFilePath string, svc agent.Service) ([]byte, string, error) {
-	if certFilePath == "" {
-		return nil, "", nil
-	}
-
-	certFile, err := os.ReadFile(certFilePath)
-	if err != nil {
-		return nil, "", err
-	}
-
-	certPem, _ := pem.Decode(certFile)
-	certx509, err := x509.ParseCertificate(certPem.Bytes)
-	if err != nil {
-		return nil, "", err
-	}
-
-	nonceSNP := sha512.Sum512(certFile)
-	nonceVTPM := sha256.Sum256(certFile)
-	attest, err := svc.Attestation(ctx, nonceSNP, nonceVTPM, attestation.SNPvTPM)
-	if err != nil {
-		return nil, "", err
-	}
-
-	return attest, certx509.SerialNumber.String(), nil
-}
-
-func azureAttestationFromCert(ctx context.Context, certFilePath string, svc agent.Service) ([]byte, string, error) {
-	if certFilePath == "" {
-		return nil, "", nil
-	}
-
-	certFile, err := os.ReadFile(certFilePath)
-	if err != nil {
-		return nil, "", err
-	}
-
-	certPem, _ := pem.Decode(certFile)
-	certx509, err := x509.ParseCertificate(certPem.Bytes)
-	if err != nil {
-		return nil, "", err
-	}
-
-	nonceAzure := sha256.Sum256(certFile)
-	attestation, err := svc.AzureAttestationToken(ctx, nonceAzure)
-	if err != nil {
-		return nil, "", err
-	}
-
-	return attestation, certx509.SerialNumber.String(), nil
 }

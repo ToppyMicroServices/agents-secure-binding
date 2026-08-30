@@ -19,7 +19,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/thinksyncs/agents-secure-binding/pkg/agtp/discovery"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/agtp/discovery"
 )
 
 const (

@@ -5,7 +5,7 @@ package generator
 import (
 	"crypto"
 
-	"github.com/thinksyncs/agents-secure-binding/pkg/attestation/corimgen"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/attestation/corimgen"
 )
 
 // Legacy SNP Defaults (re-exported from corimgen).
@@ -27,7 +27,7 @@ type Options struct {
 	Platform    string        // "snp" or "tdx"
 	Measurement string        // Hex-encoded measurement
 	Product     string        // SNP processor product name
-	SVN         uint64        // Security Version Number
+	SVN         uint64        // Exact SNP guest SVN; unsupported for TDX
 	Policy      uint64        // SNP policy flags
 	RTMRs       string        // TDX RTMRs (comma-separated hex)
 	MrSeam      string        // TDX MRSEAM (hex)

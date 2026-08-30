@@ -13,9 +13,9 @@ import (
 	"fmt"
 	"strings"
 
-	eaattestation "github.com/thinksyncs/agents-secure-binding/pkg/atls/eaattestation"
-	"github.com/thinksyncs/agents-secure-binding/pkg/atls/identitypolicy"
-	"github.com/thinksyncs/agents-secure-binding/pkg/authorityquorum"
+	eaattestation "github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/atls/eaattestation"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/atls/identitypolicy"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/authorityquorum"
 )
 
 var ErrTLSRequired = errors.New("authorityquorum asbbinding: verified TLS 1.3 client connection required")

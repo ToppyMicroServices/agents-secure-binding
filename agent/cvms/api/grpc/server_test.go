@@ -7,10 +7,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/agent/cvms"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/internal/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
-	"github.com/thinksyncs/agents-secure-binding/agent/cvms"
-	"github.com/thinksyncs/agents-secure-binding/internal/errors"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/peer"
 )

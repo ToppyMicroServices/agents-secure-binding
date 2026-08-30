@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/thinksyncs/agents-secure-binding/pkg/a2asecuritytest"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/a2asecuritytest"
 )
 
 func TestA2ASecurityTestReportSchemaAcceptsReport(t *testing.T) {

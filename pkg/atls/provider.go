@@ -11,10 +11,8 @@ import (
 	"crypto/x509"
 	"fmt"
 
-	"github.com/thinksyncs/agents-secure-binding/pkg/atls/ea"
-	eaattestation "github.com/thinksyncs/agents-secure-binding/pkg/atls/eaattestation"
-	asbattestation "github.com/thinksyncs/agents-secure-binding/pkg/attestation"
-	attestationclient "github.com/thinksyncs/agents-secure-binding/pkg/clients/grpc/attestation"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/atls/ea"
+	eaattestation "github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/atls/eaattestation"
 )
 
 // CertificateProvider builds leaf extensions for accepted aTLS call sites.
@@ -25,21 +23,14 @@ type CertificateProvider interface {
 }
 
 type provider struct {
-	attClient    attestationclient.Client
-	platformType asbattestation.PlatformType
+	evidenceSource eaattestation.EvidenceSource
 }
 
-func NewProvider(attClient attestationclient.Client, platformType asbattestation.PlatformType, _ string, _ string, _ any) (CertificateProvider, error) {
-	if attClient == nil {
-		return nil, fmt.Errorf("atls: missing attestation client")
+func NewProvider(evidenceSource eaattestation.EvidenceSource) (CertificateProvider, error) {
+	if evidenceSource == nil {
+		return nil, fmt.Errorf("atls: missing evidence source")
 	}
-	if platformType == asbattestation.NoCC {
-		return nil, fmt.Errorf("atls: confidential computing platform not available")
-	}
-	return &provider{
-		attClient:    attClient,
-		platformType: platformType,
-	}, nil
+	return &provider{evidenceSource: evidenceSource}, nil
 }
 
 func (p *provider) BuildLeafExtensions(st *tls.ConnectionState, req *ea.AuthenticatorRequest, leaf *x509.Certificate) ([]ea.Extension, error) {
@@ -56,15 +47,18 @@ func (p *provider) BuildLeafExtensions(st *tls.ConnectionState, req *ea.Authenti
 	var nonce [32]byte
 	copy(nonce[:], nonceBytes[:])
 
-	evidence, err := p.attClient.GetAttestation(context.Background(), reportData, nonce, p.platformType)
+	result, err := p.evidenceSource.GetEvidence(context.Background(), eaattestation.EvidenceRequest{
+		ReportData: reportData,
+		Nonce:      nonce,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("atls: failed to fetch attestation evidence: %w", err)
 	}
 
 	payloadBytes, err := eaattestation.MarshalPayload(eaattestation.Payload{
 		Version:   1,
-		MediaType: "application/eat+cwt",
-		Evidence:  evidence,
+		MediaType: result.MediaType,
+		Evidence:  result.Evidence,
 		Binder: eaattestation.AttestationBinder{
 			ExporterLabel: eaattestation.ExporterLabelAttestation,
 			AIKPubHash:    aikPubHash,

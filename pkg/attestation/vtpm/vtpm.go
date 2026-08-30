@@ -5,19 +5,23 @@ package vtpm
 
 import (
 	"bytes"
+	"encoding/binary"
 	"fmt"
 	"io"
 	"os"
 
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/internal/errors"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/attestation"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/attestation/corimgen"
+	"github.com/google/go-sev-guest/kds"
 	"github.com/google/go-sev-guest/proto/sevsnp"
 	"github.com/google/go-tpm-tools/client"
 	"github.com/google/go-tpm-tools/proto/attest"
 	"github.com/google/go-tpm/legacy/tpm2"
 	"github.com/google/go-tpm/tpmutil"
-	"github.com/thinksyncs/agents-secure-binding/internal/errors"
-	"github.com/thinksyncs/agents-secure-binding/pkg/attestation"
 	"github.com/veraison/corim/comid"
 	"github.com/veraison/corim/corim"
+	"github.com/veraison/swid"
 	"golang.org/x/crypto/sha3"
 	"google.golang.org/protobuf/proto"
 )
@@ -146,7 +150,11 @@ func (v *verifier) VerifyWithCoRIM(report []byte, manifest *corim.UnsignedCorim)
 		return fmt.Errorf("no SEV-SNP attestation found in report")
 	}
 
-	measurement := snp.GetReport().GetMeasurement()
+	snpReport := snp.GetReport()
+	if snpReport == nil {
+		return fmt.Errorf("SEV-SNP attestation is missing its report")
+	}
+	measurement := snpReport.GetMeasurement()
 	if len(measurement) == 0 {
 		return fmt.Errorf("no measurement in SEV-SNP report")
 	}
@@ -165,27 +173,163 @@ func (v *verifier) VerifyWithCoRIM(report []byte, manifest *corim.UnsignedCorim)
 			return fmt.Errorf("failed to parse CoMID from tag: %w", err)
 		}
 
-		// Match measurements in CoMID
+		// Match one complete, field-aware reference-value profile in the CoMID.
 		if c.Triples.ReferenceValues != nil {
 			for _, rv := range *c.Triples.ReferenceValues {
 				if err := rv.Measurements.Valid(); err != nil {
-					return fmt.Errorf("invalid CoRIM measurements for vTPM: %w", err)
+					return fmt.Errorf("invalid CoRIM measurements for SNP: %w", err)
 				}
-				for _, m := range rv.Measurements {
-					if m.Val.Digests == nil {
-						continue
-					}
-					for _, digest := range *m.Val.Digests {
-						if bytes.Equal(digest.HashValue, measurement) {
-							return nil // Match found
-						}
-					}
+				matched, err := matchSNPReferenceValue(snpReport, rv.Measurements)
+				if err != nil {
+					return err
+				}
+				if matched {
+					return nil
 				}
 			}
 		}
 	}
 
-	return fmt.Errorf("no matching reference value found in CoRIM for vTPM")
+	return fmt.Errorf("no matching reference value found in CoRIM for SNP")
+}
+
+func matchSNPReferenceValue(report *sevsnp.Report, measurements comid.Measurements) (bool, error) {
+	seen := make(map[uint64]struct{}, len(measurements))
+	matched := true
+	foundMeasurement := false
+	for _, measurement := range measurements {
+		if measurement.AuthorizedBy != nil {
+			return false, fmt.Errorf("SNP CoRIM measurement contains unsupported authorized-by metadata")
+		}
+		if measurement.Key == nil {
+			return false, fmt.Errorf("SNP CoRIM measurement key is required")
+		}
+		key, err := measurement.Key.GetKeyUint()
+		if err != nil {
+			return false, fmt.Errorf("SNP CoRIM measurement key must use the ASB uint profile: %w", err)
+		}
+		if _, duplicate := seen[key]; duplicate {
+			return false, fmt.Errorf("duplicate SNP CoRIM measurement key %#x", key)
+		}
+		seen[key] = struct{}{}
+
+		switch key {
+		case corimgen.SNPMeasurementMKey:
+			foundMeasurement = true
+			valueMatched, err := matchSNPDigestAndSVN(report, measurement.Val)
+			if err != nil {
+				return false, err
+			}
+			matched = matched && valueMatched
+		case corimgen.SNPHostDataMKey:
+			value, err := exactRawValue(measurement.Val, "SNP HOST_DATA")
+			if err != nil {
+				return false, err
+			}
+			if len(value) != Hash256 {
+				return false, fmt.Errorf("SNP HOST_DATA must be %d bytes", Hash256)
+			}
+			matched = matched && bytes.Equal(report.GetHostData(), value)
+		case corimgen.SNPPolicyMKey:
+			value, err := exactRawUint64Value(measurement.Val, "SNP policy")
+			if err != nil {
+				return false, err
+			}
+			matched = matched && report.GetPolicy() == value
+		case corimgen.SNPMinimumLaunchTCBMKey:
+			value, err := exactRawUint64Value(measurement.Val, "SNP minimum launch TCB")
+			if err != nil {
+				return false, err
+			}
+			minimum := kds.DecomposeTCBVersion(kds.TCBVersion(value))
+			actual := kds.DecomposeTCBVersion(kds.TCBVersion(report.GetLaunchTcb()))
+			matched = matched && kds.TCBPartsLE(minimum, actual)
+		default:
+			return false, fmt.Errorf("unsupported SNP CoRIM measurement key %#x", key)
+		}
+	}
+	if !foundMeasurement {
+		return false, fmt.Errorf("SNP CoRIM reference value is missing measurement key %#x", corimgen.SNPMeasurementMKey)
+	}
+	return matched, nil
+}
+
+func matchSNPDigestAndSVN(report *sevsnp.Report, value comid.Mval) (bool, error) {
+	if value.Digests == nil || len(*value.Digests) != 1 {
+		return false, fmt.Errorf("SNP measurement key requires exactly one digest")
+	}
+	digest := (*value.Digests)[0]
+	if digest.HashAlgID != swid.Sha384 || len(digest.HashValue) != Hash384 {
+		return false, fmt.Errorf("SNP measurement key requires one 48-byte SHA-384 digest")
+	}
+	if err := rejectUnexpectedMeasurementValues(value, true, value.SVN != nil, false, "SNP measurement"); err != nil {
+		return false, err
+	}
+	matched := bytes.Equal(report.GetMeasurement(), digest.HashValue)
+	if value.SVN != nil {
+		svnMatched, err := matchSVN(value.SVN, uint64(report.GetGuestSvn()))
+		if err != nil {
+			return false, fmt.Errorf("invalid SNP guest SVN constraint: %w", err)
+		}
+		matched = matched && svnMatched
+	}
+	return matched, nil
+}
+
+func matchSVN(svn *comid.SVN, actual uint64) (bool, error) {
+	if svn == nil || svn.Value == nil {
+		return false, fmt.Errorf("SVN value is missing")
+	}
+	switch value := svn.Value.(type) {
+	case comid.TaggedSVN:
+		return actual == uint64(value), nil
+	case *comid.TaggedSVN:
+		return value != nil && actual == uint64(*value), nil
+	case comid.TaggedMinSVN:
+		return actual >= uint64(value), nil
+	case *comid.TaggedMinSVN:
+		return value != nil && actual >= uint64(*value), nil
+	default:
+		return false, fmt.Errorf("unsupported SVN type %T", svn.Value)
+	}
+}
+
+func exactRawUint64Value(value comid.Mval, label string) (uint64, error) {
+	raw, err := exactRawValue(value, label)
+	if err != nil {
+		return 0, err
+	}
+	if len(raw) != 8 {
+		return 0, fmt.Errorf("%s must be an 8-byte little-endian value", label)
+	}
+	return binary.LittleEndian.Uint64(raw), nil
+}
+
+func exactRawValue(value comid.Mval, label string) ([]byte, error) {
+	if value.RawValue == nil {
+		return nil, fmt.Errorf("%s CoRIM raw value is missing", label)
+	}
+	if err := rejectUnexpectedMeasurementValues(value, false, false, true, label); err != nil {
+		return nil, err
+	}
+	raw, err := value.RawValue.GetBytes()
+	if err != nil {
+		return nil, fmt.Errorf("invalid %s CoRIM raw value: %w", label, err)
+	}
+	return raw, nil
+}
+
+func rejectUnexpectedMeasurementValues(value comid.Mval, allowDigests, allowSVN, allowRaw bool, label string) error {
+	if (!allowDigests && value.Digests != nil) ||
+		(!allowSVN && value.SVN != nil) ||
+		(!allowRaw && value.RawValue != nil) ||
+		value.Ver != nil || value.Flags != nil || value.RawValueMask != nil ||
+		value.MACAddr != nil || value.IPAddr != nil || value.SerialNumber != nil ||
+		value.UEID != nil || value.UUID != nil || value.IntegrityRegisters != nil ||
+		value.GetExtensions() != nil {
+		return fmt.Errorf("%s CoRIM value contains unsupported constraints", label)
+	}
+	return nil
 }
 
 func Attest(teeNonce []byte, vTPMNonce []byte, teeAttestaion bool, vmpl uint) ([]byte, error) {

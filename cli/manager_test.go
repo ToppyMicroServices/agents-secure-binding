@@ -10,11 +10,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/manager"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/manager/mocks"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
-	"github.com/thinksyncs/agents-secure-binding/manager"
-	"github.com/thinksyncs/agents-secure-binding/manager/mocks"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 

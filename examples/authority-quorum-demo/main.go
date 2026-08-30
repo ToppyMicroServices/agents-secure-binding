@@ -15,7 +15,7 @@ import (
 	"log"
 	"time"
 
-	"github.com/thinksyncs/agents-secure-binding/pkg/authorityquorum"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/authorityquorum"
 )
 
 func main() {

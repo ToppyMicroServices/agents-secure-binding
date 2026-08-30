@@ -11,10 +11,10 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/internal"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/manager/vm"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/manager"
 	"github.com/gofrs/uuid"
-	"github.com/thinksyncs/agents-secure-binding/internal"
-	"github.com/thinksyncs/agents-secure-binding/manager/vm"
-	"github.com/thinksyncs/agents-secure-binding/pkg/manager"
 )
 
 const (

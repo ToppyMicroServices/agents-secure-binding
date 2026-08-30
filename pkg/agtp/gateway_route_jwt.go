@@ -6,8 +6,8 @@ package agtp
 import (
 	"time"
 
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/agtp/gatewayroute"
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/thinksyncs/agents-secure-binding/pkg/agtp/gatewayroute"
 )
 
 // GatewayRouteJWTOptions contains local policy for accepting a signed Gateway

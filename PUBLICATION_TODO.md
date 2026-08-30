@@ -4,9 +4,40 @@ Release blockers and evidence limits for the public draft.
 
 ## Repository Identity
 
-Resolved for public v0.5: the repository name, Go module path, imports,
-protobuf `go_package` options, examples, and local documentation use
-`github.com/thinksyncs/agents-secure-binding`.
+The canonical repository is moving to
+`github.com/ToppyMicroServices/agents-secure-binding`. Because the published
+release line has reached `v1.1.1`, the breaking namespace migration uses the
+Go module path `github.com/ToppyMicroServices/agents-secure-binding/v2` and
+requires a v2 release. A v0.6.0 release would incorrectly move the published
+version backwards.
+
+The module declaration, internal imports, protobuf `go_package` options,
+examples, and local documentation must use the v2 module path before that
+release. Repository links, schema identifiers, and Git remotes use the
+canonical repository URL without `/v2`.
+
+## Attestation module release gates
+
+The ASB core package boundary is platform-neutral and must not depend on the
+Cocos, SNP, or TDX nested modules. The repository root still contains legacy
+platform and runtime packages. The Cocos integration retains replacements only
+for prepublication testing.
+
+Before the v2 release candidate:
+
+- merge the isolated v2/module boundary branch and pass pull-request CI;
+- run the manual `Attestation Release Gate` with target `all` on the merged
+  commit;
+- sign and push `modules/attestation/snp/v0.1.0` and
+  `modules/attestation/tdx/v0.1.0` on the merged commit;
+- wait for both tag-triggered nested-module gates to succeed;
+- pass the root release gate with `GOWORK=off`;
+- sign and push `v2.0.0-rc.1`, wait for its tag-triggered gate to succeed, and
+  only then run `gh release create v2.0.0-rc.1 --verify-tag --prerelease`
+  against the existing remote tag.
+
+No live SNP or TDX qualification has been completed. The prerelease must not
+claim that either platform module or the Cocos integration is production-ready.
 
 ## Recorded CI and Red-Team Status
 

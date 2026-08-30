@@ -244,6 +244,15 @@ rejected, not accepted.
 
 ## Command
 
+The ASB core/module split and the meaning of each test layer are described in
+[attestation-module-boundary.md](attestation-module-boundary.md).
+
+Run the hardware-independent ASB core checks on macOS or Linux with:
+
+```sh
+make test-asb-core
+```
+
 Run the focused client red-team tests with:
 
 ```sh
@@ -262,11 +271,22 @@ Run the response-cache red-team tests with:
 env GOCACHE=/tmp/go-build-asb go test -count=1 -run 'ResponseCachePolicyRedTeam' ./pkg/agtp
 ```
 
-Hardware-backed attestation replay coverage is intentionally separated from the
-dependency-free CI profile. Use the manual `Hardware Attestation Red Team`
-workflow with a confidential self-hosted runner, or run the same gate directly
-on such a runner:
+Hardware-backed attestation replay coverage is separate from the ASB core CI
+profile. Use the manual `Hardware Attestation Red Team` workflow with a
+confidential self-hosted runner and explicitly select `snp` or `tdx`. The
+workflow requires CoRIM reference values and a platform verification policy,
+then exercises the external Cocos integration. Run the same gate directly on a
+suitable runner with, for example:
 
 ```sh
-go run ./cmd/hardware-attestation-redteam --platform auto
+cd integrations/cocos
+GOWORK=off go run ./cmd/hardware-attestation-redteam \
+  --platform snp \
+  --corim-policy /runner/policy/reference-values.corim \
+  --platform-policy /runner/policy/snp-policy.json \
+  --corim-public-key /runner/policy/corim-public-key.pem \
+  --require-full-verification \
+  --evidence-dir /runner/evidence/asb-snp
 ```
+
+No live SNP or TDX result is recorded for this change.

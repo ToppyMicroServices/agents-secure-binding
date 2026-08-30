@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/thinksyncs/agents-secure-binding/pkg/a2asecuritytest"
-	"github.com/thinksyncs/agents-secure-binding/schemas"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/a2asecuritytest"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/schemas"
 )
 
 const acceptedReason = "accepted"

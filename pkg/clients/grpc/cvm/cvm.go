@@ -3,9 +3,9 @@
 package cvm
 
 import (
-	"github.com/thinksyncs/agents-secure-binding/agent/cvms"
-	"github.com/thinksyncs/agents-secure-binding/pkg/clients"
-	"github.com/thinksyncs/agents-secure-binding/pkg/clients/grpc"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/agent/cvms"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/clients"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/clients/grpc"
 )
 
 // NewManagerClient creates new manager gRPC client instance.

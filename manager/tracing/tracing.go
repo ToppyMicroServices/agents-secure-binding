@@ -5,7 +5,7 @@ package tracing
 import (
 	"context"
 
-	"github.com/thinksyncs/agents-secure-binding/manager"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/manager"
 	"go.opentelemetry.io/otel/trace"
 )
 

@@ -9,13 +9,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/agent"
+	agentgrpc "github.com/ToppyMicroServices/agents-secure-binding/v2/agent/api/grpc"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/agent/mocks"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/internal/errors"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/clients"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/thinksyncs/agents-secure-binding/agent"
-	agentgrpc "github.com/thinksyncs/agents-secure-binding/agent/api/grpc"
-	"github.com/thinksyncs/agents-secure-binding/agent/mocks"
-	"github.com/thinksyncs/agents-secure-binding/internal/errors"
-	"github.com/thinksyncs/agents-secure-binding/pkg/clients"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/health"
 	grpchealth "google.golang.org/grpc/health/grpc_health_v1"
@@ -104,7 +104,7 @@ func TestAgentClientIntegration(t *testing.T) {
 			err: errors.New("agent service is unavailable"),
 		},
 		{
-			name: "invalid config, missing AttestationPolicy with aTLS",
+			name: "invalid config, missing attestation verifier with aTLS",
 			config: clients.AttestedClientConfig{
 				StandardClientConfig: clients.StandardClientConfig{
 					URL:     testServer.listenAddr,
@@ -112,7 +112,7 @@ func TestAgentClientIntegration(t *testing.T) {
 				},
 				AttestedTLS: true,
 			},
-			err: errors.New("failed to stat attestation policy file"),
+			err: clients.ErrMissingAttestationVerifier,
 		},
 	}
 

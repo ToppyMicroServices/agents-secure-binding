@@ -1,6 +1,7 @@
 BUILD_DIR = build
-SERVICES = manager agent cli attestation-service log-forwarder computation-runner egress-proxy ingress-proxy
+SERVICES = manager cli attestation-service log-forwarder computation-runner egress-proxy
 DIRECT_AGENT_CORE_PKGS = ./pkg/atls/... ./pkg/clients/... ./pkg/agtp/... ./pkg/production
+ASB_CORE_PKGS = ./pkg/atls/... ./pkg/clients ./pkg/clients/http ./pkg/clients/grpc ./pkg/agtp/... ./pkg/tls
 PRODUCTION_CONSUMER_PKGS = ./examples/protected-change-consumer
 CGO_ENABLED ?= 0
 GOARCH ?= amd64
@@ -26,7 +27,10 @@ define compile_service
 	-o ${BUILD_DIR}/agents-secure-binding-$(1) ./cmd/$(1)
 endef
 
-.PHONY: all $(SERVICES) a2a-test install install-a2a-test clean product-security-gate fuzz-smoke
+.PHONY: all $(SERVICES) a2a-test install install-a2a-test clean product-security-gate fuzz-smoke \
+	test-asb-core test-attestation-modules check-asb-core-boundary \
+	check-attestation-v2-boundary check-attestation-v2-release \
+	check-attestation-release check-cocos-release
 
 all: $(SERVICES)
 
@@ -83,10 +87,34 @@ build-igvm:
 
 product-security-gate:
 	go mod verify
-	GOTOOLCHAIN=go1.26.0+auto go test $(DIRECT_AGENT_CORE_PKGS)
-	GOTOOLCHAIN=go1.26.0+auto go test -v -race -count=1 ./pkg/atls/identitypolicy ./pkg/clients ./pkg/production ./cmd/redis-failover-redteam $(PRODUCTION_CONSUMER_PKGS)
+	GOTOOLCHAIN=go1.26.6+auto go test $(DIRECT_AGENT_CORE_PKGS)
+	GOTOOLCHAIN=go1.26.6+auto go test -v -race -count=1 ./pkg/atls/identitypolicy ./pkg/clients ./pkg/production ./cmd/redis-failover-redteam $(PRODUCTION_CONSUMER_PKGS)
 	$(MAKE) fuzz-smoke
 	$(GOVULNCHECK) ./...
 
 fuzz-smoke:
-	GOTOOLCHAIN=go1.26.0+auto go test -run '^$$' -fuzz=FuzzVerifySessionIdentityJWTRejectsMalformedCompactTokens -fuzztime=10s ./pkg/agtp
+	GOTOOLCHAIN=go1.26.6+auto go test -run '^$$' -fuzz=FuzzVerifySessionIdentityJWTRejectsMalformedCompactTokens -fuzztime=10s ./pkg/agtp
+
+check-asb-core-boundary:
+	sh ./scripts/check-asb-core-boundary.sh
+
+check-attestation-v2-boundary:
+	sh ./scripts/check-attestation-v2-boundary.sh
+
+check-attestation-v2-release:
+	sh ./scripts/check-attestation-v2-release.sh
+
+check-attestation-release:
+	sh ./scripts/check-attestation-release.sh
+
+check-cocos-release:
+	sh ./scripts/check-cocos-release.sh
+
+test-asb-core: check-asb-core-boundary
+	GOWORK=off go test $(ASB_CORE_PKGS)
+
+test-attestation-modules:
+	GOWORK=off go test ./pkg/attestation/...
+	cd modules/attestation/snp && GOWORK=off go test ./...
+	cd modules/attestation/tdx && GOWORK=off go test ./...
+	cd integrations/cocos && GOWORK=off go test ./...

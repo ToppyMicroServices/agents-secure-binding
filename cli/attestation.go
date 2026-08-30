@@ -9,14 +9,14 @@ import (
 	"os"
 	"strings"
 
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/internal/errors"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/attestation"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/attestation/vtpm"
 	"github.com/fatih/color"
 	"github.com/google/go-sev-guest/abi"
 	tpmAttest "github.com/google/go-tpm-tools/proto/attest"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
-	"github.com/thinksyncs/agents-secure-binding/internal/errors"
-	"github.com/thinksyncs/agents-secure-binding/pkg/attestation"
-	"github.com/thinksyncs/agents-secure-binding/pkg/attestation/vtpm"
 	"google.golang.org/protobuf/encoding/prototext"
 	"google.golang.org/protobuf/proto"
 )

@@ -8,8 +8,8 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/atls/ea"
 	"github.com/stretchr/testify/mock"
-	"github.com/thinksyncs/agents-secure-binding/pkg/atls/ea"
 )
 
 type CertificateProvider struct {
