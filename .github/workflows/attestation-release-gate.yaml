@@ -115,6 +115,7 @@ jobs:
               go test -race -count=1 ./...
               go vet ./...
             )
+            ./scripts/check-attestation-vulnerabilities.sh cocos
           }
 
           run_cocos_release_gate() {

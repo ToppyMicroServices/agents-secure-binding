@@ -46,8 +46,19 @@ independently.
 Run the hardware-independent tests with the workspace disabled:
 
 ```sh
-GOWORK=off go test ./...
+GOWORK=off go mod tidy -diff
+GOWORK=off go mod verify
+GOWORK=off go test -race -count=1 ./...
+GOWORK=off go vet ./...
+../../scripts/check-attestation-vulnerabilities.sh cocos
 ```
+
+The SNP and TDX libraries require `x/crypto/cryptobyte`, so the Go
+vulnerability database also reports the unmaintained `x/crypto/openpgp`
+package as the module-only advisory `GO-2026-5932`. Cocos does not import
+`openpgp`, and no fixed `x/crypto` version exists for that advisory. The gate
+rejects any future `openpgp` import and retains the package scan; it does not
+suppress the module-only notice.
 
 Build the moved Cocos commands independently from the root release build:
 
@@ -63,16 +74,16 @@ packaging inputs and are not built by the ASB root `make` target.
 These tests use deterministic fixtures and do not access `/dev/sev-guest`,
 `/dev/tdx_guest`, a TPM, AMD KDS, or Intel PCS.
 
-## Remaining release steps
+## Release steps
 
-The first Cocos tag uses ASB `v2.0.0-rc.1`, SNP `v0.1.0`, and TDX `v0.1.1`.
-After these versions are recorded in `go.mod` and `go.sum`:
+After the intended published ASB, SNP, and TDX versions are recorded in
+`go.mod` and `go.sum`:
 
 1. Pass `make check-cocos-release` and pull-request CI.
 2. Merge the dependency update.
 3. Run the manual `Attestation Release Gate` with target `cocos` on the exact
    merged commit and confirm that it succeeds.
-4. Sign and push `integrations/cocos/v0.1.0`.
+4. Sign and push the next `integrations/cocos/v0.x` tag.
 5. Wait for the tag-triggered Cocos gate before creating a release.
 
 The Cocos tag remains experimental. It does not establish live SNP or TDX

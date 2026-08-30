@@ -3,21 +3,28 @@
 set -eu
 
 if [ "$#" -ne 1 ]; then
-	echo "usage: $0 <snp|tdx>" >&2
+	echo "usage: $0 <root|snp|tdx|cocos>" >&2
 	exit 2
 fi
 
-module=$1
-case "$module" in
-	snp|tdx) ;;
+target=$1
+script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+
+case "$target" in
+	root)
+		module_dir="$script_dir/.."
+		;;
+	snp|tdx)
+		module_dir="$script_dir/../modules/attestation/$target"
+		;;
+	cocos)
+		module_dir="$script_dir/../integrations/cocos"
+		;;
 	*)
-		echo "unsupported attestation module: $module" >&2
+		echo "unsupported attestation target: $target" >&2
 		exit 2
 		;;
 esac
-
-script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
-module_dir="$script_dir/../modules/attestation/$module"
 
 dependencies=$(
 	cd "$module_dir"
@@ -26,7 +33,7 @@ dependencies=$(
 
 if printf '%s\n' "$dependencies" |
 	grep -Eq '^golang\.org/x/crypto/openpgp($|/)'; then
-	echo "vulnerability gate blocked: $module imports unmaintained x/crypto/openpgp" >&2
+	echo "vulnerability gate blocked: $target imports unmaintained x/crypto/openpgp" >&2
 	exit 1
 fi
 

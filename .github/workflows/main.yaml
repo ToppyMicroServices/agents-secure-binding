@@ -167,4 +167,4 @@ jobs:
             -fuzztime=10s ./pkg/agtp
 
       - name: Run govulncheck
-        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+        run: ./scripts/check-attestation-vulnerabilities.sh root

@@ -93,6 +93,8 @@ jobs:
         run: go test -race -count=1 ./...
       - working-directory: integrations/cocos
         run: go vet ./...
+      - name: Scan Cocos packages for vulnerabilities
+        run: ./scripts/check-attestation-vulnerabilities.sh cocos
 
   workspace:
     runs-on: ${{ matrix.os }}
