@@ -7,11 +7,17 @@ import (
 	"bytes"
 	"crypto/ecdsa"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/fxamacker/cbor/v2"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/veraison/go-cose"
+)
+
+var (
+	ErrVerificationKeyRequired = errors.New("EAT verification key is required")
+	ErrSignedCBORRequired      = errors.New("signed COSE EAT is required")
 )
 
 // Decoder decodes EAT tokens (auto-detects JWT vs CBOR).
@@ -79,6 +85,9 @@ func (d *Decoder) decodeCBOR(token []byte) (*EATClaims, error) {
 	// Try to unmarshal as COSE_Sign1 message
 	var msg cose.Sign1Message
 	if err := msg.UnmarshalCBOR(token); err != nil {
+		if d.verifyKey != nil {
+			return nil, fmt.Errorf("%w: %v", ErrSignedCBORRequired, err)
+		}
 		// If it's not a COSE message, try to decode as plain CBOR (backward compatibility)
 		claims := &EATClaims{}
 		if err := cbor.Unmarshal(token, claims); err != nil {
@@ -106,6 +115,15 @@ func (d *Decoder) decodeCBOR(token []byte) (*EATClaims, error) {
 	}
 
 	return claims, nil
+}
+
+// DecodeVerifiedCBOR verifies a signed COSE EAT and decodes its claims. Unlike
+// DecodeCBOR, it never accepts plain CBOR or an omitted verification key.
+func DecodeVerifiedCBOR(token []byte, verifyKey *ecdsa.PublicKey) (*EATClaims, error) {
+	if verifyKey == nil {
+		return nil, ErrVerificationKeyRequired
+	}
+	return NewDecoder(verifyKey).decodeCBOR(token)
 }
 
 // DecodeJWT is a convenience function to decode JWT EAT token.

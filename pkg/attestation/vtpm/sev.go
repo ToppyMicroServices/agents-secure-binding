@@ -39,23 +39,28 @@ func getLeveledQuoteProvider() (client.LeveledQuoteProvider, error) {
 // fetchSEVAttestation fetches a SEV-SNP attestation report.
 func fetchSEVAttestation(reportDataSlice []byte, vmpl uint) ([]byte, error) {
 	var reportData [SEVNonce]byte
-
-	qp, err := getLeveledQuoteProvider()
-	if err != nil {
-		return []byte{}, fmt.Errorf("could not get quote provider")
-	}
-
-	if len(reportData) > SEVNonce {
-		return []byte{}, fmt.Errorf("attestation report size mismatch")
+	if len(reportDataSlice) != len(reportData) {
+		return nil, fmt.Errorf("invalid SEV-SNP REPORT_DATA length: expected %d bytes, got %d", len(reportData), len(reportDataSlice))
 	}
 	copy(reportData[:], reportDataSlice)
 
-	quoteProto, err := client.GetQuoteProtoAtLevel(qp, reportData, vmpl)
+	qp, err := getLeveledQuoteProvider()
 	if err != nil {
-		return []byte{}, fmt.Errorf("failed to get quote proto")
+		return nil, fmt.Errorf("could not get SEV-SNP quote provider: %w", err)
 	}
 
-	homePath, _ := os.UserHomeDir()
+	quoteProto, err := client.GetQuoteProtoAtLevel(qp, reportData, vmpl)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get SEV-SNP quote: %w", err)
+	}
+	if quoteProto.GetProduct() == nil {
+		return nil, fmt.Errorf("SEV-SNP quote is missing product information")
+	}
+
+	homePath, err := os.UserHomeDir()
+	if err != nil {
+		return nil, fmt.Errorf("resolve certificate cache home directory: %w", err)
+	}
 	vcekPath := path.Join(homePath, certCacheDirectory, fmt.Sprintf("%d", quoteProto.Product.Name), vcekName)
 	arkAskBundlePath := path.Join(homePath, certCacheDirectory, fmt.Sprintf("%d", quoteProto.Product.Name), arkAskBundleName)
 
@@ -69,13 +74,11 @@ func fetchSEVAttestation(reportDataSlice []byte, vmpl uint) ([]byte, error) {
 		return []byte{}, fmt.Errorf("could not read ask/ark bundle file: %v", err)
 	}
 
-	vcekPem, _ := pem.Decode(vcekBytes)
-	arkPem, rest := pem.Decode(arkAskBundleBytes)
-	askPem, _ := pem.Decode(rest)
-
-	quoteProto.CertificateChain.VcekCert = vcekPem.Bytes
-	quoteProto.CertificateChain.AskCert = askPem.Bytes
-	quoteProto.CertificateChain.ArkCert = arkPem.Bytes
+	certificateChain, err := decodeCachedSEVCertificateChain(vcekBytes, arkAskBundleBytes)
+	if err != nil {
+		return nil, err
+	}
+	quoteProto.CertificateChain = certificateChain
 
 	result, err := proto.Marshal(quoteProto)
 	if err != nil {
@@ -83,6 +86,28 @@ func fetchSEVAttestation(reportDataSlice []byte, vmpl uint) ([]byte, error) {
 	}
 
 	return result, nil
+}
+
+// decodeCachedSEVCertificateChain decodes the cache format written by
+// FetchSEVCertificates: one VCEK PEM file and an ASK-then-ARK PEM bundle.
+func decodeCachedSEVCertificateChain(vcekBytes, askArkBundleBytes []byte) (*sevsnp.CertificateChain, error) {
+	vcekPEM, _ := pem.Decode(vcekBytes)
+	if vcekPEM == nil {
+		return nil, fmt.Errorf("cached VCEK is not valid PEM")
+	}
+	askPEM, rest := pem.Decode(askArkBundleBytes)
+	if askPEM == nil {
+		return nil, fmt.Errorf("cached ASK/ARK bundle is missing ASK PEM")
+	}
+	arkPEM, _ := pem.Decode(rest)
+	if arkPEM == nil {
+		return nil, fmt.Errorf("cached ASK/ARK bundle is missing ARK PEM")
+	}
+	return &sevsnp.CertificateChain{
+		VcekCert: vcekPEM.Bytes,
+		AskCert:  askPEM.Bytes,
+		ArkCert:  arkPEM.Bytes,
+	}, nil
 }
 
 // GetSEVProductName maps a product string to a SEV product name.
@@ -113,21 +138,19 @@ func FetchSEVCertificates(vmpl uint) error {
 
 	qp, err := getLeveledQuoteProvider()
 	if err != nil {
-		return fmt.Errorf("could not get quote provider")
+		return fmt.Errorf("could not get SEV-SNP quote provider: %w", err)
 	}
 
-	if len(reportData) > SEVNonce {
-		return fmt.Errorf("attestation report size mismatch")
-	}
-
-	_, err = rand.Read(reportData[:])
-	if err != nil {
-		return fmt.Errorf("failed to read random data: %v", err)
+	if _, err := rand.Read(reportData[:]); err != nil {
+		return fmt.Errorf("failed to create SEV-SNP certificate-fetch challenge: %w", err)
 	}
 
 	quoteProto, err := client.GetQuoteProtoAtLevel(qp, reportData, vmpl) // for coverage
 	if err != nil {
-		return fmt.Errorf("failed to get quote proto")
+		return fmt.Errorf("failed to get SEV-SNP quote for certificate fetch: %w", err)
+	}
+	if quoteProto.GetProduct() == nil || quoteProto.GetReport() == nil {
+		return fmt.Errorf("SEV-SNP quote is missing product or report information")
 	}
 
 	options := &verify.Options{
@@ -141,10 +164,16 @@ func FetchSEVCertificates(vmpl uint) error {
 
 	result, err := verify.GetAttestationFromReport(quoteProto.Report, options)
 	if err != nil {
-		return fmt.Errorf("could not get fetch certificates: %v", err)
+		return fmt.Errorf("fetch SEV-SNP certificates: %w", err)
+	}
+	if result.GetCertificateChain() == nil {
+		return fmt.Errorf("fetched SEV-SNP attestation is missing its certificate chain")
 	}
 
-	homePath, _ := os.UserHomeDir()
+	homePath, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("resolve certificate cache home directory: %w", err)
+	}
 
 	vcekPath := path.Join(homePath, certCacheDirectory, fmt.Sprintf("%d", quoteProto.Product.Name), vcekName)
 	arkAskBundlePath := path.Join(homePath, certCacheDirectory, fmt.Sprintf("%d", quoteProto.Product.Name), arkAskBundleName)
@@ -156,24 +185,20 @@ func FetchSEVCertificates(vmpl uint) error {
 	arkAskBundlePem := append(askPem, arkPem...)
 
 	vcekDir := filepath.Dir(vcekPath)
-	err = os.MkdirAll(vcekDir, 0o755)
-	if err != nil {
-		return fmt.Errorf("could not create VCEK directory: %v", err)
+	if err := os.MkdirAll(vcekDir, 0o755); err != nil {
+		return fmt.Errorf("could not create VCEK directory: %w", err)
 	}
 	askArkBundleDir := filepath.Dir(arkAskBundlePath)
-	err = os.MkdirAll(askArkBundleDir, 0o755)
-	if err != nil {
-		return fmt.Errorf("could not create ask/ark bundle directory: %v", err)
+	if err := os.MkdirAll(askArkBundleDir, 0o755); err != nil {
+		return fmt.Errorf("could not create ASK/ARK bundle directory: %w", err)
 	}
 
-	err = os.WriteFile(vcekPath, vcekPem, 0o644)
-	if err != nil {
-		return fmt.Errorf("could not write VCEK file: %v", err)
+	if err := os.WriteFile(vcekPath, vcekPem, 0o644); err != nil {
+		return fmt.Errorf("could not write VCEK file: %w", err)
 	}
 
-	err = os.WriteFile(arkAskBundlePath, arkAskBundlePem, 0o644)
-	if err != nil {
-		return fmt.Errorf("could not write ark/ask bundle file: %v", err)
+	if err := os.WriteFile(arkAskBundlePath, arkAskBundlePem, 0o644); err != nil {
+		return fmt.Errorf("could not write ASK/ARK bundle file: %w", err)
 	}
 
 	return nil

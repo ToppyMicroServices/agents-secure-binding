@@ -4,20 +4,34 @@ package corimgen
 
 import (
 	"crypto"
+	"encoding/binary"
 	"encoding/hex"
 	"fmt"
 	"strings"
 
+	sevabi "github.com/google/go-sev-guest/abi"
 	"github.com/google/uuid"
 	"github.com/veraison/corim/comid"
 	"github.com/veraison/corim/corim"
 	"github.com/veraison/go-cose"
+	"github.com/veraison/swid"
 )
 
 // Legacy SNP Defaults.
 const (
 	SNPDefaultVmpl        = 2
 	SNPDefaultMeasurement = "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000" // 48 bytes
+
+	// These unsigned-integer measurement keys define the repository's local
+	// CoMID appraisal profile. They are not IETF-assigned code points.
+	SNPMeasurementMKey         uint64 = 0x1000
+	SNPHostDataMKey            uint64 = 0x1001
+	SNPPolicyMKey              uint64 = 0x1002
+	SNPMinimumLaunchTCBMKey    uint64 = 0x1003
+	TDXMRTDMKey                uint64 = 0x2000
+	TDXMRSEAMMKey              uint64 = 0x2001
+	TDXRTMR0MKey               uint64 = 0x2010
+	maximumTDXRuntimeRegisters        = 4
 )
 
 // Legacy TDX Defaults.
@@ -37,7 +51,7 @@ type Options struct {
 	Platform    string        // "snp" or "tdx"
 	Measurement string        // Hex-encoded measurement
 	Product     string        // SNP processor product name
-	SVN         uint64        // Security Version Number
+	SVN         uint64        // Exact SNP guest SVN; unsupported for TDX
 	Policy      uint64        // SNP policy flags
 	RTMRs       string        // TDX RTMRs (comma-separated hex)
 	MrSeam      string        // TDX MRSEAM (hex)
@@ -71,6 +85,7 @@ func GenerateCoRIM(opts Options) ([]byte, error) {
 	// Sign the CoRIM
 	signedCorim := &corim.SignedCorim{}
 	signedCorim.UnsignedCorim = *unsignedCorim
+	signedCorim.Meta = *corim.NewMeta().SetSigner("agents-secure-binding corimgen", nil)
 
 	// Create COSE signer (use ES256 for ECDSA keys)
 	signer, err := cose.NewSigner(cose.AlgorithmES256, opts.SigningKey)
@@ -155,59 +170,150 @@ func createReferenceValue(opts Options) (*comid.ReferenceValue, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode measurement: %w", err)
 	}
+	measurementAlg, err := platformMeasurementAlgorithm(opts.Platform)
+	if err != nil {
+		return nil, err
+	}
 
-	// Create main measurement with UUID key
-	measUUID := uuid.New()
-	mval, err := comid.NewUUIDMeasurement(comid.UUID(measUUID))
+	measurementKey, err := mainMeasurementKey(opts.Platform)
+	if err != nil {
+		return nil, err
+	}
+	mval, err := comid.NewUintMeasurement(measurementKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create measurement: %w", err)
 	}
 
-	// Add digest with SHA-256 algorithm (algID = 1)
-	mval.AddDigest(1, measBytes)
+	if mval.AddDigest(measurementAlg, measBytes) == nil {
+		return nil, fmt.Errorf("measurement must be a valid SHA-384 value (48 bytes)")
+	}
 
 	// Add SVN if specified
 	if opts.SVN > 0 {
 		mval.SetSVN(opts.SVN)
 	}
 
-	// Initialize measurements slice
+	// Initialize measurements slice with the platform's primary measurement.
 	refVal.Measurements = comid.Measurements{*mval}
+	if opts.Platform == "snp" {
+		if err := addSNPReferenceValues(refVal, opts); err != nil {
+			return nil, err
+		}
+	}
 
 	// Platform-specific additions
 	if opts.Platform == "tdx" {
+		if opts.SVN != 0 {
+			return nil, fmt.Errorf("TDX scalar SVN is unsupported; use the platform policy's 16-byte minimum_tee_tcb_svn")
+		}
 		// Add MRSEAM
 		if opts.MrSeam != "" {
 			mrSeamBytes, err := hex.DecodeString(opts.MrSeam)
 			if err != nil {
 				return nil, fmt.Errorf("failed to decode MRSEAM: %w", err)
 			}
-			seamUUID := uuid.New()
-			seamMval, err := comid.NewUUIDMeasurement(comid.UUID(seamUUID))
+			seamMval, err := comid.NewUintMeasurement(TDXMRSEAMMKey)
 			if err != nil {
 				return nil, fmt.Errorf("failed to create MRSEAM measurement: %w", err)
 			}
-			seamMval.AddDigest(1, mrSeamBytes)
+			if seamMval.AddDigest(swid.Sha384, mrSeamBytes) == nil {
+				return nil, fmt.Errorf("MRSEAM must be a valid SHA-384 value (48 bytes)")
+			}
 			refVal.Measurements = append(refVal.Measurements, *seamMval)
 		}
 
 		// Add RTMRs
 		if opts.RTMRs != "" {
-			for _, rtmr := range strings.Split(opts.RTMRs, ",") {
+			rtmrs := strings.Split(opts.RTMRs, ",")
+			if len(rtmrs) > maximumTDXRuntimeRegisters {
+				return nil, fmt.Errorf("TDX CoRIM supports at most %d RTMR values", maximumTDXRuntimeRegisters)
+			}
+			for index, rtmr := range rtmrs {
 				rtmrBytes, err := hex.DecodeString(strings.TrimSpace(rtmr))
 				if err != nil {
 					return nil, fmt.Errorf("failed to decode RTMR: %w", err)
 				}
-				rtmrUUID := uuid.New()
-				rtmrMval, err := comid.NewUUIDMeasurement(comid.UUID(rtmrUUID))
+				rtmrMval, err := comid.NewUintMeasurement(TDXRTMR0MKey + uint64(index))
 				if err != nil {
 					return nil, fmt.Errorf("failed to create RTMR measurement: %w", err)
 				}
-				rtmrMval.AddDigest(1, rtmrBytes)
+				if rtmrMval.AddDigest(swid.Sha384, rtmrBytes) == nil {
+					return nil, fmt.Errorf("RTMR must be a valid SHA-384 value (48 bytes)")
+				}
 				refVal.Measurements = append(refVal.Measurements, *rtmrMval)
 			}
 		}
 	}
 
 	return refVal, nil
+}
+
+func mainMeasurementKey(platform string) (uint64, error) {
+	switch platform {
+	case "snp":
+		return SNPMeasurementMKey, nil
+	case "tdx":
+		return TDXMRTDMKey, nil
+	default:
+		return 0, fmt.Errorf("unsupported CoRIM platform %q", platform)
+	}
+}
+
+func addSNPReferenceValues(refVal *comid.ReferenceValue, opts Options) error {
+	if opts.HostData != "" {
+		hostData, err := hex.DecodeString(opts.HostData)
+		if err != nil {
+			return fmt.Errorf("failed to decode SNP HOST_DATA: %w", err)
+		}
+		if len(hostData) != sevabi.HostDataSize {
+			return fmt.Errorf("SNP HOST_DATA must be %d bytes, got %d", sevabi.HostDataSize, len(hostData))
+		}
+		measurement, err := newRawValueMeasurement(SNPHostDataMKey, hostData)
+		if err != nil {
+			return err
+		}
+		refVal.Measurements = append(refVal.Measurements, *measurement)
+	}
+	if opts.Policy != 0 {
+		measurement, err := newUint64RawValueMeasurement(SNPPolicyMKey, opts.Policy)
+		if err != nil {
+			return err
+		}
+		refVal.Measurements = append(refVal.Measurements, *measurement)
+	}
+	if opts.LaunchTCB != 0 {
+		measurement, err := newUint64RawValueMeasurement(SNPMinimumLaunchTCBMKey, opts.LaunchTCB)
+		if err != nil {
+			return err
+		}
+		refVal.Measurements = append(refVal.Measurements, *measurement)
+	}
+	return nil
+}
+
+func newUint64RawValueMeasurement(key, value uint64) (*comid.Measurement, error) {
+	raw := make([]byte, 8)
+	binary.LittleEndian.PutUint64(raw, value)
+	return newRawValueMeasurement(key, raw)
+}
+
+func newRawValueMeasurement(key uint64, raw []byte) (*comid.Measurement, error) {
+	measurement, err := comid.NewUintMeasurement(key)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create keyed CoRIM measurement: %w", err)
+	}
+	if measurement.SetRawValueBytes(raw, nil) == nil {
+		return nil, fmt.Errorf("failed to set keyed CoRIM raw value")
+	}
+	return measurement, nil
+}
+
+func platformMeasurementAlgorithm(platform string) (uint64, error) {
+	switch platform {
+	case "snp", "tdx":
+		// SNP MEASUREMENT and the TDX MRTD/RTMR fields are SHA-384 values.
+		return swid.Sha384, nil
+	default:
+		return 0, fmt.Errorf("unsupported CoRIM platform %q", platform)
+	}
 }

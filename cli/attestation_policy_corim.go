@@ -217,7 +217,7 @@ func (cli *CLI) NewCreateCoRIMSNPCmd() *cobra.Command {
 
 	cmd.Flags().StringVar(&measurement, "measurement", "", "Measurement/Launch Digest (hex string, defaults to zero if not provided)")
 	cmd.Flags().Uint64Var(&policy, "policy", 0, "SNP policy flags")
-	cmd.Flags().Uint64Var(&svn, "svn", 0, "Security Version Number (TCB)")
+	cmd.Flags().Uint64Var(&svn, "svn", 0, "Exact SNP guest SVN")
 	cmd.Flags().StringVar(&product, "product", "Milan", "Processor product name (Milan, Genoa, etc.)")
 	cmd.Flags().StringVar(&hostData, "host-data", "", "Host data (hex string)")
 	cmd.Flags().Uint64Var(&launchTCB, "launch-tcb", 0, "Minimum launch TCB")
@@ -230,7 +230,6 @@ func (cli *CLI) NewCreateCoRIMSNPCmd() *cobra.Command {
 func (cli *CLI) NewCreateCoRIMTDXCmd() *cobra.Command {
 	var (
 		measurement    string
-		svn            uint64
 		rtmrs          string
 		mrSeam         string
 		output         string
@@ -245,7 +244,6 @@ func (cli *CLI) NewCreateCoRIMTDXCmd() *cobra.Command {
 			opts := generator.Options{
 				Platform:    "tdx",
 				Measurement: measurement,
-				SVN:         svn,
 				RTMRs:       rtmrs,
 				MrSeam:      mrSeam,
 			}
@@ -279,7 +277,6 @@ func (cli *CLI) NewCreateCoRIMTDXCmd() *cobra.Command {
 	}
 
 	cmd.Flags().StringVar(&measurement, "measurement", "", "MRTD measurement (hex string, uses default if not provided)")
-	cmd.Flags().Uint64Var(&svn, "svn", 0, "Security Version Number")
 	cmd.Flags().StringVar(&rtmrs, "rtmrs", "", "Comma-separated RTMRs (hex)")
 	cmd.Flags().StringVar(&mrSeam, "mr-seam", "", "MRSEAM (hex)")
 	cmd.Flags().StringVar(&output, "output", "", "Output file path (default: stdout)")

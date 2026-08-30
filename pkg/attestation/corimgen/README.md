@@ -4,14 +4,14 @@ This package provides CoRIM (Concise Reference Integrity Manifest) generation us
 
 ## Overview
 
-The `corimgen` package generates CoRIM attestation policies for confidential computing platforms (SNP and TDX) using the veraison/corim library, which provides:
-- Standard-compliant CoRIM/CoMID structures per RFC 9393
-- Built-in COSE signing and verification
-- Ecosystem compatibility with Veraison attestation services
+The `corimgen` package generates CoRIM containers for local SNP and TDX
+attestation policy. The container and CoMID encoding use the `veraison/corim`
+implementation of RFC 9393. The SNP/TDX measurement-key mapping is an ASB-local
+appraisal profile, not an IETF-assigned interoperability profile.
 
 ## Features
 
-- **SNP Support**: Generate CoRIM for AMD SEV-SNP with measurements, SVN, and product information
+- **SNP Support**: Generate keyed constraints for measurement, guest SVN, host data, policy, and minimum launch TCB
 - **TDX Support**: Generate CoRIM for Intel TDX with MRTD, MRSEAM, and RTMRs
 - **COSE Signing**: Optional COSE_Sign1 signing with crypto.Signer keys
 - **Defaults**: Sensible defaults for testing and development
@@ -65,7 +65,6 @@ opts := corimgen.Options{
     Measurement: "91eb2b44...", // MRTD
     MrSeam:      "5b38e33a...", // MRSEAM
     RTMRs:       "ce0891f4...,062ac322...,5fd86e8c...,00000000...", // comma-separated
-    SVN:         2,
 }
 
 corimBytes, err := corimgen.GenerateCoRIM(opts)
@@ -78,12 +77,12 @@ corimBytes, err := corimgen.GenerateCoRIM(opts)
 | `Platform` | string | Platform type: "snp" or "tdx" |
 | `Measurement` | string | Hex-encoded measurement (MRTD for TDX, measurement for SNP) |
 | `Product` | string | SNP processor product name (e.g., "Milan", "Genoa") |
-| `SVN` | uint64 | Security Version Number |
-| `Policy` | uint64 | SNP policy flags |
+| `SVN` | uint64 | Exact SNP guest SVN; unsupported for TDX |
+| `Policy` | uint64 | Exact nonzero SNP policy flags |
 | `RTMRs` | string | TDX Runtime Measurement Registers (comma-separated hex) |
 | `MrSeam` | string | TDX SEAM module measurement (hex) |
-| `HostData` | string | SNP host data (hex) |
-| `LaunchTCB` | uint64 | SNP minimum launch TCB |
+| `HostData` | string | Exact 32-byte SNP host data (64 hex characters) |
+| `LaunchTCB` | uint64 | Component-wise minimum SNP launch TCB when nonzero |
 | `SigningKey` | crypto.Signer | Optional COSE signing key (ES256) |
 
 ## Defaults
@@ -108,10 +107,13 @@ Generated CoRIM contains:
 - **CoMID Tags**: One or more CoMID tags with:
   - **Tag Identity**: Unique tag ID and version
   - **Environment**: Platform class (UUID) and optional instance (product)
-  - **Reference Values**: Measurements with:
-    - **Key**: UUID identifier for each measurement
-    - **Digests**: SHA-256 hash of measurement
-    - **SVN**: Security version number (if specified)
+  - **Reference Values**: Measurements with repository-local unsigned-integer
+    keys. SNP uses `0x1000`-`0x1003`; TDX uses `0x2000`, `0x2001`, and
+    `0x2010`-`0x2013`. These values are not IETF-assigned code points.
+
+The matching appraisers reject unkeyed, unknown, duplicate, and unsupported
+constraints. TDX TCB policy remains in the platform JSON policy as
+`minimum_tee_tcb_svn`; it is not represented by the scalar `SVN` option.
 
 ### Signing
 

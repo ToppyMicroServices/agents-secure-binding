@@ -18,6 +18,8 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
+const validSHA384Measurement = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff"
+
 func TestCLI_NewCreateCoRIMCmd(t *testing.T) {
 	cli := &CLI{}
 	cmd := cli.NewCreateCoRIMCmd()
@@ -119,7 +121,7 @@ func TestCLI_NewCreateCoRIMAzureCmd_Success(t *testing.T) {
 		validateFunc: func(token string) (map[string]any, error) {
 			return map[string]any{
 				"x-ms-isolation-tee": map[string]any{
-					"x-ms-sevsnpvm-launchmeasurement": "00112233",
+					"x-ms-sevsnpvm-launchmeasurement": validSHA384Measurement,
 					"x-ms-sevsnpvm-guestsvn":          1.0,
 				},
 			}, nil
@@ -173,7 +175,7 @@ func TestCLI_NewCreateCoRIMGCPCmd_More(t *testing.T) {
 				goldenUEFI := &endorsement.VMGoldenMeasurement{
 					SevSnp: &endorsement.VMSevSnp{
 						Policy:       123,
-						Measurements: map[uint32][]byte{1: {0x1, 0x2}},
+						Measurements: map[uint32][]byte{1: bytes.Repeat([]byte{0x01}, 48)},
 					},
 				}
 				goldenBytes, _ := proto.Marshal(goldenUEFI)
@@ -213,7 +215,7 @@ func TestCLI_NewCreateCoRIMSNPCmd_More(t *testing.T) {
 		"--policy", "1",
 		"--svn", "1",
 		"--product", "Genoa",
-		"--host-data", "00112233",
+		"--host-data", "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff",
 		"--launch-tcb", "1",
 		"--output", outputFile,
 	})
@@ -232,10 +234,9 @@ func TestCLI_NewCreateCoRIMTDXCmd_More(t *testing.T) {
 	outputFile := filepath.Join(tmpDir, "tdx-corim.cbor")
 
 	cmd.SetArgs([]string{
-		"--measurement", "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff",
-		"--svn", "1",
-		"--rtmrs", "0011,2233",
-		"--mr-seam", "aabbcc",
+		"--measurement", validSHA384Measurement,
+		"--rtmrs", validSHA384Measurement + "," + validSHA384Measurement,
+		"--mr-seam", validSHA384Measurement,
 		"--output", outputFile,
 	})
 
@@ -351,7 +352,7 @@ func TestCLI_NewCreateCoRIMGCPCmd_Success(t *testing.T) {
 				goldenUEFI := &endorsement.VMGoldenMeasurement{
 					SevSnp: &endorsement.VMSevSnp{
 						Policy:       123,
-						Measurements: map[uint32][]byte{1: {0x1, 0x2}},
+						Measurements: map[uint32][]byte{1: bytes.Repeat([]byte{0x01}, 48)},
 					},
 				}
 				goldenBytes, _ := proto.Marshal(goldenUEFI)
