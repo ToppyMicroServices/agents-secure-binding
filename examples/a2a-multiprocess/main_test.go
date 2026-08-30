@@ -244,6 +244,35 @@ func TestOrchestratorReportsFailureBeforeAgentStarts(t *testing.T) {
 	}
 }
 
+func TestDebugSimpleRejectsNonOrchestratorBeforeStartup(t *testing.T) {
+	if testing.Short() {
+		t.Skip("binary startup test disabled in short mode")
+	}
+	binary := filepath.Join(t.TempDir(), "asb-a2a")
+	build := exec.Command("go", "build", "-o", binary, ".")
+	build.Env = os.Environ()
+	if output, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build demo: %v\n%s", err, output)
+	}
+
+	var stdout, stderr bytes.Buffer
+	run := exec.Command(binary, "--debug-simple", "--role", "agent-b", "--listen", "0.0.0.0:0")
+	run.Stdout = &stdout
+	run.Stderr = &stderr
+	if err := run.Run(); err == nil {
+		t.Fatalf("debug-simple non-orchestrator run succeeded\nstdout:\n%s\nstderr:\n%s", stdout.Bytes(), stderr.Bytes())
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("rejected debug-simple run wrote stdout:\n%s", stdout.Bytes())
+	}
+	if !bytes.Contains(stderr.Bytes(), []byte("--debug-simple requires --role=orchestrator")) {
+		t.Fatalf("rejected debug-simple run reported the wrong error:\n%s", stderr.Bytes())
+	}
+	if bytes.Contains(stderr.Bytes(), []byte(debugSimpleWarning)) || bytes.Contains(stderr.Bytes(), []byte("started ")) {
+		t.Fatalf("rejected debug-simple run reached startup or emitted the run warning:\n%s", stderr.Bytes())
+	}
+}
+
 func TestMultiprocessSimulationEndToEnd(t *testing.T) {
 	if testing.Short() {
 		t.Skip("multiprocess loopback test disabled in short mode")
@@ -302,12 +331,20 @@ func TestMultiprocessSimulationEndToEnd(t *testing.T) {
 		}
 	}
 
-	jsonRun := exec.Command(binary, "--role", "orchestrator", "--format", "json")
-	jsonOutput, err := jsonRun.CombinedOutput()
-	if err != nil {
-		t.Fatalf("run JSON report: %v\n%s", err, jsonOutput)
+	jsonRun := exec.Command(binary, "--debug-simple", "--format", "json")
+	var jsonStdout, jsonStderr bytes.Buffer
+	jsonRun.Stdout = &jsonStdout
+	jsonRun.Stderr = &jsonStderr
+	if err := jsonRun.Run(); err != nil {
+		t.Fatalf("run JSON report: %v\nstdout:\n%s\nstderr:\n%s", err, jsonStdout.Bytes(), jsonStderr.Bytes())
 	}
-	jsonReport := decodeA2ATestReport(t, jsonOutput)
+	if bytes.Contains(jsonStdout.Bytes(), []byte(debugSimpleWarning)) {
+		t.Fatalf("debug warning contaminated JSON stdout:\n%s", jsonStdout.Bytes())
+	}
+	if count := bytes.Count(jsonStderr.Bytes(), []byte(debugSimpleWarning)); count != 1 {
+		t.Fatalf("debug warning count on stderr = %d, want 1\n%s", count, jsonStderr.Bytes())
+	}
+	jsonReport := decodeA2ATestReport(t, jsonStdout.Bytes())
 	if jsonReport.Status != a2asecuritytest.StatusPass || jsonReport.Summary.Passed != 8 {
 		t.Fatalf("JSON stdout result = status %q summary %+v", jsonReport.Status, jsonReport.Summary)
 	}

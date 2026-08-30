@@ -59,6 +59,7 @@ type options struct {
 	redisMaxReplayTTL        time.Duration
 	redisReplicaAcks         int
 	redisReplicationTimeout  time.Duration
+	debugSimple              bool
 	showVersion              bool
 }
 
@@ -71,6 +72,15 @@ func runMain() int {
 	if opts.showVersion {
 		fmt.Printf("asb-a2a-test %s (%s)\n", version, commit)
 		return 0
+	}
+	if opts.debugSimple {
+		var err error
+		opts, err = prepareDebugSimple(opts)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "asb-a2a-test (%s) failed: %v\n", opts.role, err)
+			return 1
+		}
+		fmt.Fprintln(os.Stderr, debugSimpleWarning)
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -124,6 +134,7 @@ func parseFlags() options {
 	flag.DurationVar(&opts.redisMaxReplayTTL, "redis-max-replay-ttl", 10*time.Minute, "maximum accepted replay retention")
 	flag.IntVar(&opts.redisReplicaAcks, "redis-replica-acks", 0, "replica acknowledgements required after each Redis/Valkey write")
 	flag.DurationVar(&opts.redisReplicationTimeout, "redis-replication-timeout", 0, "WAIT timeout when replica acknowledgements are required")
+	flag.BoolVar(&opts.debugSimple, "debug-simple", false, "run the local loopback simulation with explicit insecure debug opt-ins")
 	flag.BoolVar(&opts.showVersion, "version", false, "print version and exit")
 	flag.Parse()
 	return opts

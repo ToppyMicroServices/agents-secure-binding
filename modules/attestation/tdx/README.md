@@ -16,13 +16,21 @@ collateral getter.
 It does not implement ASB, TLS, EAT, or CoRIM. Those concerns stay in the root
 composition layer.
 
+The root A2A tester's `--debug-simple` mode uses signed simulated evidence and
+does not import, invoke, or qualify this module.
+
 Run the hardware-independent checks with:
 
 ```sh
+GOWORK=off go mod tidy -diff
 GOWORK=off go mod verify
-GOWORK=off go test -race ./...
+GOWORK=off go test -race -count=1 ./...
 GOWORK=off go vet ./...
+GOWORK=off go run golang.org/x/vuln/cmd/govulncheck@v1.7.0 -scan=package ./...
 ```
+
+The package scan covers imported packages. It does not turn a clean result into
+a hardware or production-readiness claim.
 
 Live qualification must use the exact target image, launch policy, Intel
 platform, endorsement path, and collateral environment.

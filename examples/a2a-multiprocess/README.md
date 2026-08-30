@@ -92,6 +92,58 @@ The source form remains available:
 go run ./examples/a2a-multiprocess
 ```
 
+### Mac and local debug mode
+
+On a Mac or another local development machine without confidential-computing
+hardware, run:
+
+```sh
+make mac-debug-a2a
+```
+
+The target builds the tester and runs the same explicit command:
+
+```sh
+make a2a-test
+./build/asb-a2a-test --debug-simple
+```
+
+With no workflow override, this mode starts the reference roles on loopback and
+runs the existing eight-scenario security-test suite. It still uses mutual TLS
+and checks the exact session/request binding, the signed attestation result,
+local policy, and one-shot replay state. Its Attester signs demo evidence
+labeled `SIMULATED`. That signature detects tampering within the demo trust
+setup; it is not an SNP, TDX, TPM, or vTPM quote and is not evidence of
+confidential execution.
+
+To use two OpenAI-compatible model servers on loopback, create `prompt.txt` and
+run, for example:
+
+```sh
+./build/asb-a2a-test --debug-simple \
+  --workflow llm-conversation \
+  --prompt-file ./prompt.txt \
+  --agent-a-llm-url http://127.0.0.1:11434 \
+  --agent-a-llm-model model-a \
+  --agent-b-llm-url http://127.0.0.1:11434 \
+  --agent-b-llm-model model-b
+```
+
+Replace the model labels and ports as needed. In `--debug-simple` mode, both
+model URLs must use cleartext HTTP and a loopback hostname. The runtime disables
+proxy use and rejects any resolved address outside loopback. This workflow
+makes one ASB-bound request from Agent A to Agent B. The reply is authenticated
+by its TLS connection but is not a separately ASB-bound reverse-direction
+request.
+
+By default, the demo PKI, role keys, and file-backed state are placed in a
+temporary directory and removed after the run. If `--state-dir` is supplied,
+that test material remains there for inspection. It is not production identity,
+enrollment, or a durable replay service. Do not supply production data or
+credentials. The mode refuses multi-host deployment and role URLs, hardware
+options, and the Redis/Valkey acceptance store. A successful run does not
+establish hardware qualification or production readiness.
+
 ## Run two selected LLMs
 
 The `llm-conversation` workflow uses two OpenAI-compatible
