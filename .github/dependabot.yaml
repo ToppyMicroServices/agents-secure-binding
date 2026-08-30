@@ -3,6 +3,9 @@ updates:
   - package-ecosystem: "gomod"
     directories:
       - "/"
+      - "/modules/attestation/snp"
+      - "/modules/attestation/tdx"
+      - "/integrations/cocos"
     schedule:
       interval: "weekly"
       day: "monday"
