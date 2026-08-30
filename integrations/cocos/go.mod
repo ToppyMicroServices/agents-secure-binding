@@ -3,9 +3,9 @@ module github.com/ToppyMicroServices/agents-secure-binding/integrations/cocos
 go 1.26.0
 
 require (
-	github.com/ToppyMicroServices/agents-secure-binding/modules/attestation/snp v0.0.0-00010101000000-000000000000
-	github.com/ToppyMicroServices/agents-secure-binding/modules/attestation/tdx v0.0.0-00010101000000-000000000000
-	github.com/ToppyMicroServices/agents-secure-binding/v2 v2.0.0-00010101000000-000000000000
+	github.com/ToppyMicroServices/agents-secure-binding/modules/attestation/snp v0.1.0
+	github.com/ToppyMicroServices/agents-secure-binding/modules/attestation/tdx v0.1.0
+	github.com/ToppyMicroServices/agents-secure-binding/v2 v2.0.0-rc.1
 	github.com/caarlos0/env/v11 v11.4.0
 	github.com/fatih/color v1.18.0
 	github.com/go-kit/kit v0.13.0
@@ -106,11 +106,3 @@ require (
 	google.golang.org/grpc v1.82.1 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
-
-// Prepublication monorepo wiring only. Remove these local replacements and
-// require released versions before tagging this integration module.
-replace github.com/ToppyMicroServices/agents-secure-binding/v2 => ../..
-
-replace github.com/ToppyMicroServices/agents-secure-binding/modules/attestation/snp => ../../modules/attestation/snp
-
-replace github.com/ToppyMicroServices/agents-secure-binding/modules/attestation/tdx => ../../modules/attestation/tdx

@@ -28,6 +28,12 @@ github.com/GoogleCloudPlatform/opentelemetry-operations-go/internal/cloudmock v0
 github.com/GoogleCloudPlatform/opentelemetry-operations-go/internal/cloudmock v0.53.0/go.mod h1:jUZ5LYlw40WMd07qxcQJD5M40aUxrfwqQX1g7zxYnrQ=
 github.com/GoogleCloudPlatform/opentelemetry-operations-go/internal/resourcemapping v0.53.0 h1:Ron4zCA/yk6U7WOBXhTJcDpsUBG9npumK6xw2auFltQ=
 github.com/GoogleCloudPlatform/opentelemetry-operations-go/internal/resourcemapping v0.53.0/go.mod h1:cSgYe11MCNYunTnRXrKiR/tHc0eoKjICUuWpNZoVCOo=
+github.com/ToppyMicroServices/agents-secure-binding/modules/attestation/snp v0.1.0 h1:fVpQGD9XfwMJ0wg4unp9vGufKzDMJiCiv9TrlNPiQJQ=
+github.com/ToppyMicroServices/agents-secure-binding/modules/attestation/snp v0.1.0/go.mod h1:IdDgCa7aNju3FwLsd9BVPpxwrQIctGp4glXyrhJ8VRY=
+github.com/ToppyMicroServices/agents-secure-binding/modules/attestation/tdx v0.1.0 h1:I85L2TZqFIIz3MUjxbSLzhN/W2+PO8cz6mQgi+x4K+8=
+github.com/ToppyMicroServices/agents-secure-binding/modules/attestation/tdx v0.1.0/go.mod h1:UbhCrC2Eap5/qf8WUrIwnrofYgW0FkEjwjLG0KD7cQ8=
+github.com/ToppyMicroServices/agents-secure-binding/v2 v2.0.0-rc.1 h1:D+V58MRptxwex35rHwEwjqSaDSJIG0ZXuFbnhNd+J2Y=
+github.com/ToppyMicroServices/agents-secure-binding/v2 v2.0.0-rc.1/go.mod h1:fnwelpUCT2/u5LEf5Mkw4tusswWZnoSaA368EXMdNCo=
 github.com/VividCortex/gohistogram v1.0.0 h1:6+hBz+qvs0JOrrNhhmR7lFxo5sINxBCGXrdtl/UvroE=
 github.com/VividCortex/gohistogram v1.0.0/go.mod h1:Pf5mBqqDxYaXu3hDrrU+w6nw50o/4+TcAqDqk/vUH7g=
 github.com/beorn7/perks v1.0.1 h1:VlbKKnNfV8bJzeqoa4cOKqO6bYr3WgKZxO8Z16+hsOM=

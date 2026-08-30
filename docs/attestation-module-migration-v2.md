@@ -17,9 +17,10 @@ ASB root /v2 --------------------------------------+
 ```
 
 ASB root has no dependency on the Cocos integration or the two platform
-modules. During development, `integrations/cocos/go.mod` uses local replacements
-because the ASB v2 release candidate does not yet exist. Those replacements are
-not permitted in a Cocos module release.
+modules. Before the ASB v2 release candidate existed,
+`integrations/cocos/go.mod` used local replacements for development. The Cocos
+module now resolves the published root and platform versions without local
+replacements.
 
 ## API migration
 
