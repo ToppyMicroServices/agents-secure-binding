@@ -9,7 +9,9 @@ TDX run for this change. The module is not production-ready.
 This module accepts a raw QuoteV4. `Verify` checks quote authentication,
 certificate and PCS collateral, CRL status, local TDX policy, debug state, and
 the caller-supplied `REPORT_DATA`. Its default network getter is bounded and
-restricted to Intel PCS. A deployment may inject a reviewed collateral getter.
+restricted to the exact Intel PCS API and certificate origins required for
+collateral and Root CA CRL retrieval. A deployment may inject a reviewed local
+collateral getter.
 
 It does not implement ASB, TLS, EAT, or CoRIM. Those concerns stay in the root
 composition layer.
