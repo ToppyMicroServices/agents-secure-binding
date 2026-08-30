@@ -23,11 +23,16 @@ GOWORK=off go mod tidy -diff
 GOWORK=off go mod verify
 GOWORK=off go test -race -count=1 ./...
 GOWORK=off go vet ./...
-GOWORK=off go run golang.org/x/vuln/cmd/govulncheck@v1.7.0 -scan=package ./...
+../../../scripts/check-attestation-vulnerabilities.sh snp
 ```
 
-The package scan covers imported packages. It does not turn a clean result into
-a hardware or production-readiness claim.
+`go-sev-guest` requires `x/crypto/cryptobyte`, so the Go vulnerability database
+also reports the unmaintained `x/crypto/openpgp` package as the module-only
+advisory `GO-2026-5932`. This module does not import `openpgp`, and no fixed
+`x/crypto` version exists for that advisory. The vulnerability gate rejects any
+future `openpgp` import before running the package scan. It does not suppress
+the module-only notice or turn a clean result into a hardware or
+production-readiness claim.
 
 Live qualification must use the exact target image, launch policy, AMD product,
 endorsement path, and collateral environment.

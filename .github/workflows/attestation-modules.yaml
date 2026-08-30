@@ -68,8 +68,7 @@ jobs:
       - working-directory: modules/attestation/${{ matrix.module }}
         run: go vet ./...
       - name: Scan module packages for vulnerabilities
-        working-directory: modules/attestation/${{ matrix.module }}
-        run: go run golang.org/x/vuln/cmd/govulncheck@v1.7.0 -scan=package ./...
+        run: ./scripts/check-attestation-vulnerabilities.sh "${{ matrix.module }}"
 
   cocos-integration:
     runs-on: ${{ matrix.os }}

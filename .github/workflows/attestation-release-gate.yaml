@@ -103,8 +103,8 @@ jobs:
               go mod verify
               go test -race -count=1 ./...
               go vet ./...
-              go run golang.org/x/vuln/cmd/govulncheck@v1.7.0 -scan=package ./...
             )
+            ./scripts/check-attestation-vulnerabilities.sh "$module"
           }
 
           run_cocos_development_gate() {
