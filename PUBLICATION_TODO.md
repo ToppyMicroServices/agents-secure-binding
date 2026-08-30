@@ -20,24 +20,20 @@ canonical repository URL without `/v2`.
 
 The ASB core package boundary is platform-neutral and must not depend on the
 Cocos, SNP, or TDX nested modules. The repository root still contains legacy
-platform and runtime packages. The Cocos integration retains replacements only
-for prepublication testing.
+platform and runtime packages.
 
-Before the v2 release candidate:
+The published prerequisites for the first Cocos tag are ASB
+`v2.0.0-rc.1`, SNP `v0.1.0`, and TDX `v0.1.1`.
+`integrations/cocos/go.mod` resolves these versions without local replacements.
 
-- merge the isolated v2/module boundary branch and pass pull-request CI;
-- run the manual `Attestation Release Gate` with target `all` on the merged
-  commit;
-- sign and push `modules/attestation/snp/v0.1.0` and
-  `modules/attestation/tdx/v0.1.0` on the merged commit;
-- wait for both tag-triggered nested-module gates to succeed;
-- pass the root release gate with `GOWORK=off`;
-- sign and push `v2.0.0-rc.1`, wait for its tag-triggered gate to succeed, and
-  only then run `gh release create v2.0.0-rc.1 --verify-tag --prerelease`
-  against the existing remote tag.
+Before `integrations/cocos/v0.1.0`, pass `make check-cocos-release` and
+pull-request CI, merge the dependency update, then run the manual Cocos release
+gate on the exact merged commit. Sign and push the directory-prefixed tag only
+after that gate succeeds, and wait for its tag-triggered gate before creating a
+release.
 
-No live SNP or TDX qualification has been completed. The prerelease must not
-claim that either platform module or the Cocos integration is production-ready.
+No live SNP or TDX qualification has been completed. The Cocos release must not
+claim production readiness.
 
 ## Recorded CI and Red-Team Status
 

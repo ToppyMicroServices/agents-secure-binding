@@ -51,35 +51,16 @@ command with `make -C integrations/cocos agent`; it preserves the
 packaging files. The standalone ingress command was removed because the Cocos
 agent owns and starts the per-computation ingress proxy.
 
-## Release order
+## Current release state
 
-1. Merge the boundary and module changes after pull-request CI passes.
-2. Run the `Attestation Release Gate` manually with target `all` on the merged
-   commit. This runs the root and nested-module preflight plus the Cocos
-   development gate; the Cocos release gate remains blocked while replacements
-   are present.
-3. Sign and push `modules/attestation/snp/v0.1.0` and
-   `modules/attestation/tdx/v0.1.0` on the same immutable merged commit.
-4. Wait for each tag-triggered gate to verify the annotated tag, its target
-   commit, `main` ancestry, module metadata, and tests.
-5. Verify the root with `GOWORK=off`; its module graph must contain no Cocos,
-   SNP-module, or TDX-module dependency.
-6. Sign and push `v2.0.0-rc.1`. Wait for its tag-triggered gate to succeed, then
-   create the prerelease from that existing remote tag:
+The platform-neutral root is published as the `v2.0.0-rc.1` prerelease. The
+experimental platform modules are published as SNP `v0.1.0` and TDX `v0.1.1`.
+The Cocos module resolves these published versions without local replacements.
 
-   ```sh
-   gh release create v2.0.0-rc.1 \
-     --verify-tag --prerelease --latest=false \
-     --title "v2.0.0-rc.1" \
-     --notes "Release candidate only. SNP, TDX, and Cocos hardware qualification is incomplete; no production-ready claim is made."
-   ```
+Before the first Cocos tag, pass `make check-cocos-release` and pull-request CI,
+then merge the dependency update. Run the manual `Attestation Release Gate`
+with target `cocos` on the exact merged commit. Only after that gate succeeds,
+sign and push `integrations/cocos/v0.1.0` and wait for its tag-triggered gate.
 
-7. After the root RC exists, replace the temporary Cocos development versions
-   with the published root and platform versions, remove all replacements, and
-   pass `make check-cocos-release` plus pull-request CI.
-8. Sign and push `integrations/cocos/v0.1.0`, then wait for its tag-triggered
-   gate to succeed before creating any Cocos release.
-
-The root RC release notes must say that hardware qualification is incomplete.
-The RC does not assert that SNP, TDX, or the Cocos integration is
-production-ready.
+The root RC and the Cocos tag do not establish live SNP or TDX qualification or
+production readiness.
