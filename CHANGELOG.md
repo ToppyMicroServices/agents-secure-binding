@@ -1,6 +1,14 @@
 # Changelog
 
-## Unreleased
+## v2.0.0-rc.1
+
+- Move the public Go module and imports to the canonical `/v2` path.
+- Inject platform-neutral evidence sources and verifiers into aTLS, and move
+  Cocos-specific composition to its own nested integration module.
+- Add experimental direct SNP and TDX `v0.1.0` modules and harden signed EAT,
+  CoRIM, and legacy appraisal compatibility paths.
+- Add macOS and Linux release gates for the ASB core, nested modules, Cocos
+  development workspace, signed tags, and `GOWORK=off` operation.
 
 - Reject typed-nil replay, trust-source, and attestation implementations as
   missing configuration; built-in replay caches now fail closed on nil
@@ -11,6 +19,9 @@
   bind its reference outcome record to the accepted identity projection.
 - Document `INDETERMINATE` post-acceptance outcomes and authenticated
   reconciliation without blind retry.
+
+This release candidate does not assert production readiness for the SNP or TDX
+modules or the Cocos integration. Live hardware qualification is incomplete.
 
 ## v1.1.0
 
