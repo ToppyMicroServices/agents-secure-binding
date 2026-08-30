@@ -136,7 +136,7 @@ jobs:
               root) run_root_gate ;;
               snp) run_nested_gate snp ;;
               tdx) run_nested_gate tdx ;;
-              cocos) run_cocos_development_gate ;;
+              cocos) run_cocos_release_gate ;;
               *)
                 echo "unsupported pre-tag target: $1" >&2
                 return 1
