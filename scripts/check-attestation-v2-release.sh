@@ -32,3 +32,4 @@ fi
 
 GOWORK=off go list ./... >/dev/null
 GOWORK=off go test ./...
+"$repo_root/scripts/check-attestation-vulnerabilities.sh" root

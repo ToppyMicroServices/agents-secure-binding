@@ -37,3 +37,4 @@ GOWORK=off go mod tidy -diff
 GOWORK=off go mod verify
 GOWORK=off go list ./... >/dev/null
 GOWORK=off go test ./...
+"$repo_root/scripts/check-attestation-vulnerabilities.sh" cocos
