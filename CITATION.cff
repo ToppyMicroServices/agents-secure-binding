@@ -5,10 +5,10 @@ type: software
 authors:
   - family-names: "Okutomi"
     given-names: "Akira"
-version: "1.1.1"
-date-released: "2026-08-04"
+version: "2.0.0-rc.1"
+date-released: "2026-08-30"
 repository-code: "https://github.com/ToppyMicroServices/agents-secure-binding"
-url: "https://github.com/ToppyMicroServices/agents-secure-binding/releases/tag/v1.1.1"
+url: "https://github.com/ToppyMicroServices/agents-secure-binding/releases/tag/v2.0.0-rc.1"
 license: "Apache-2.0"
 abstract: >
   A security-hardening profile and Go implementation helpers for binding

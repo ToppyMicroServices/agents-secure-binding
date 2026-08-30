@@ -28,6 +28,12 @@ non-Split-Knowledge protected-change consumer. See
 [`docs/API_COMPATIBILITY.md`](docs/API_COMPATIBILITY.md) and
 [`docs/production-deployment-profile.md`](docs/production-deployment-profile.md).
 
+Release `v2.0.0-rc.1` is a prerelease for the breaking Go module migration and
+the platform-neutral attestation boundary. The direct SNP and TDX modules and
+the Cocos integration remain experimental. Live hardware qualification is
+incomplete, and this prerelease does not make a production-readiness claim for
+them. See [`docs/attestation-module-boundary.md`](docs/attestation-module-boundary.md).
+
 ## Secure LLM-to-LLM Conversation
 
 The product-candidate `llm-conversation` workflow connects two separately
