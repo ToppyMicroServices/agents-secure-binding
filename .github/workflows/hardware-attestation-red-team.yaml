@@ -11,12 +11,20 @@ on:
         description: "Hardware attestation platform"
         required: true
         type: choice
-        default: auto
+        default: snp
         options:
-          - auto
           - snp
-          - snp-vtpm
           - tdx
+      corim_policy_path:
+        description: "Absolute path to the runner's CoRIM policy"
+        required: true
+      platform_policy_path:
+        description: "Absolute path to the runner's go-sev/go-tdx policy JSON"
+        required: true
+      corim_public_key_path:
+        description: "Optional absolute path to the signed-CoRIM public key"
+        required: false
+        default: ""
       expected_host_data_hex:
         description: "Optional SEV-SNP HostData value, hex encoded"
         required: false
@@ -47,15 +55,20 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: 1.26.6
-          cache-dependency-path: go.sum
+          cache-dependency-path: integrations/cocos/go.sum
 
-      - name: Run hardware attestation replay gate
+      - name: Run full hardware attestation module gate
+        working-directory: integrations/cocos
         env:
           ASB_ATTESTATION_PLATFORM: ${{ inputs.platform }}
           ASB_EXPECTED_HOST_DATA_HEX: ${{ inputs.expected_host_data_hex }}
           ASB_REQUIRE_KERNEL_HASHES: ${{ inputs.require_kernel_hashes }}
           ASB_KERNEL_HASHES_EVIDENCE: ${{ inputs.kernel_hashes_evidence }}
-          GOTOOLCHAIN: go1.26.0+auto
+          ASB_CORIM_POLICY_PATH: ${{ inputs.corim_policy_path }}
+          ASB_PLATFORM_POLICY_PATH: ${{ inputs.platform_policy_path }}
+          ASB_CORIM_PUBLIC_KEY_PATH: ${{ inputs.corim_public_key_path }}
+          GOWORK: "off"
+          GOTOOLCHAIN: go1.26.6+auto
         run: |
           set -euo pipefail
 
@@ -65,7 +78,14 @@ jobs:
           args=(
             "--platform" "${ASB_ATTESTATION_PLATFORM}"
             "--evidence-dir" "${evidence_dir}"
+            "--corim-policy" "${ASB_CORIM_POLICY_PATH}"
+            "--platform-policy" "${ASB_PLATFORM_POLICY_PATH}"
+            "--require-full-verification"
           )
+
+          if [[ -n "${ASB_CORIM_PUBLIC_KEY_PATH}" ]]; then
+            args+=("--corim-public-key" "${ASB_CORIM_PUBLIC_KEY_PATH}")
+          fi
 
           if [[ -n "${ASB_EXPECTED_HOST_DATA_HEX}" ]]; then
             args+=("--expected-host-data-hex" "${ASB_EXPECTED_HOST_DATA_HEX}")

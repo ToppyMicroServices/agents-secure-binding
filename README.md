@@ -102,12 +102,19 @@ slice.
   revocation, attestation, distributed replay, and exact action binding.
 - `docs/azure-sev-snp-attestation-bridge.md`: experimental Azure Attestation
   token-to-ASB bridge boundary and live confidential-VM qualification.
+- `docs/attestation-module-boundary.md`: platform-neutral ASB boundary,
+  separate SNP/TDX modules, Cocos integration, and test lanes.
+- `docs/attestation-module-migration-v2.md`: v2 API and release-order migration.
 - `docs/redis-failover-runbook.md`: private multi-node replay topology,
   replication acknowledgement, and real failover gate.
 - `formal/`: ProVerif and TLA+ models, recorded results, and
   model-to-implementation traceability.
 - `pkg/clients`, `pkg/atls`, and `pkg/atls/identitypolicy`: Direct-Agent
   acceptance implementation.
+- `modules/attestation/snp` and `modules/attestation/tdx`: independent,
+  experimental `v0.x` hardware appraisers. They are not production-qualified.
+- `integrations/cocos`: experimental Cocos evidence and compatibility
+  composition outside the ASB root module.
 - `pkg/production`: supported attested and software-only fail-closed
   compositions, plus TLS Redis/Valkey replay and shared operation/result
   adapters.
@@ -338,7 +345,7 @@ go test ./pkg/agtp ./pkg/agtp/gatewayroute
 Focused Direct-Agent red-team check:
 
 ```sh
-GOTOOLCHAIN=go1.26.0+auto go test -v -race -count=1 \
+GOTOOLCHAIN=go1.26.6+auto go test -v -race -count=1 \
   ./pkg/atls/identitypolicy \
   ./pkg/clients
 ```
