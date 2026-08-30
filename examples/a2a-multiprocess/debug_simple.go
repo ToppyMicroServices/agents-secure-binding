@@ -14,7 +14,7 @@ import (
 const debugSimpleWarning = "WARNING: --debug-simple is for LOCAL DEBUGGING ONLY. It uses signed SIMULATED attestation evidence; no SNP, TDX, TPM, or vTPM evidence is collected or verified. ASB role endpoints remain loopback-only, and plaintext HTTP is permitted only for loopback LLM endpoints. This run is not evidence of confidential execution or production readiness."
 
 func prepareDebugSimple(opts options) (options, error) {
-	if opts.role != "orchestrator" {
+	if opts.role != roleOrchestrator {
 		return opts, fmt.Errorf("--debug-simple requires --role=orchestrator")
 	}
 	if opts.deploymentConfig != "" {

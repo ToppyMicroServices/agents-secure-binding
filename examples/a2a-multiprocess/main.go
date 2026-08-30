@@ -94,7 +94,7 @@ func runMain() int {
 
 func parseFlags() options {
 	var opts options
-	flag.StringVar(&opts.role, "role", "orchestrator", "role: orchestrator, bootstrap, manager, attester, verifier, replay, agent-b, agent-a, or verify-evidence")
+	flag.StringVar(&opts.role, "role", roleOrchestrator, "role: orchestrator, bootstrap, manager, attester, verifier, replay, agent-b, agent-a, or verify-evidence")
 	flag.StringVar(&opts.workflow, "workflow", workflowSecurityTest, "workflow: security-test or llm-conversation")
 	flag.StringVar(&opts.stateDir, "state-dir", "", "state directory containing role-specific credentials and replay state")
 	flag.StringVar(&opts.listen, "listen", "127.0.0.1:0", "server listen address")
@@ -149,7 +149,7 @@ func runRole(ctx context.Context, opts options, out outputWriter) error {
 		}
 		deployment = &loaded
 		opts = applyMultiHostDeployment(opts, loaded)
-		if opts.role == "orchestrator" {
+		if opts.role == roleOrchestrator {
 			return fmt.Errorf("multi-host deployment config is used with explicit roles, not the loopback orchestrator")
 		}
 	}
@@ -167,7 +167,7 @@ func runRole(ctx context.Context, opts options, out outputWriter) error {
 		return fmt.Errorf("unsupported result format %q", opts.reportFormat)
 	}
 	switch opts.role {
-	case "orchestrator":
+	case roleOrchestrator:
 		return runOrchestrator(ctx, opts, out)
 	case "bootstrap":
 		if deployment != nil {
