@@ -6,7 +6,7 @@ require (
 	github.com/ToppyMicroServices/agents-secure-binding/modules/attestation/snp v0.1.1
 	github.com/ToppyMicroServices/agents-secure-binding/modules/attestation/tdx v0.1.2
 	github.com/ToppyMicroServices/agents-secure-binding/v2 v2.0.0-rc.2
-	github.com/caarlos0/env/v11 v11.4.0
+	github.com/caarlos0/env/v11 v11.4.1
 	github.com/fatih/color v1.18.0
 	github.com/go-kit/kit v0.13.0
 	github.com/google/go-sev-guest v0.14.1
