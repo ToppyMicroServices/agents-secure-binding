@@ -32,6 +32,8 @@ const (
 	TDXMRSEAMMKey              uint64 = 0x2001
 	TDXRTMR0MKey               uint64 = 0x2010
 	maximumTDXRuntimeRegisters        = 4
+	platformSNP                       = "snp"
+	platformTDX                       = "tdx"
 )
 
 // Legacy TDX Defaults.
@@ -104,11 +106,11 @@ func GenerateCoRIM(opts Options) ([]byte, error) {
 
 // applyDefaults applies platform-specific defaults to options.
 func applyDefaults(opts *Options) {
-	if opts.Platform == "snp" {
+	if opts.Platform == platformSNP {
 		if opts.Measurement == "" {
 			opts.Measurement = SNPDefaultMeasurement
 		}
-	} else if opts.Platform == "tdx" {
+	} else if opts.Platform == platformTDX {
 		if opts.Measurement == "" {
 			opts.Measurement = TDXDefaultMrTd
 		}
@@ -195,14 +197,14 @@ func createReferenceValue(opts Options) (*comid.ReferenceValue, error) {
 
 	// Initialize measurements slice with the platform's primary measurement.
 	refVal.Measurements = comid.Measurements{*mval}
-	if opts.Platform == "snp" {
+	if opts.Platform == platformSNP {
 		if err := addSNPReferenceValues(refVal, opts); err != nil {
 			return nil, err
 		}
 	}
 
 	// Platform-specific additions
-	if opts.Platform == "tdx" {
+	if opts.Platform == platformTDX {
 		if opts.SVN != 0 {
 			return nil, fmt.Errorf("TDX scalar SVN is unsupported; use the platform policy's 16-byte minimum_tee_tcb_svn")
 		}
@@ -250,9 +252,9 @@ func createReferenceValue(opts Options) (*comid.ReferenceValue, error) {
 
 func mainMeasurementKey(platform string) (uint64, error) {
 	switch platform {
-	case "snp":
+	case platformSNP:
 		return SNPMeasurementMKey, nil
-	case "tdx":
+	case platformTDX:
 		return TDXMRTDMKey, nil
 	default:
 		return 0, fmt.Errorf("unsupported CoRIM platform %q", platform)
@@ -310,7 +312,7 @@ func newRawValueMeasurement(key uint64, raw []byte) (*comid.Measurement, error) 
 
 func platformMeasurementAlgorithm(platform string) (uint64, error) {
 	switch platform {
-	case "snp", "tdx":
+	case platformSNP, platformTDX:
 		// SNP MEASUREMENT and the TDX MRTD/RTMR fields are SHA-384 values.
 		return swid.Sha384, nil
 	default:
