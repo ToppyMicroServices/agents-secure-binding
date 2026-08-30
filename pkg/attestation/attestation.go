@@ -30,8 +30,6 @@ const (
 	azureApiVersion  = "2021-02-01"
 )
 
-var AttestationPolicyPath string
-
 type ccCheck struct {
 	checkFunc func() bool
 	platform  PlatformType

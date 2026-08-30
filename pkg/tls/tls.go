@@ -9,7 +9,6 @@ import (
 	"os"
 
 	"github.com/ToppyMicroServices/agents-secure-binding/v2/internal/errors"
-	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/attestation"
 )
 
 // Security represents the type of TLS security configuration.
@@ -44,10 +43,9 @@ func (s Security) String() string {
 const AttestationReportSize = 0x4A0
 
 var (
-	ErrFailedToLoadClientCertKey  = errors.New("failed to load client certificate and key")
-	ErrFailedToLoadRootCA         = errors.New("failed to load root ca file")
-	ErrMissingRootCA              = errors.New("server CA file is required")
-	errAttestationPolicyIrregular = errors.New("attestation policy file is not a regular file")
+	ErrFailedToLoadClientCertKey = errors.New("failed to load client certificate and key")
+	ErrFailedToLoadRootCA        = errors.New("failed to load root ca file")
+	ErrMissingRootCA             = errors.New("server CA file is required")
 )
 
 // Result contains the result of TLS configuration.
@@ -86,11 +84,10 @@ func LoadBasicConfig(serverCAFile, clientCert, clientKey string) (*Result, error
 	return &Result{Config: tlsConfig, Security: security}, nil
 }
 
-// LoadATLSConfig configures Attested TLS.
-func LoadATLSConfig(attestationPolicy, serverCAFile, clientCert, clientKey string) (*Result, error) {
-	if err := validateRegularFile(attestationPolicy); err != nil {
-		return nil, err
-	}
+// LoadASBConfig configures the TLS 1.3 transport consumed by Agents Secure
+// Binding. Platform attestation policy is supplied separately by the injected
+// attestation module.
+func LoadASBConfig(serverCAFile, clientCert, clientKey string) (*Result, error) {
 	if serverCAFile == "" {
 		return nil, ErrMissingRootCA
 	}
@@ -100,7 +97,6 @@ func LoadATLSConfig(attestationPolicy, serverCAFile, clientCert, clientKey strin
 		return nil, err
 	}
 
-	attestation.AttestationPolicyPath = attestationPolicy
 	tlsConfig := &tls.Config{
 		MinVersion: tls.VersionTLS13,
 		RootCAs:    rootCAs,
@@ -116,17 +112,6 @@ func LoadATLSConfig(attestationPolicy, serverCAFile, clientCert, clientKey strin
 	}
 
 	return &Result{Config: tlsConfig, Security: security}, nil
-}
-
-func validateRegularFile(path string) error {
-	info, err := os.Stat(path)
-	if err != nil {
-		return errors.Wrap(errors.New("failed to stat attestation policy file"), err)
-	}
-	if !info.Mode().IsRegular() {
-		return errAttestationPolicyIrregular
-	}
-	return nil
 }
 
 // loadRootCAs loads root CA certificates from a file.

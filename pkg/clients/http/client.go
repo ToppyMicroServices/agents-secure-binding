@@ -64,9 +64,13 @@ func createTransport(cfg clients.ClientConfiguration) (*http.Transport, tls.Secu
 
 	security := tls.WithoutTLS
 
-	if agcfg, ok := cfg.(*clients.AttestedClientConfig); ok && agcfg.AttestedTLS {
-		result, err := tls.LoadATLSConfig(
-			agcfg.AttestationPolicy,
+	if agcfg, ok := clients.AsAttestedClientConfig(cfg); ok && agcfg == nil {
+		return nil, security, clients.ErrNilAttestedClientConfig
+	} else if ok && agcfg.AttestedTLS {
+		if !agcfg.AttestationVerificationPolicy.RequiresAttestation() {
+			return nil, security, clients.ErrMissingAttestationVerifier
+		}
+		result, err := tls.LoadASBConfig(
 			agcfg.ServerCAFile,
 			agcfg.ClientCert,
 			agcfg.ClientKey,
@@ -74,6 +78,7 @@ func createTransport(cfg clients.ClientConfiguration) (*http.Transport, tls.Secu
 		if err != nil {
 			return nil, security, err
 		}
+		result.Config.ServerName = agcfg.ServerName
 
 		atlsConfig, err := buildATLSClientConfig(agcfg, result.Config)
 		if err != nil {
@@ -83,6 +88,9 @@ func createTransport(cfg clients.ClientConfiguration) (*http.Transport, tls.Secu
 		transport.DialTLSContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
 			dialNetwork, target := httpDialTarget(network, addr)
 			return atls.DialContext(ctx, dialNetwork, target, atlsConfig)
+		}
+		transport.DialContext = func(context.Context, string, string) (net.Conn, error) {
+			return nil, clients.ErrAttestedTLSRequiresHTTPS
 		}
 		security = result.Security
 	} else {
@@ -94,6 +102,7 @@ func createTransport(cfg clients.ClientConfiguration) (*http.Transport, tls.Secu
 		}
 
 		if result.Security != tls.WithoutTLS {
+			result.Config.ServerName = conf.ServerName
 			transport.TLSClientConfig = result.Config
 		}
 
@@ -104,12 +113,15 @@ func createTransport(cfg clients.ClientConfiguration) (*http.Transport, tls.Secu
 }
 
 func buildATLSClientConfig(agcfg *clients.AttestedClientConfig, baseTLSConfig *stdtls.Config) (*atls.ClientConfig, error) {
+	if !agcfg.AttestationVerificationPolicy.RequiresAttestation() {
+		return nil, clients.ErrMissingAttestationVerifier
+	}
 	tlsConfig := baseTLSConfig.Clone()
 	tlsConfig.MinVersion = stdtls.VersionTLS13
 	atlsConfig := &atls.ClientConfig{
 		TLSConfig:         tlsConfig,
 		VerifyOptions:     atls.VerifyOptionsFromTLSConfig(tlsConfig),
-		AttestationPolicy: atls.VerificationPolicyFromEvidenceVerifier(atls.NewEvidenceVerifier(agcfg.AttestationPolicy)),
+		AttestationPolicy: agcfg.AttestationVerificationPolicy,
 		IdentityPolicy:    agcfg.IdentityPolicy,
 		IdentityGrant:     agcfg.IdentityGrant,
 		IdentityBinding:   agcfg.IdentityBinding,

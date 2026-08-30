@@ -185,123 +185,31 @@ func TestLoadBasicConfig(t *testing.T) {
 	}
 }
 
-func TestLoadATLSConfig(t *testing.T) {
+func TestLoadASBConfig(t *testing.T) {
 	tmpDir := t.TempDir()
-
-	// Create test files
 	cert, key, caPEM := generateTestCertificates(t)
 
 	certFile := filepath.Join(tmpDir, "client.crt")
 	keyFile := filepath.Join(tmpDir, "client.key")
 	caFile := filepath.Join(tmpDir, "ca.crt")
-	policyFile := filepath.Join(tmpDir, "policy.json")
-
 	require.NoError(t, os.WriteFile(certFile, cert, 0o644))
 	require.NoError(t, os.WriteFile(keyFile, key, 0o644))
 	require.NoError(t, os.WriteFile(caFile, caPEM, 0o644))
-	require.NoError(t, os.WriteFile(policyFile, []byte(`{"policy": "test"}`), 0o644))
 
-	tests := []struct {
-		name              string
-		attestationPolicy string
-		serverCAFile      string
-		clientCert        string
-		clientKey         string
-		expectedSec       Security
-		expectError       bool
-		errorMsg          string
-	}{
-		{
-			name:              "ATLSWithoutCARejected",
-			attestationPolicy: policyFile,
-			serverCAFile:      "",
-			clientCert:        "",
-			clientKey:         "",
-			expectedSec:       WithoutTLS,
-			expectError:       true,
-			errorMsg:          "server CA file is required",
-		},
-		{
-			name:              "ValidMATLSConfig",
-			attestationPolicy: policyFile,
-			serverCAFile:      caFile,
-			clientCert:        "",
-			clientKey:         "",
-			expectedSec:       WithMATLS,
-			expectError:       false,
-		},
-		{
-			name:              "MATLSWithClientCert",
-			attestationPolicy: policyFile,
-			serverCAFile:      caFile,
-			clientCert:        certFile,
-			clientKey:         keyFile,
-			expectedSec:       WithMATLS,
-			expectError:       false,
-		},
-		{
-			name:              "NonexistentPolicyFile",
-			attestationPolicy: filepath.Join(tmpDir, "nonexistent.json"),
-			serverCAFile:      "",
-			clientCert:        "",
-			clientKey:         "",
-			expectedSec:       WithoutTLS,
-			expectError:       true,
-			errorMsg:          "failed to stat attestation policy file",
-		},
-		{
-			name:              "PolicyFileIsDirectory",
-			attestationPolicy: tmpDir, // Directory instead of file
-			serverCAFile:      "",
-			clientCert:        "",
-			clientKey:         "",
-			expectedSec:       WithoutTLS,
-			expectError:       true,
-			errorMsg:          "attestation policy file is not a regular file",
-		},
-		{
-			name:              "InvalidCAFile",
-			attestationPolicy: policyFile,
-			serverCAFile:      filepath.Join(tmpDir, "nonexistent.crt"),
-			clientCert:        "",
-			clientKey:         "",
-			expectedSec:       WithoutTLS,
-			expectError:       true,
-			errorMsg:          "failed to read certificate file",
-		},
-		{
-			name:              "InvalidClientCert",
-			attestationPolicy: policyFile,
-			serverCAFile:      "",
-			clientCert:        filepath.Join(tmpDir, "nonexistent.crt"),
-			clientKey:         keyFile,
-			expectedSec:       WithoutTLS,
-			expectError:       true,
-		},
-	}
+	result, err := LoadASBConfig(caFile, certFile, keyFile)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.NotNil(t, result.Config)
+	assert.Equal(t, WithMATLS, result.Security)
+	assert.Equal(t, uint16(stdtls.VersionTLS13), result.Config.MinVersion)
+	assert.NotNil(t, result.Config.RootCAs)
+	assert.False(t, result.Config.InsecureSkipVerify)
+}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result, err := LoadATLSConfig(tt.attestationPolicy, tt.serverCAFile, tt.clientCert, tt.clientKey)
-
-			if tt.expectError {
-				assert.Error(t, err)
-				if tt.errorMsg != "" {
-					assert.Contains(t, err.Error(), tt.errorMsg)
-				}
-				return
-			}
-
-			require.NoError(t, err)
-			require.NotNil(t, result)
-			assert.Equal(t, tt.expectedSec, result.Security)
-			assert.NotNil(t, result.Config)
-
-			assert.False(t, result.Config.InsecureSkipVerify)
-			assert.Equal(t, uint16(stdtls.VersionTLS13), result.Config.MinVersion)
-			assert.NotNil(t, result.Config.RootCAs)
-		})
-	}
+func TestLoadASBConfigRejectsMissingCA(t *testing.T) {
+	result, err := LoadASBConfig("", "", "")
+	assert.ErrorIs(t, err, ErrMissingRootCA)
+	assert.Nil(t, result)
 }
 
 func TestLoadRootCAs(t *testing.T) {

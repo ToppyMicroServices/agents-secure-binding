@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"strings"
 	"time"
 
 	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/atls/ea"
@@ -22,7 +23,10 @@ import (
 
 // ErrMissingObservedIdentity reports an enabled identity policy without a
 // trusted observed-identity source.
-var ErrMissingObservedIdentity = errors.New("atls: missing observed identity source")
+var (
+	ErrMissingObservedIdentity = errors.New("atls: missing observed identity source")
+	ErrMissingTLSServerName    = errors.New("atls: TLS server name is required for a non-TCP target")
+)
 
 type Conn struct {
 	*tls.Conn
@@ -67,13 +71,17 @@ func DialWithDialer(d *net.Dialer, network, address string, cfg *ClientConfig) (
 	if cfg == nil || cfg.TLSConfig == nil {
 		return nil, fmt.Errorf("atls: missing client TLS config")
 	}
+	tlsConfig, err := clientTLSConfigForTarget(network, address, cfg.TLSConfig)
+	if err != nil {
+		return nil, err
+	}
 
 	rawConn, err := d.Dial(network, address)
 	if err != nil {
 		return nil, err
 	}
 
-	tlsConn := tls.Client(rawConn, cfg.TLSConfig.Clone())
+	tlsConn := tls.Client(rawConn, tlsConfig)
 	conn, err := Client(tlsConn, cfg)
 	if err != nil {
 		_ = tlsConn.Close()
@@ -89,19 +97,42 @@ func DialContextWithDialer(ctx context.Context, d *net.Dialer, network, address 
 	if ctx == nil {
 		return nil, fmt.Errorf("atls: missing client context")
 	}
+	tlsConfig, err := clientTLSConfigForTarget(network, address, cfg.TLSConfig)
+	if err != nil {
+		return nil, err
+	}
 
 	rawConn, err := d.DialContext(ctx, network, address)
 	if err != nil {
 		return nil, err
 	}
 
-	tlsConn := tls.Client(rawConn, cfg.TLSConfig.Clone())
+	tlsConn := tls.Client(rawConn, tlsConfig)
 	conn, err := ClientContext(ctx, tlsConn, cfg)
 	if err != nil {
 		_ = tlsConn.Close()
 		return nil, err
 	}
 	return conn, nil
+}
+
+func clientTLSConfigForTarget(network, address string, source *tls.Config) (*tls.Config, error) {
+	config := source.Clone()
+	if config.ServerName != "" || config.InsecureSkipVerify {
+		return config, nil
+	}
+	if !strings.HasPrefix(network, "tcp") {
+		return nil, ErrMissingTLSServerName
+	}
+	host, _, err := net.SplitHostPort(address)
+	if err != nil {
+		return nil, fmt.Errorf("atls: derive TLS server name from %q: %w", address, err)
+	}
+	if host == "" {
+		return nil, fmt.Errorf("atls: derive TLS server name from %q: host is empty", address)
+	}
+	config.ServerName = host
+	return config, nil
 }
 
 func Client(tlsConn *tls.Conn, cfg *ClientConfig) (*Conn, error) {

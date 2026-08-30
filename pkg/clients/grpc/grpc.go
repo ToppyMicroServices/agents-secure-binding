@@ -74,9 +74,13 @@ func connect(cfg clients.ClientConfiguration) (*grpc.ClientConn, tls.Security, e
 	}
 	security := tls.WithoutTLS
 
-	if agcfg, ok := cfg.(clients.AttestedClientConfig); ok && agcfg.AttestedTLS {
-		result, err := tls.LoadATLSConfig(
-			agcfg.AttestationPolicy,
+	if agcfg, ok := clients.AsAttestedClientConfig(cfg); ok && agcfg == nil {
+		return nil, security, clients.ErrNilAttestedClientConfig
+	} else if ok && agcfg.AttestedTLS {
+		if !agcfg.AttestationVerificationPolicy.RequiresAttestation() {
+			return nil, security, clients.ErrMissingAttestationVerifier
+		}
+		result, err := tls.LoadASBConfig(
 			agcfg.ServerCAFile,
 			agcfg.ClientCert,
 			agcfg.ClientKey,
@@ -84,8 +88,9 @@ func connect(cfg clients.ClientConfiguration) (*grpc.ClientConn, tls.Security, e
 		if err != nil {
 			return nil, security, err
 		}
+		result.Config.ServerName = agcfg.ServerName
 
-		atlsConfig, err := buildATLSClientConfig(agcfg, result.Config)
+		atlsConfig, err := buildATLSClientConfig(*agcfg, result.Config)
 		if err != nil {
 			return nil, security, err
 		}
@@ -105,7 +110,7 @@ func connect(cfg clients.ClientConfiguration) (*grpc.ClientConn, tls.Security, e
 		security = result.Security
 	} else {
 		conf := cfg.Config()
-		transportCreds, sec, err := loadTLSConfig(conf.ServerCAFile, conf.ClientCert, conf.ClientKey)
+		transportCreds, sec, err := loadTLSConfig(conf.ServerCAFile, conf.ClientCert, conf.ClientKey, conf.ServerName)
 		if err != nil {
 			return nil, security, err
 		}
@@ -124,6 +129,9 @@ func connect(cfg clients.ClientConfiguration) (*grpc.ClientConn, tls.Security, e
 }
 
 func buildATLSClientConfig(agcfg clients.AttestedClientConfig, baseTLSConfig *stdtls.Config) (*atls.ClientConfig, error) {
+	if !agcfg.AttestationVerificationPolicy.RequiresAttestation() {
+		return nil, clients.ErrMissingAttestationVerifier
+	}
 	tlsConfig := baseTLSConfig.Clone()
 	tlsConfig.MinVersion = stdtls.VersionTLS13
 	tlsConfig.NextProtos = []string{"h2"}
@@ -131,7 +139,7 @@ func buildATLSClientConfig(agcfg clients.AttestedClientConfig, baseTLSConfig *st
 	atlsConfig := &atls.ClientConfig{
 		TLSConfig:         tlsConfig,
 		VerifyOptions:     atls.VerifyOptionsFromTLSConfig(tlsConfig),
-		AttestationPolicy: atls.VerificationPolicyFromEvidenceVerifier(atls.NewEvidenceVerifier(agcfg.AttestationPolicy)),
+		AttestationPolicy: agcfg.AttestationVerificationPolicy,
 		IdentityPolicy:    agcfg.IdentityPolicy,
 		IdentityGrant:     agcfg.IdentityGrant,
 		IdentityBinding:   agcfg.IdentityBinding,
@@ -173,7 +181,7 @@ func dialTarget(addr string) (string, string) {
 	return "tcp", addr
 }
 
-func loadTLSConfig(serverCAFile, clientCert, clientKey string) (credentials.TransportCredentials, tls.Security, error) {
+func loadTLSConfig(serverCAFile, clientCert, clientKey, serverName string) (credentials.TransportCredentials, tls.Security, error) {
 	result, err := tls.LoadBasicConfig(serverCAFile, clientCert, clientKey)
 	if err != nil {
 		return nil, tls.WithoutTLS, err
@@ -182,6 +190,7 @@ func loadTLSConfig(serverCAFile, clientCert, clientKey string) (credentials.Tran
 	if result.Security == tls.WithoutTLS || result.Config == nil {
 		return insecure.NewCredentials(), result.Security, nil
 	}
+	result.Config.ServerName = serverName
 
 	return credentials.NewTLS(result.Config), result.Security, nil
 }

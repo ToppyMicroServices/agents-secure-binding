@@ -18,6 +18,7 @@ import (
 	"testing"
 	"time"
 
+	eaattestation "github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/atls/eaattestation"
 	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/atls/identitypolicy"
 	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/clients"
 	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/tls"
@@ -202,15 +203,14 @@ func TestCreateTransport_DefaultSettings(t *testing.T) {
 	assert.Nil(t, transport.TLSClientConfig)
 }
 
-func TestCreateTransport_ATLSError(t *testing.T) {
+func TestCreateTransport_ATLSRejectsMissingVerifier(t *testing.T) {
 	config := &clients.AttestedClientConfig{
 		StandardClientConfig: clients.StandardClientConfig{
 			URL:     "https://agent.example.com",
 			Timeout: 60 * time.Second,
 		},
-		AttestationPolicy: "invalid",
-		AttestedTLS:       true,
-		ProductName:       "Milan",
+		AttestedTLS: true,
+		ProductName: "Milan",
 	}
 
 	transport, security, err := createTransport(config)
@@ -218,18 +218,50 @@ func TestCreateTransport_ATLSError(t *testing.T) {
 	assert.Error(t, err)
 	assert.Nil(t, transport)
 	assert.Equal(t, tls.WithoutTLS, security)
-	assert.Contains(t, err.Error(), "failed to stat attestation policy")
+	assert.ErrorIs(t, err, clients.ErrMissingAttestationVerifier)
+}
+
+func TestCreateTransport_ATLSValueCannotBypassVerifier(t *testing.T) {
+	config := clients.AttestedClientConfig{
+		StandardClientConfig: clients.StandardClientConfig{URL: "https://agent.example.com"},
+		AttestedTLS:          true,
+	}
+
+	transport, security, err := createTransport(config)
+	assert.ErrorIs(t, err, clients.ErrMissingAttestationVerifier)
+	assert.Nil(t, transport)
+	assert.Equal(t, tls.WithoutTLS, security)
+}
+
+func TestCreateTransport_ATLSRejectsPlainHTTP(t *testing.T) {
+	config := &clients.AttestedClientConfig{
+		StandardClientConfig: clients.StandardClientConfig{
+			URL:          "http://example.invalid",
+			ServerCAFile: createHTTPTestCAFile(t),
+		},
+		AttestedTLS:                   true,
+		AttestationVerificationPolicy: httpAttestationVerificationPolicy(),
+	}
+	transport, security, err := createTransport(config)
+	assert.NoError(t, err)
+	assert.Equal(t, tls.WithMATLS, security)
+
+	request, err := http.NewRequest(http.MethodGet, config.URL, nil)
+	assert.NoError(t, err)
+	response, err := transport.RoundTrip(request)
+	assert.Nil(t, response)
+	assert.ErrorIs(t, err, clients.ErrAttestedTLSRequiresHTTPS)
+}
+
+func TestCreateTransport_RejectsNilAttestedConfig(t *testing.T) {
+	var config *clients.AttestedClientConfig
+	transport, security, err := createTransport(config)
+	assert.ErrorIs(t, err, clients.ErrNilAttestedClientConfig)
+	assert.Nil(t, transport)
+	assert.Equal(t, tls.WithoutTLS, security)
 }
 
 func TestCreateTransport_ATLSCustomRequestContext(t *testing.T) {
-	policyFile, err := os.CreateTemp("", "attestation_policy.json")
-	assert.NoError(t, err)
-	_, err = policyFile.WriteString("{}")
-	assert.NoError(t, err)
-	assert.NoError(t, policyFile.Close())
-	t.Cleanup(func() {
-		_ = os.Remove(policyFile.Name())
-	})
 	caFile := createHTTPTestCAFile(t)
 
 	config := &clients.AttestedClientConfig{
@@ -238,9 +270,9 @@ func TestCreateTransport_ATLSCustomRequestContext(t *testing.T) {
 			Timeout:      60 * time.Second,
 			ServerCAFile: caFile,
 		},
-		AttestationPolicy:            policyFile.Name(),
-		AttestedTLS:                  true,
-		AttestationRequestContextHex: "01020304",
+		AttestedTLS:                   true,
+		AttestationVerificationPolicy: httpAttestationVerificationPolicy(),
+		AttestationRequestContextHex:  "01020304",
 	}
 
 	transport, security, err := createTransport(config)
@@ -275,6 +307,7 @@ func TestBuildATLSClientConfigCopiesIdentityBindingInputs(t *testing.T) {
 	replay := newHTTPReplayCache()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	agcfg := &clients.AttestedClientConfig{
+		AttestationVerificationPolicy: httpAttestationVerificationPolicy(),
 		IdentityPolicy: identitypolicy.Policy{
 			Require:  identitypolicy.Requirements{L3: true},
 			Expected: identitypolicy.Values{Service: "payments"},
@@ -288,6 +321,7 @@ func TestBuildATLSClientConfigCopiesIdentityBindingInputs(t *testing.T) {
 	atlsConfig, err := buildATLSClientConfig(agcfg, &stdtls.Config{})
 
 	assert.NoError(t, err)
+	assert.Equal(t, agcfg.AttestationVerificationPolicy, atlsConfig.AttestationPolicy)
 	assert.Equal(t, agcfg.IdentityPolicy, atlsConfig.IdentityPolicy)
 	assert.Same(t, grant, atlsConfig.IdentityGrant)
 	assert.Same(t, binding, atlsConfig.IdentityBinding)
@@ -297,6 +331,7 @@ func TestBuildATLSClientConfigCopiesIdentityBindingInputs(t *testing.T) {
 
 func TestBuildATLSClientConfigWiresAGTPObservedIdentity(t *testing.T) {
 	agcfg := &clients.AttestedClientConfig{
+		AttestationVerificationPolicy: httpAttestationVerificationPolicy(),
 		IdentityPolicy: identitypolicy.Policy{
 			Require:  identitypolicy.Requirements{L3: true},
 			Expected: identitypolicy.Values{Service: "payments"},
@@ -325,14 +360,6 @@ func TestBuildATLSClientConfigWiresAGTPObservedIdentity(t *testing.T) {
 }
 
 func TestCreateTransport_ATLSInvalidRequestContext(t *testing.T) {
-	policyFile, err := os.CreateTemp("", "attestation_policy.json")
-	assert.NoError(t, err)
-	_, err = policyFile.WriteString("{}")
-	assert.NoError(t, err)
-	assert.NoError(t, policyFile.Close())
-	t.Cleanup(func() {
-		_ = os.Remove(policyFile.Name())
-	})
 	caFile := createHTTPTestCAFile(t)
 
 	config := &clients.AttestedClientConfig{
@@ -341,9 +368,9 @@ func TestCreateTransport_ATLSInvalidRequestContext(t *testing.T) {
 			Timeout:      60 * time.Second,
 			ServerCAFile: caFile,
 		},
-		AttestationPolicy:            policyFile.Name(),
-		AttestedTLS:                  true,
-		AttestationRequestContextHex: "xyz",
+		AttestedTLS:                   true,
+		AttestationVerificationPolicy: httpAttestationVerificationPolicy(),
+		AttestationRequestContextHex:  "xyz",
 	}
 
 	transport, security, err := createTransport(config)
@@ -355,6 +382,16 @@ func TestCreateTransport_ATLSInvalidRequestContext(t *testing.T) {
 }
 
 type httpReplayCache struct{}
+
+type httpAcceptEvidenceVerifier struct{}
+
+func (httpAcceptEvidenceVerifier) VerifyEvidence([]byte, eaattestation.EvidenceBinding) error {
+	return nil
+}
+
+func httpAttestationVerificationPolicy() eaattestation.VerificationPolicy {
+	return eaattestation.VerificationPolicy{EvidenceVerifier: httpAcceptEvidenceVerifier{}}
+}
 
 func newHTTPReplayCache() *httpReplayCache {
 	return &httpReplayCache{}

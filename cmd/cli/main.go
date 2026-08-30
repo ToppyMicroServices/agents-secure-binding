@@ -16,7 +16,6 @@ import (
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
-	cmd "github.com/virtee/sev-snp-measure-go/sevsnpmeasure/cmd"
 )
 
 const (
@@ -146,7 +145,6 @@ func main() {
 	attestationCmd.AddCommand(cliSVC.NewValidateAttestationValidationCmd())
 
 	// measure.
-	rootCmd.AddCommand(cmd.NewRootCmd())
 	rootCmd.AddCommand(cliSVC.NewMeasureCmd(cfg.IgvmBinaryPath))
 
 	// Flags

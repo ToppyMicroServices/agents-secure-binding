@@ -104,7 +104,7 @@ func TestAgentClientIntegration(t *testing.T) {
 			err: errors.New("agent service is unavailable"),
 		},
 		{
-			name: "invalid config, missing AttestationPolicy with aTLS",
+			name: "invalid config, missing attestation verifier with aTLS",
 			config: clients.AttestedClientConfig{
 				StandardClientConfig: clients.StandardClientConfig{
 					URL:     testServer.listenAddr,
@@ -112,7 +112,7 @@ func TestAgentClientIntegration(t *testing.T) {
 				},
 				AttestedTLS: true,
 			},
-			err: errors.New("failed to stat attestation policy file"),
+			err: clients.ErrMissingAttestationVerifier,
 		},
 	}
 
