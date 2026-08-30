@@ -41,7 +41,8 @@ const (
 	defaultHTTPRequestTimeout = 20 * time.Second
 	maxCollateralBytes        = 16 << 20
 	tdxDebugAttribute         = uint64(1)
-	intelPCSHost              = "api.trustedservices.intel.com"
+	intelPCSAPIHost           = "api.trustedservices.intel.com"
+	intelPCSCertificatesHost  = "certificates.trustedservices.intel.com"
 )
 
 // RuntimeOptions permits deterministic collateral injection in tests and
@@ -202,8 +203,9 @@ func validatePCSURL(parsed *url.URL) error {
 	if parsed == nil || parsed.Scheme != "https" || parsed.Host == "" {
 		return fmt.Errorf("TDX collateral URL must use HTTPS")
 	}
-	if !strings.EqualFold(parsed.Hostname(), intelPCSHost) {
-		return fmt.Errorf("TDX collateral URL host must be %s", intelPCSHost)
+	host := strings.ToLower(parsed.Hostname())
+	if host != intelPCSAPIHost && host != intelPCSCertificatesHost {
+		return fmt.Errorf("TDX collateral URL host is not an approved Intel PCS origin")
 	}
 	if port := parsed.Port(); port != "" && port != "443" {
 		return fmt.Errorf("TDX collateral URL port must be 443")
