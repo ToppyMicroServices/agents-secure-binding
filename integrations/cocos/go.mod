@@ -4,7 +4,7 @@ go 1.26.0
 
 require (
 	github.com/ToppyMicroServices/agents-secure-binding/modules/attestation/snp v0.1.0
-	github.com/ToppyMicroServices/agents-secure-binding/modules/attestation/tdx v0.1.0
+	github.com/ToppyMicroServices/agents-secure-binding/modules/attestation/tdx v0.1.1
 	github.com/ToppyMicroServices/agents-secure-binding/v2 v2.0.0-rc.1
 	github.com/caarlos0/env/v11 v11.4.0
 	github.com/fatih/color v1.18.0

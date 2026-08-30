@@ -36,11 +36,12 @@ The moved runtime command reads `ASB_ATTESTATION_PLATFORM` (`snp`, `tdx`,
 vTPM and cloud-metadata signals; if both direct devices appear, startup fails
 until one is selected explicitly.
 
-## Development wiring
+## Dependency and development wiring
 
-The local `replace` directives in this module's `go.mod` are prepublication
-monorepo wiring only. They must not be present in a tagged integration release.
-They allow the integration to be tested before the root ASB v2 release exists.
+This module resolves published ASB v2, SNP, and TDX module versions without
+local `replace` directives. Repository development may use the root `go.work`,
+but release checks run with `GOWORK=off` so the nested module is verified
+independently.
 
 Run the hardware-independent tests with the workspace disabled:
 
@@ -62,16 +63,17 @@ packaging inputs and are not built by the ASB root `make` target.
 These tests use deterministic fixtures and do not access `/dev/sev-guest`,
 `/dev/tdx_guest`, a TPM, AMD KDS, or Intel PCS.
 
-## Release order
+## Remaining release steps
 
-1. Test and tag `modules/attestation/snp` and `modules/attestation/tdx` as
-   experimental `v0.x` modules.
-2. Release the platform-neutral ASB root module as `v2` without a dependency on
-   this integration or either hardware module.
-3. Replace the three local directives here with the released ASB, SNP, and TDX
-   versions, then run `GOWORK=off go mod verify`, `go test -race ./...`, and
-   `go vet ./...`.
-4. Tag this module with the directory prefix, for example
-   `integrations/cocos/v0.1.0`.
+The first Cocos tag uses ASB `v2.0.0-rc.1`, SNP `v0.1.0`, and TDX `v0.1.1`.
+After these versions are recorded in `go.mod` and `go.sum`:
 
-Hardware qualification remains a separate, platform-specific release gate.
+1. Pass `make check-cocos-release` and pull-request CI.
+2. Merge the dependency update.
+3. Run the manual `Attestation Release Gate` with target `cocos` on the exact
+   merged commit and confirm that it succeeds.
+4. Sign and push `integrations/cocos/v0.1.0`.
+5. Wait for the tag-triggered Cocos gate before creating a release.
+
+The Cocos tag remains experimental. It does not establish live SNP or TDX
+qualification or production readiness.
