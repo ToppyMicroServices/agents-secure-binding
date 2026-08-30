@@ -34,6 +34,53 @@ the Cocos integration remain experimental. Live hardware qualification is
 incomplete, and this prerelease does not make a production-readiness claim for
 them. See [`docs/attestation-module-boundary.md`](docs/attestation-module-boundary.md).
 
+## Mac and Local Debug Run
+
+For a short local run on macOS, use the dedicated target. The explicit binary
+form is equivalent:
+
+```sh
+make mac-debug-a2a
+
+# Equivalent explicit form:
+make a2a-test
+./build/asb-a2a-test --debug-simple
+```
+
+With no workflow override, `--debug-simple` runs the existing eight-scenario
+security-test suite through loopback-only role endpoints. It retains mutual
+TLS, exact session and request binding, signed attestation-result verification,
+and one-shot replay handling. The Attester evidence is signed by a demo key and
+clearly labeled `SIMULATED`; the signature exercises the evidence-binding path
+but does not turn the evidence into a hardware quote.
+
+It can also call two OpenAI-compatible models running on loopback:
+
+```sh
+./build/asb-a2a-test --debug-simple \
+  --workflow llm-conversation \
+  --prompt-file ./prompt.txt \
+  --agent-a-llm-url http://127.0.0.1:11434 \
+  --agent-a-llm-model model-a \
+  --agent-b-llm-url http://127.0.0.1:11434 \
+  --agent-b-llm-model model-b
+```
+
+Both model URLs must use `http://` and a loopback hostname. Proxy use is
+disabled, and any resolved address outside loopback is rejected.
+
+That workflow makes one ASB-bound A-to-B request. Agent B's reply returns on
+the authenticated TLS connection but is not a separately ASB-bound reverse
+request.
+
+By default, the run creates ephemeral demo PKI and local file-backed state and
+removes them when it exits. If `--state-dir` is supplied, the test keys and
+replay state remain there for debugging and must be treated as disposable test
+material. The run collects no SNP, TDX, TPM, or vTPM evidence, does not place
+either Agent in confidential execution, and makes no production or
+hardware-qualification claim. Do not use production data or credentials with
+this debug mode.
+
 ## Secure LLM-to-LLM Conversation
 
 The product-candidate `llm-conversation` workflow connects two separately

@@ -59,6 +59,7 @@ type options struct {
 	redisMaxReplayTTL        time.Duration
 	redisReplicaAcks         int
 	redisReplicationTimeout  time.Duration
+	debugSimple              bool
 	showVersion              bool
 }
 
@@ -72,6 +73,15 @@ func runMain() int {
 		fmt.Printf("asb-a2a-test %s (%s)\n", version, commit)
 		return 0
 	}
+	if opts.debugSimple {
+		var err error
+		opts, err = prepareDebugSimple(opts)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "asb-a2a-test (%s) failed: %v\n", opts.role, err)
+			return 1
+		}
+		fmt.Fprintln(os.Stderr, debugSimpleWarning)
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -84,7 +94,7 @@ func runMain() int {
 
 func parseFlags() options {
 	var opts options
-	flag.StringVar(&opts.role, "role", "orchestrator", "role: orchestrator, bootstrap, manager, attester, verifier, replay, agent-b, agent-a, or verify-evidence")
+	flag.StringVar(&opts.role, "role", roleOrchestrator, "role: orchestrator, bootstrap, manager, attester, verifier, replay, agent-b, agent-a, or verify-evidence")
 	flag.StringVar(&opts.workflow, "workflow", workflowSecurityTest, "workflow: security-test or llm-conversation")
 	flag.StringVar(&opts.stateDir, "state-dir", "", "state directory containing role-specific credentials and replay state")
 	flag.StringVar(&opts.listen, "listen", "127.0.0.1:0", "server listen address")
@@ -124,6 +134,7 @@ func parseFlags() options {
 	flag.DurationVar(&opts.redisMaxReplayTTL, "redis-max-replay-ttl", 10*time.Minute, "maximum accepted replay retention")
 	flag.IntVar(&opts.redisReplicaAcks, "redis-replica-acks", 0, "replica acknowledgements required after each Redis/Valkey write")
 	flag.DurationVar(&opts.redisReplicationTimeout, "redis-replication-timeout", 0, "WAIT timeout when replica acknowledgements are required")
+	flag.BoolVar(&opts.debugSimple, "debug-simple", false, "run the local loopback simulation with explicit insecure debug opt-ins")
 	flag.BoolVar(&opts.showVersion, "version", false, "print version and exit")
 	flag.Parse()
 	return opts
@@ -138,7 +149,7 @@ func runRole(ctx context.Context, opts options, out outputWriter) error {
 		}
 		deployment = &loaded
 		opts = applyMultiHostDeployment(opts, loaded)
-		if opts.role == "orchestrator" {
+		if opts.role == roleOrchestrator {
 			return fmt.Errorf("multi-host deployment config is used with explicit roles, not the loopback orchestrator")
 		}
 	}
@@ -156,7 +167,7 @@ func runRole(ctx context.Context, opts options, out outputWriter) error {
 		return fmt.Errorf("unsupported result format %q", opts.reportFormat)
 	}
 	switch opts.role {
-	case "orchestrator":
+	case roleOrchestrator:
 		return runOrchestrator(ctx, opts, out)
 	case "bootstrap":
 		if deployment != nil {

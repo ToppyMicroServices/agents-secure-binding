@@ -67,6 +67,8 @@ jobs:
         run: go test -race -count=1 ./...
       - working-directory: modules/attestation/${{ matrix.module }}
         run: go vet ./...
+      - name: Scan module packages for vulnerabilities
+        run: ./scripts/check-attestation-vulnerabilities.sh "${{ matrix.module }}"
 
   cocos-integration:
     runs-on: ${{ matrix.os }}

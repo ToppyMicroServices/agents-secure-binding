@@ -104,6 +104,7 @@ jobs:
               go test -race -count=1 ./...
               go vet ./...
             )
+            ./scripts/check-attestation-vulnerabilities.sh "$module"
           }
 
           run_cocos_development_gate() {

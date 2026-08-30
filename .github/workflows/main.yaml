@@ -34,6 +34,22 @@ jobs:
       - name: Build
         run: make
 
+  mac-debug-a2a:
+    runs-on: macos-latest
+    needs: lint
+    timeout-minutes: 15
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: 1.26.6
+
+      - name: Run macOS debug A2A integration
+        run: GOTOOLCHAIN=go1.26.6+auto make mac-debug-a2a
+
   test:
     runs-on: ubuntu-latest
     needs: lint

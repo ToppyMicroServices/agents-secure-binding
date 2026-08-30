@@ -248,6 +248,7 @@ func TestConversationWorkflowSelectedLLMsRoundTrip(t *testing.T) {
 	}
 
 	run := exec.Command(binary,
+		"--debug-simple",
 		"--role", "orchestrator",
 		"--workflow", workflowLLMConversation,
 		"--prompt-file", promptPath,
@@ -257,7 +258,6 @@ func TestConversationWorkflowSelectedLLMsRoundTrip(t *testing.T) {
 		"--agent-b-llm-url", agentBRuntime.URL,
 		"--agent-b-llm-model", agentBModel,
 		"--agent-b-api-key-env", agentBKeyName,
-		"--allow-insecure-llm-loopback",
 		"--report", reportPath,
 	)
 	baseEnvironment := isolateSecretEnvironment(os.Environ(), "", agentAKeyName, agentBKeyName)

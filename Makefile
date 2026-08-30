@@ -27,7 +27,7 @@ define compile_service
 	-o ${BUILD_DIR}/agents-secure-binding-$(1) ./cmd/$(1)
 endef
 
-.PHONY: all $(SERVICES) a2a-test install install-a2a-test clean product-security-gate fuzz-smoke \
+.PHONY: all $(SERVICES) a2a-test mac-debug-a2a install install-a2a-test clean product-security-gate fuzz-smoke \
 	test-asb-core test-attestation-modules check-asb-core-boundary \
 	check-attestation-v2-boundary check-attestation-v2-release \
 	check-attestation-release check-cocos-release
@@ -43,6 +43,9 @@ a2a-test:
 	CGO_ENABLED=$(CGO_ENABLED) GOOS=$(A2A_GOOS) GOARCH=$(A2A_GOARCH) \
 	go build -ldflags "-s -w -X main.version=$(A2A_VERSION) -X main.commit=$(COMMIT)" \
 	-o $(BUILD_DIR)/asb-a2a-test ./examples/a2a-multiprocess
+
+mac-debug-a2a: a2a-test
+	./$(BUILD_DIR)/asb-a2a-test --debug-simple
 
 protoc:
 	protoc -I. --go_out=. --go_opt=paths=source_relative --go-grpc_out=. --go-grpc_opt=paths=source_relative agent/agent.proto

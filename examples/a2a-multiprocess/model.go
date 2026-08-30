@@ -26,6 +26,7 @@ const (
 	workflowLLMConversation  = "llm-conversation"
 	reportFormatText         = "text"
 	reportFormatJSON         = "json"
+	roleOrchestrator         = "orchestrator"
 	roleVerifyEvidence       = "verify-evidence"
 	v2EndpointRole           = "client-tls-endpoint"
 	v2InteractionType        = "agent-to-agent"
