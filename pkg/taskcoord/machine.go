@@ -215,6 +215,7 @@ func Delegate(
 		PolicyRef:             verified.PolicyRef,
 		EvidenceRef:           verified.EvidenceRef,
 		At:                    event.At,
+		Assurance:             cloneAssuranceProvenance(event.Auth.Assurance),
 	}
 	if err := nextParent.Validate(); err != nil {
 		return DelegationTransition{}, err
@@ -314,6 +315,11 @@ func validateOperation(auth AuthenticatedOperation, kind OperationKind, taskID, 
 	if at.Before(auth.IssuedAt) || !at.Before(auth.ExpiresAt) {
 		return fmt.Errorf("%w: operation is outside authorization validity window", ErrAuthenticationRequired)
 	}
+	if auth.Assurance != nil {
+		if err := auth.Assurance.Validate(); err != nil {
+			return fmt.Errorf("%w: invalid assurance provenance: %v", ErrAuthenticationRequired, err)
+		}
+	}
 	return nil
 }
 
@@ -373,6 +379,7 @@ func initialOfferRecord(def AssignmentDefinition, auth AuthenticatedOperation) T
 		ParticipantID:   auth.ParticipantID,
 		AuthorizationID: auth.AuthorizationID,
 		ProofID:         auth.ProofID,
+		Assurance:       cloneAssuranceProvenance(auth.Assurance),
 	}
 }
 
@@ -392,6 +399,7 @@ func transitionRecord(current, next Assignment, event Event) TransitionRecord {
 		AuthorizationID: event.Auth.AuthorizationID,
 		ProofID:         event.Auth.ProofID,
 		EvidenceRef:     event.EvidenceRef,
+		Assurance:       cloneAssuranceProvenance(event.Auth.Assurance),
 	}
 }
 
@@ -399,7 +407,22 @@ func cloneAssignment(in Assignment) Assignment {
 	out := in
 	out.AcceptedAt = cloneTime(in.AcceptedAt)
 	out.DueAt = cloneTime(in.DueAt)
+	out.LastTransition = cloneTransitionRecord(in.LastTransition)
 	return out
+}
+
+func cloneTransitionRecord(in TransitionRecord) TransitionRecord {
+	out := in
+	out.Assurance = cloneAssuranceProvenance(in.Assurance)
+	return out
+}
+
+func sameTransitionRecord(left, right TransitionRecord) bool {
+	leftAssurance := left.Assurance
+	rightAssurance := right.Assurance
+	left.Assurance = nil
+	right.Assurance = nil
+	return left == right && sameAssuranceProvenance(leftAssurance, rightAssurance)
 }
 
 func cloneTime(in *time.Time) *time.Time {

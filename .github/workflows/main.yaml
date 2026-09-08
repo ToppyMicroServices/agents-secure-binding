@@ -50,6 +50,46 @@ jobs:
       - name: Run macOS debug A2A integration
         run: GOTOOLCHAIN=go1.26.6+auto make mac-debug-a2a
 
+  mac-human-coordination-e2e:
+    runs-on: macos-latest
+    needs: lint
+    timeout-minutes: 15
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: 1.26.6
+
+      - name: Run macOS Human Coordination E2E
+        run: GOTOOLCHAIN=go1.26.6+auto make mac-human-coordination-e2e
+
+      - name: Validate Human Coordination evidence
+        run: |
+          jq empty build/human-coordination-e2e/evidence.json
+          jq -e '.success == true' build/human-coordination-e2e/evidence.json
+          jq -e '.mode == "debug-simple"' build/human-coordination-e2e/evidence.json
+          jq -e '.production_claim == false' build/human-coordination-e2e/evidence.json
+          jq -e '.runtime.software_only == true' build/human-coordination-e2e/evidence.json
+          jq -e '.runtime.in_process == true' build/human-coordination-e2e/evidence.json
+          jq -e '.runtime.network_calls == false' build/human-coordination-e2e/evidence.json
+          jq -e '.runtime.live_tls == false' build/human-coordination-e2e/evidence.json
+          jq -e '.runtime.hardware_attestation == false' build/human-coordination-e2e/evidence.json
+          jq -e '.runtime.external_provider == false' build/human-coordination-e2e/evidence.json
+          jq -e '.boundaries | length == 9' build/human-coordination-e2e/evidence.json
+          jq -e '[.boundaries[] | select(.classification == "external-asb") | .profile_id] == ["asb.taskcoord-human-request/v1", "asb.taskcoord-agent-relay/v1"]' build/human-coordination-e2e/evidence.json
+          jq -e 'all(.boundaries[]; (.evidence_source | length) > 0 and ((.classification == "external-asb" and (.profile_id | length) > 0) or (.classification == "trusted-internal" and ((.profile_id // "") | length) == 0)))' build/human-coordination-e2e/evidence.json
+
+      - name: Upload Human Coordination evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: human-coordination-e2e-evidence-macos
+          path: build/human-coordination-e2e/evidence.json
+          if-no-files-found: error
+          retention-days: 1
+
   test:
     runs-on: ubuntu-latest
     needs: lint
@@ -141,6 +181,16 @@ jobs:
             ./pkg/clients \
             ./pkg/production \
             ./cmd/redis-failover-redteam
+
+      - name: Run Human coordination security tests
+        run: |
+          GOWORK=off GOTOOLCHAIN=go1.26.6+auto go test -race -count=1 \
+            ./pkg/actionlifecycle \
+            ./pkg/humanrelay/... \
+            ./pkg/taskcoord/... \
+            ./pkg/production \
+            ./schemas \
+            ./examples/human-coordination-e2e
 
       - name: Run three-node discovery soak gate
         env:

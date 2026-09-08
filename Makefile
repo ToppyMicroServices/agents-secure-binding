@@ -3,6 +3,9 @@ SERVICES = manager cli attestation-service log-forwarder computation-runner egre
 DIRECT_AGENT_CORE_PKGS = ./pkg/atls/... ./pkg/clients/... ./pkg/agtp/... ./pkg/production
 ASB_CORE_PKGS = ./pkg/atls/... ./pkg/clients ./pkg/clients/http ./pkg/clients/grpc ./pkg/agtp/... ./pkg/tls
 PRODUCTION_CONSUMER_PKGS = ./examples/protected-change-consumer
+HUMAN_COORDINATION_PKGS = ./pkg/actionlifecycle ./pkg/humanrelay/... ./pkg/taskcoord/... ./pkg/production ./schemas ./examples/human-coordination-e2e
+HUMAN_COORDINATION_REDTEAM_PKGS = ./internal/strictjson ./pkg/actionlifecycle ./pkg/humanrelay/... ./pkg/operationjournal ./pkg/taskcoord/... ./pkg/production ./schemas
+HUMAN_COORDINATION_FUZZTIME ?= 2m
 CGO_ENABLED ?= 0
 GOARCH ?= amd64
 A2A_GOOS ?= $(shell go env GOOS)
@@ -30,7 +33,8 @@ endef
 .PHONY: all $(SERVICES) a2a-test mac-debug-a2a install install-a2a-test clean product-security-gate fuzz-smoke \
 	test-asb-core test-attestation-modules check-asb-core-boundary \
 	check-attestation-v2-boundary check-attestation-v2-release \
-	check-attestation-release check-cocos-release
+	check-attestation-release check-cocos-release human-coordination-gate \
+	human-coordination-red-team human-coordination-fuzz mac-human-coordination-e2e
 
 all: $(SERVICES)
 
@@ -46,6 +50,10 @@ a2a-test:
 
 mac-debug-a2a: a2a-test
 	./$(BUILD_DIR)/asb-a2a-test --debug-simple
+
+mac-human-coordination-e2e:
+	@mkdir -p build/human-coordination-e2e
+	GOWORK=off go run ./examples/human-coordination-e2e --debug-simple --report build/human-coordination-e2e/evidence.json
 
 protoc:
 	protoc -I. --go_out=. --go_opt=paths=source_relative --go-grpc_out=. --go-grpc_opt=paths=source_relative agent/agent.proto
@@ -92,8 +100,22 @@ product-security-gate:
 	go mod verify
 	GOTOOLCHAIN=go1.26.6+auto go test $(DIRECT_AGENT_CORE_PKGS)
 	GOTOOLCHAIN=go1.26.6+auto go test -v -race -count=1 ./pkg/atls/identitypolicy ./pkg/clients ./pkg/production ./cmd/redis-failover-redteam $(PRODUCTION_CONSUMER_PKGS)
+	$(MAKE) human-coordination-gate
 	$(MAKE) fuzz-smoke
 	$(GOVULNCHECK) ./...
+
+human-coordination-gate:
+	GOWORK=off GOTOOLCHAIN=go1.26.6+auto go test -race -count=1 $(HUMAN_COORDINATION_PKGS)
+
+# Bounded, hardware-independent misuse gate. Long-running fuzz campaigns use
+# human-coordination-fuzz and are intentionally not dependencies of this target.
+human-coordination-red-team:
+	GOWORK=off GOTOOLCHAIN=go1.26.6+auto go test -v -race -count=1 $(HUMAN_COORDINATION_REDTEAM_PKGS)
+
+human-coordination-fuzz:
+	GOWORK=off GOTOOLCHAIN=go1.26.6+auto go test -run '^$$' \
+		-fuzz='^FuzzHumanIngressStrictJSONDifferential$$' \
+		-fuzztime=$(HUMAN_COORDINATION_FUZZTIME) ./pkg/taskcoord/asbbinding
 
 fuzz-smoke:
 	GOTOOLCHAIN=go1.26.6+auto go test -run '^$$' -fuzz=FuzzVerifySessionIdentityJWTRejectsMalformedCompactTokens -fuzztime=10s ./pkg/agtp

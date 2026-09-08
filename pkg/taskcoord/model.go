@@ -99,9 +99,14 @@ type Reason struct {
 	Detail string        `json:"detail,omitempty"`
 }
 
-// AuthenticatedOperation is the projection of a freshly verified ASB
-// authorization. ParticipantID is the accountable principal whose authority
-// ActorID exercises; those identifiers are deliberately allowed to differ.
+// AuthenticatedOperation is a trusted application projection of one freshly
+// verified authorization. ParticipantID is the accountable principal whose
+// authority ActorID exercises; those identifiers are deliberately allowed to
+// differ. For the current Human ingress profile, this provenance means
+// gateway-asserted-for-human, not a Human-held signature. Validate checks
+// structure, not provenance. Untrusted network, RPC, queue, or plugin input
+// must reach this type only through an external ASB profile or another
+// deployment-trusted verifier.
 type AuthenticatedOperation struct {
 	ActorID             string        `json:"actor_id"`
 	ParticipantID       string        `json:"participant_id"`
@@ -116,24 +121,32 @@ type AuthenticatedOperation struct {
 	VerifierNonce       string        `json:"verifier_nonce"`
 	IssuedAt            time.Time     `json:"issued_at"`
 	ExpiresAt           time.Time     `json:"expires_at"`
+	// Assurance is verifier-derived metadata. Network callers must not supply
+	// it; nil is valid for trusted-internal projections.
+	Assurance *AssuranceProvenance `json:"assurance,omitempty"`
 }
 
 // TransitionRecord is appended atomically with an Assignment snapshot.
+// ActorID, ParticipantID, AuthorizationID, and ProofID preserve the submitting
+// Actor and attribution chain. For Human ingress, audit displays must label the
+// assurance supplied by the profile and must not relabel ProofID as a Human
+// signature.
 type TransitionRecord struct {
-	EventID         string           `json:"event_id"`
-	AssignmentID    string           `json:"assignment_id"`
-	TaskID          string           `json:"task_id"`
-	Revision        uint64           `json:"revision"`
-	Kind            OperationKind    `json:"kind"`
-	From            AssignmentStatus `json:"from,omitempty"`
-	To              AssignmentStatus `json:"to"`
-	Reason          Reason           `json:"reason"`
-	At              time.Time        `json:"at"`
-	ActorID         string           `json:"actor_id"`
-	ParticipantID   string           `json:"participant_id"`
-	AuthorizationID string           `json:"authorization_id"`
-	ProofID         string           `json:"proof_id"`
-	EvidenceRef     string           `json:"evidence_ref,omitempty"`
+	EventID         string               `json:"event_id"`
+	AssignmentID    string               `json:"assignment_id"`
+	TaskID          string               `json:"task_id"`
+	Revision        uint64               `json:"revision"`
+	Kind            OperationKind        `json:"kind"`
+	From            AssignmentStatus     `json:"from,omitempty"`
+	To              AssignmentStatus     `json:"to"`
+	Reason          Reason               `json:"reason"`
+	At              time.Time            `json:"at"`
+	ActorID         string               `json:"actor_id"`
+	ParticipantID   string               `json:"participant_id"`
+	AuthorizationID string               `json:"authorization_id"`
+	ProofID         string               `json:"proof_id"`
+	EvidenceRef     string               `json:"evidence_ref,omitempty"`
+	Assurance       *AssuranceProvenance `json:"assurance,omitempty"`
 }
 
 // Assignment is the complete durable state of one responsibility relation.
@@ -190,8 +203,8 @@ const (
 	InteractionWithdrawal InteractionKind = "WITHDRAWAL"
 )
 
-// ResponseFinality is an author's assertion about one response version. FINAL
-// does not close an interaction or fulfill an Assignment.
+// ResponseFinality is the submitting Participant's assertion about one response
+// version. FINAL does not close an interaction or fulfill an Assignment.
 type ResponseFinality string
 
 const (
@@ -217,10 +230,13 @@ type InteractionEventDefinition struct {
 	At            time.Time
 }
 
-// AuthenticatedInteraction is the projection of a freshly verified ASB
-// authorization for one exact interaction event. ParticipantID is the author
-// whose authority ActorID exercises; a Human gateway and Human therefore keep
-// distinct identifiers.
+// AuthenticatedInteraction is a trusted application projection of one freshly
+// verified authorization for an exact interaction event. ParticipantID is the
+// accountable Participant whose authority ActorID exercises; a Human gateway
+// and Human therefore keep distinct identifiers. For the current Human ingress
+// profile, this is gateway-asserted-for-human evidence, not a Human-held
+// signature. Validate checks structure, not provenance; raw untrusted input
+// must not construct this value directly.
 type AuthenticatedInteraction struct {
 	ActorID         string           `json:"actor_id"`
 	ParticipantID   string           `json:"participant_id"`
@@ -241,28 +257,34 @@ type AuthenticatedInteraction struct {
 	VerifierNonce   string           `json:"verifier_nonce"`
 	IssuedAt        time.Time        `json:"issued_at"`
 	ExpiresAt       time.Time        `json:"expires_at"`
+	// Assurance is verifier-derived metadata. Network callers must not supply
+	// it; nil is valid for trusted-internal projections.
+	Assurance *AssuranceProvenance `json:"assurance,omitempty"`
 }
 
 // InteractionEvent is an append-only question, response, correction, or
-// withdrawal. Corrections and withdrawals preserve the superseded event.
+// withdrawal. Corrections and withdrawals preserve the superseded event. Its
+// Actor and Participant provenance has the assurance of the profile that
+// produced it; the record alone does not establish a Human-held signature.
 type InteractionEvent struct {
-	Schema          string           `json:"schema"`
-	EventID         string           `json:"event_id"`
-	InteractionID   string           `json:"interaction_id"`
-	TaskID          string           `json:"task_id"`
-	AssignmentID    string           `json:"assignment_id"`
-	Kind            InteractionKind  `json:"kind"`
-	InReplyTo       string           `json:"in_reply_to,omitempty"`
-	Supersedes      string           `json:"supersedes,omitempty"`
-	Finality        ResponseFinality `json:"finality,omitempty"`
-	ContentRef      string           `json:"content_ref,omitempty"`
-	ContentDigest   string           `json:"content_digest,omitempty"`
-	At              time.Time        `json:"at"`
-	ActorID         string           `json:"actor_id"`
-	ParticipantID   string           `json:"participant_id"`
-	AuthorizationID string           `json:"authorization_id"`
-	ProofID         string           `json:"proof_id"`
-	EvidenceRef     string           `json:"evidence_ref,omitempty"`
+	Schema          string               `json:"schema"`
+	EventID         string               `json:"event_id"`
+	InteractionID   string               `json:"interaction_id"`
+	TaskID          string               `json:"task_id"`
+	AssignmentID    string               `json:"assignment_id"`
+	Kind            InteractionKind      `json:"kind"`
+	InReplyTo       string               `json:"in_reply_to,omitempty"`
+	Supersedes      string               `json:"supersedes,omitempty"`
+	Finality        ResponseFinality     `json:"finality,omitempty"`
+	ContentRef      string               `json:"content_ref,omitempty"`
+	ContentDigest   string               `json:"content_digest,omitempty"`
+	At              time.Time            `json:"at"`
+	ActorID         string               `json:"actor_id"`
+	ParticipantID   string               `json:"participant_id"`
+	AuthorizationID string               `json:"authorization_id"`
+	ProofID         string               `json:"proof_id"`
+	EvidenceRef     string               `json:"evidence_ref,omitempty"`
+	Assurance       *AssuranceProvenance `json:"assurance,omitempty"`
 }
 
 // Transition is committed atomically by a Store.
@@ -287,21 +309,25 @@ type VerifiedDelegation struct {
 	VerifiedAt            time.Time `json:"verified_at"`
 }
 
-// DelegationRecord preserves the immutable parent-child provenance edge.
+// DelegationRecord preserves the immutable parent-child provenance edge. Its
+// optional Assurance has the same verifier-derived meaning as the parent and
+// child transition records; absence means unspecified trusted-internal or
+// legacy provenance.
 type DelegationRecord struct {
-	EventID               string    `json:"event_id"`
-	DecisionID            string    `json:"decision_id"`
-	ParentAssignmentID    string    `json:"parent_assignment_id"`
-	ChildAssignmentID     string    `json:"child_assignment_id"`
-	ParentTaskID          string    `json:"parent_task_id"`
-	ChildTaskID           string    `json:"child_task_id"`
-	FromParticipantID     string    `json:"from_participant_id"`
-	ToParticipantID       string    `json:"to_participant_id"`
-	ParentAuthorityDigest string    `json:"parent_authority_digest"`
-	ChildAuthorityDigest  string    `json:"child_authority_digest"`
-	PolicyRef             string    `json:"policy_ref"`
-	EvidenceRef           string    `json:"evidence_ref"`
-	At                    time.Time `json:"at"`
+	EventID               string               `json:"event_id"`
+	DecisionID            string               `json:"decision_id"`
+	ParentAssignmentID    string               `json:"parent_assignment_id"`
+	ChildAssignmentID     string               `json:"child_assignment_id"`
+	ParentTaskID          string               `json:"parent_task_id"`
+	ChildTaskID           string               `json:"child_task_id"`
+	FromParticipantID     string               `json:"from_participant_id"`
+	ToParticipantID       string               `json:"to_participant_id"`
+	ParentAuthorityDigest string               `json:"parent_authority_digest"`
+	ChildAuthorityDigest  string               `json:"child_authority_digest"`
+	PolicyRef             string               `json:"policy_ref"`
+	EvidenceRef           string               `json:"evidence_ref"`
+	At                    time.Time            `json:"at"`
+	Assurance             *AssuranceProvenance `json:"assurance,omitempty"`
 }
 
 // DelegationTransition must be committed atomically: the parent audit event,

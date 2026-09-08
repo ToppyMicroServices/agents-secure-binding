@@ -6,6 +6,13 @@ protocol.
 
 A consolidated Japanese implementation specification is available in
 [`task-participant-v1-spec-ja.md`](task-participant-v1-spec-ja.md).
+Stable product-profile identifiers and the bilingual conformance mapping are
+maintained in the
+[Human Coordination conformance registry](human-coordination-conformance-v1.md).
+The complete reference flow can be run locally with the
+[Human Coordination debug-simple E2E](../examples/human-coordination-e2e/README.md).
+Identifier units, whitespace, case, and Unicode handling follow
+[`human-coordination-field-semantics-v1.md`](human-coordination-field-semantics-v1.md).
 
 ## Purpose
 
@@ -51,6 +58,12 @@ release accountability.
 `WAITING`, `PAUSED`, `ORPHANED`, and execution outcomes are intentionally not
 Assignment states. They belong to the Task or Action lifecycle.
 
+Under `ASB-HC-CORE-004`, `OWNER`, `ASSIGNEE`, and `REVIEWER` are responsibility
+labels, not permission grants. Assignee-owned transitions still require the
+assigned Participant, while authority to offer or revoke comes from the
+authenticated operation and verifier-local policy. Implementations must not
+infer extra permissions from a role name.
+
 ### Human waiting example
 
 When Agent A delegates work to Human B for completion tomorrow:
@@ -91,6 +104,11 @@ interaction nor changes, fulfills, or releases the Assignment. A later
 correction may supersede a final response, and other Participants may still
 append responses.
 
+Under `ASB-HC-CORE-007`, a terminal Assignment does not close its interaction
+history. Authorized questions, responses, corrections, and withdrawals may be
+appended afterward for audit or reconciliation, but no interaction append may
+change the terminal Assignment snapshot or revision.
+
 Content is not stored inline by this package. `content_ref` locates it and
 `content_digest` binds its exact bytes. A correction or withdrawal never
 overwrites the prior event, so an auditor can reconstruct response provenance.
@@ -129,20 +147,37 @@ candidate identifier, capability, channel, relay reference, and expiry only. It
 does not expose the Human Participant identifier, consent proof, Email address,
 social account, or telephone number.
 
-Human approval of a contact request produces a separate
+A broker-verified contact approval attributed to the Human produces a separate
 `HumanReachabilityGrant`. The grant is bound to the requester, purpose,
 capability, channel, and validity window and contains only an HTTPS relay
 session reference. It omits both the Human Participant identifier and the
 internal consent identifier. Approval Actor, authorization, and proof
-identifiers remain broker-internal rather than requester-facing. Either the
-Human or the requesting Agent can append an immutable grant revocation;
-withdrawing the underlying matching consent also invalidates its grants.
+identifiers remain broker-internal rather than requester-facing. This
+trusted-internal projection does not by itself declare any of the Human ingress
+assurance levels. Either the Human or the requesting Agent can append an
+immutable grant revocation; withdrawing the underlying matching consent also
+invalidates its grants.
+
+Matching consent and a reachability grant authorize the scoped contact route
+and contact metadata. They do not mean that the Human approved the exact
+message content. The relay's ASB proof binds the Agent's exact request. A
+deployment that requires Human approval of those bytes needs a separate
+authenticated, Human-produced binding to the relay `RequestDigest`; that
+approval statement is not implemented here.
 
 Participant status is re-resolved when Human matches and active grants are
 read. A Human that is no longer active is therefore omitted even when an older
 consent or grant has not yet expired. Grant reads likewise require a fresh
 `AuthenticatedReachabilityAccess` projection for the exact Agent requester and
 scope; possession of a requester identifier alone is insufficient.
+
+The relay must repeat this check under the same grant-scoped serialization
+guard immediately before external dispatch. If revocation wins, a queued
+intent becomes `CANCELED` and no provider callback occurs. If dispatch wins,
+`DISPATCHING` is durable before that callback and revocation waits. An unknown
+provider outcome remains `DISPATCHING` and is not retried blindly. A production
+adapter needs a distributed lock with fencing or a gateway-consumed one-shot
+permit to preserve this ordering across processes.
 
 For Human Participants, `identity_ref` must be an opaque resolver reference;
 public HTTP(S) profiles and direct-contact URI schemes such as `mailto:`,
@@ -198,11 +233,13 @@ sufficient.
 ## Store boundary
 
 `Store.CommitAssignment` requires revision compare-and-swap, complete snapshot
-persistence, and event deduplication in one atomic commit.
+persistence, and event deduplication in one atomic commit. Exact
+deduplication compares the complete durable record; a retry made with a fresh
+ASB proof is a different audit record and requires application-level outcome
+reconciliation.
 
-`Store.CommitDelegation` requires the parent event, child offer, and delegation
-record to be committed atomically. A production adapter should write its
-notification outbox entry in the same database transaction.
+`Store.CommitDelegation` requires the parent event, child offer, delegation
+record, and notification outbox entry to be committed atomically.
 
 `Store.AppendInteractionEvent` requires exact event-ID deduplication and
 append-only persistence. It must not modify the related Assignment snapshot or
@@ -217,9 +254,27 @@ stubs exercise kind checks, pairwise binding, exact matching, expiry,
 idempotency, and revocation, but do not implement a network directory or a
 contact transport.
 
+`NewMemoryReachabilityDirectory` uses the local wall clock.
+`NewMemoryReachabilityDirectoryWithClock` is an additive reference-test path
+for deterministic expiry checks and rejects a missing clock. Its clock must be
+verifier-controlled and must never be selected from a peer request; it does not
+add a caller-supplied time field to any profile.
+
 `MemoryStore` is an in-process application stub that exercises these contracts.
 It does not survive restart and is not evidence of database durability,
 replication, failover, or outbox delivery.
+
+`production.RedisTaskCoordStore` is a Redis/Valkey adapter candidate. It uses
+Lua commits for revision CAS, event deduplication, delegation atomicity,
+immutable Interaction append, and a transactional outbox. The outbox uses
+bounded leases and at-least-once delivery semantics, so consumers must
+deduplicate by event ID. It has been tested against a stateful TLS Redis
+protocol test double; live Redis/Valkey execution, persistence, replication,
+failover, backup, and recovery have not been qualified. When replica
+acknowledgement is configured, an idempotent mutation retry writes a same-slot
+replication barrier and runs `WAIT` on that connection before returning
+success. This narrows an unknown-write recovery gap; it does not make
+asynchronous replication linearizable or zero-loss.
 
 ## Current boundary
 
@@ -238,20 +293,64 @@ Implemented:
 - CAS and atomic delegation Store contracts;
 - concurrency-safe in-memory Store stub;
 - strict bounded JSON decoders;
+- TLS 1.3/mTLS ingress for exact gateway-asserted-for-human offers,
+  transitions, delegations, and interaction appends; delegation requires a
+  configured deployment policy verifier;
+- route-specific challenge/execute request validation and a response schema
+  for the existing `201` challenge success, `200` execute success, and public
+  error bodies;
+- a Redis/Valkey TaskCoord adapter candidate with atomic state/outbox commits,
+  bounded interaction history, and leased outbox delivery;
+- a privacy-minimized Agent-to-Human relay profile that consumes one active
+  reachability grant per intent, plus an in-process Mac/CI gateway sink;
+- separate Action lifecycle and Task–Action binding packages that preserve
+  Assignment responsibility while tracking durable execution state;
 - typed dependency groups and conservative deadlock detection; and
 - Draft 2020-12 JSON Schema for durable documents, with meta-schema, format,
   positive fixture, and privacy-negative validation in CI.
 
-Not implemented:
+The Human ingress item above means that the authenticated gateway Actor submits
+the exact request for a Human Participant under operation-authority and local
+policy. It is not evidence of a Human-held signature, authenticated-Human
+evidence, Human liveness, Human-facing UI confirmation, or legal consent. The
+assurance vocabulary is defined by the
+[Human request binding profile](asb-taskcoord-human-request-binding-v1.md#21-human-assurance-vocabulary).
+Accepted Human ingress persists that verifier-derived pair on transition,
+delegation, and interaction audit records. Legacy or trusted-internal records
+may omit it; absence never implies Human assurance.
 
-- a database adapter or selected transaction technology;
-- an outbox publisher;
-- HTTP, A2A, AGTP, or other transport bindings;
+Not implemented or not yet qualified:
+
+- live Redis/Valkey acceptance, persistence, replication, failover, backup,
+  and recovery for the TaskCoord adapter;
+- an outbox publisher and downstream delivery worker;
+- general A2A/AGTP bindings or a transport for Participant discovery and Human
+  matching;
 - a network Participant, Agent discovery, or Human matching protocol;
-- an encrypted contact vault, Email/SNS/TEL relay, abuse-monitoring service, or
-  delivery implementation;
+- an encrypted contact vault, Email/SNS/TEL provider, abuse-monitoring service,
+  or live Human delivery implementation;
+- a relay-specific TLS challenge/execute endpoint or restart-durable relay
+  Store;
+- a production Action binding store or network Action ingress;
 - Participant status-transition audit (`MemoryStore` registry records are
   immutable);
-- cryptographic verification of projected ASB operations, consent, approvals,
-  or revocations; or
-- integration with the separate Action lifecycle package.
+- cryptographic verification adapters for reachability consent, approvals, or
+  authority-revocation inputs.
+
+The implemented HTTP surface is limited to
+`POST /v1/human-operations/challenge` and
+`POST /v1/human-operations/execute`. Every response carries a server-generated
+`X-Request-ID`. Error bodies retain the string `error` field and add `code`,
+`retryable`, and `request_id`; raw internal errors are not returned. A `429`
+response carries `Retry-After: 1`. An execute response with an unknown outcome
+is not safe for automatic retry and requires reconciliation against trusted
+state. The exact status/code table is in the
+[Human ingress demo](asb-taskcoord-human-ingress-demo.md). Relay and Action HTTP
+endpoints remain unimplemented.
+
+The Agent-to-Human relay is documented separately in
+[`agent-to-human-relay-v1.md`](agent-to-human-relay-v1.md). A provider
+acknowledgement is transport state only; it is not a Human response or an
+Assignment transition. The relay also distinguishes `CANCELED`, where
+revocation won before any provider call, from `DISPATCHING`, where an external
+effect may already have occurred.

@@ -78,3 +78,39 @@ TLA2TOOLS_JAR=/path/to/tla2tools.jar \
 See `RESULTS.md` for the exact recorded toolchain, bounds, and state counts.
 The recorded run is bounded exhaustive evidence for that configuration, not
 an unbounded proof. `TLAPS_PLAN.md` records the separate unbounded-proof plan.
+
+## Human Coordination target models
+
+`HumanIngressCommitRetry.tla` starts after proof verification. It separates the
+durable journal state, Worker control phase, external-effect ghost history, and
+the outcome observed by the caller. It checks an immutable
+operation-ID/request-digest binding, proof consumption on every exact retry, a
+single effect attempt, crash cutpoints before/during/after the effect, response
+loss after a terminal commit, preserved unknown outcomes, conflict rejection,
+and evidence-gated reconciliation.
+
+`HumanRelayDispatch.tla` checks two one-intent grants, two racing Workers,
+grant-scoped revocation and dispatch ordering, crash cutpoints around the
+provider callback, exact acknowledgement-to-intent binding, at most one
+provider callback, preservation of an unknown callback outcome, and trusted
+evidence before reconciliation. A reconciled `NO_EFFECT` remains
+`DISPATCHING`; the current status vocabulary
+does not authorize an implicit requeue.
+
+Run SANY and TLC for both finite configurations with:
+
+```sh
+TLA2TOOLS_JAR=/path/to/tla2tools.jar \
+  JAVA_BIN=/path/to/java \
+  sh formal/tla/run_human.sh
+```
+
+The models treat journal writes and dispatch reservations as atomic, but do not
+make an external effect atomic with those writes. Ghost effect/provider truth is
+never used by an implementation action; only the modeled environment may turn
+it into trusted reconciliation evidence. Human ingress does not yet compose
+`operationjournal.AcceptanceStore` with TaskCoord mutation, and the relay has no
+production durable Store, fencing, or provider-reconciliation adapter. No
+refinement to current Go code is claimed. See
+`../HUMAN_COORDINATION_MAP.md` and `HUMAN_RESULTS.md` for the mappings,
+assumptions, exact finite bounds, and recorded results.

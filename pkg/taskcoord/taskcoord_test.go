@@ -275,6 +275,14 @@ func TestDecodeAssignmentRejectsUnknownField(t *testing.T) {
 	}
 }
 
+func TestDecodeAssignmentRejectsTypedNilReader(t *testing.T) {
+	t.Parallel()
+	var reader *bytes.Reader
+	if _, err := DecodeAssignment(reader); !errors.Is(err, ErrInvalidAssignment) {
+		t.Fatalf("error = %v, want ErrInvalidAssignment", err)
+	}
+}
+
 func TestInteractionHistoryPreservesMultipleResponsesAndCorrection(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()

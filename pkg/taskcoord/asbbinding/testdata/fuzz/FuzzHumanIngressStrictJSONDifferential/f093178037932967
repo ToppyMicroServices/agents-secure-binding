@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("{\"operation\":\"ASSIGNMENT_TRANSITION\",\"request\":{\"participant_id\":\" 000000000\",\"event_id\":\"0000\",\"task_id\":\"000000000\",\"assignment_id\":\"000000000000000\",\"operation\":\"ACCEPT\",\"expected_revision\":1}}")

@@ -1,0 +1,492 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://toppymicroservices.github.io/agents-secure-binding/schemas/asb-taskcoord-human-ingress-response-v1.schema.json",
+  "title": "ASB TaskCoord Human Ingress response v1",
+  "description": "Success and public error bodies for the implemented Human challenge and execute endpoints. X-Request-ID is an HTTP header and is not duplicated in success bodies.",
+  "oneOf": [
+    { "$ref": "#/$defs/challengeResponse" },
+    { "$ref": "#/$defs/executeOfferResponse" },
+    { "$ref": "#/$defs/executeTransitionResponse" },
+    { "$ref": "#/$defs/executeDelegationResponse" },
+    { "$ref": "#/$defs/executeInteractionResponse" },
+    { "$ref": "#/$defs/errorResponse" }
+  ],
+  "$defs": {
+    "digest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "identifier": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "pattern": "^[^\u0000-\u0020\u007F-\u00A0\u1680\u2000-\u200A\u2028-\u2029\u202F\u205F\u3000](?:[^\u0000-\u001F\u007F-\u009F]*[^\u0000-\u0020\u007F-\u00A0\u1680\u2000-\u200A\u2028-\u2029\u202F\u205F\u3000])?$",
+      "description": "A case-sensitive identifier. Schema validation bounds Unicode code points and rejects control characters and surrounding Unicode whitespace. Semantic validation additionally limits the exact UTF-8 encoding to 256 octets; it performs no normalization or trimming.",
+      "x-asb-maxUtf8Bytes": 256
+    },
+    "reference": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2048,
+      "pattern": "^[^\u0000-\u001F\u007F-\u009F]+$",
+      "description": "An exact UTF-8 reference with no control characters. Semantic validation additionally limits its encoding to 2048 octets.",
+      "x-asb-maxUtf8Bytes": 2048
+    },
+    "assuranceProvenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["profile_id", "assurance_level"],
+      "properties": {
+        "profile_id": { "const": "asb.taskcoord-human-request/v1" },
+        "assurance_level": { "const": "gateway-asserted-for-human" }
+      },
+      "description": "Verifier-derived audit provenance. Its absence means unspecified trusted-internal or legacy provenance, never an inferred Human assurance level."
+    },
+    "operation": {
+      "enum": ["OFFER", "ACCEPT", "DECLINE", "RELEASE", "REVOKE", "FULFILL", "DELEGATE"]
+    },
+    "assignmentStatus": {
+      "enum": ["OFFERED", "ACCEPTED", "DECLINED", "RELEASED", "REVOKED", "FULFILLED"]
+    },
+    "interactionKind": {
+      "enum": ["QUESTION", "RESPONSE", "CORRECTION", "WITHDRAWAL"]
+    },
+    "responseFinality": {
+      "enum": ["INTERIM", "FINAL"]
+    },
+    "reason": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code"],
+      "properties": {
+        "code": { "$ref": "#/$defs/operation" },
+        "detail": {
+          "type": "string",
+          "maxLength": 1024,
+          "pattern": "^[^\u0000-\u0008\u000B-\u001F\u007F-\u009F]*$",
+          "x-asb-maxUtf8Bytes": 1024
+        }
+      }
+    },
+    "transition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "event_id", "assignment_id", "task_id", "revision", "kind", "to",
+        "reason", "at", "actor_id", "participant_id", "authorization_id", "proof_id"
+      ],
+      "properties": {
+        "event_id": { "$ref": "#/$defs/identifier" },
+        "assignment_id": { "$ref": "#/$defs/identifier" },
+        "task_id": { "$ref": "#/$defs/identifier" },
+        "revision": { "type": "integer", "minimum": 1 },
+        "kind": { "$ref": "#/$defs/operation" },
+        "from": { "$ref": "#/$defs/assignmentStatus" },
+        "to": { "$ref": "#/$defs/assignmentStatus" },
+        "reason": { "$ref": "#/$defs/reason" },
+        "at": { "type": "string", "format": "date-time" },
+        "actor_id": { "$ref": "#/$defs/identifier" },
+        "participant_id": { "$ref": "#/$defs/identifier" },
+        "authorization_id": { "$ref": "#/$defs/identifier" },
+        "proof_id": { "$ref": "#/$defs/identifier" },
+        "evidence_ref": { "$ref": "#/$defs/reference" },
+        "assurance": { "$ref": "#/$defs/assuranceProvenance" }
+      }
+    },
+    "assignment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema", "assignment_id", "task_id", "participant_id", "offered_by_participant_id",
+        "role", "authority_digest", "revision", "status", "last_transition", "created_at", "updated_at"
+      ],
+      "properties": {
+        "schema": { "const": "asb.task-assignment/v1" },
+        "assignment_id": { "$ref": "#/$defs/identifier" },
+        "task_id": { "$ref": "#/$defs/identifier" },
+        "participant_id": { "$ref": "#/$defs/identifier" },
+        "offered_by_participant_id": { "$ref": "#/$defs/identifier" },
+        "role": { "enum": ["OWNER", "ASSIGNEE", "REVIEWER"] },
+        "authority_digest": { "$ref": "#/$defs/digest" },
+        "parent_assignment_id": { "$ref": "#/$defs/identifier" },
+        "revision": { "type": "integer", "minimum": 1 },
+        "status": { "$ref": "#/$defs/assignmentStatus" },
+        "accepted_at": { "type": "string", "format": "date-time" },
+        "due_at": { "type": "string", "format": "date-time" },
+        "last_transition": { "$ref": "#/$defs/transition" },
+        "created_at": { "type": "string", "format": "date-time" },
+        "updated_at": { "type": "string", "format": "date-time" }
+      }
+    },
+    "delegation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "event_id", "decision_id", "parent_assignment_id", "child_assignment_id",
+        "parent_task_id", "child_task_id", "from_participant_id", "to_participant_id",
+        "parent_authority_digest", "child_authority_digest", "policy_ref", "evidence_ref", "at"
+      ],
+      "properties": {
+        "event_id": { "$ref": "#/$defs/identifier" },
+        "decision_id": { "$ref": "#/$defs/identifier" },
+        "parent_assignment_id": { "$ref": "#/$defs/identifier" },
+        "child_assignment_id": { "$ref": "#/$defs/identifier" },
+        "parent_task_id": { "$ref": "#/$defs/identifier" },
+        "child_task_id": { "$ref": "#/$defs/identifier" },
+        "from_participant_id": { "$ref": "#/$defs/identifier" },
+        "to_participant_id": { "$ref": "#/$defs/identifier" },
+        "parent_authority_digest": { "$ref": "#/$defs/digest" },
+        "child_authority_digest": { "$ref": "#/$defs/digest" },
+        "policy_ref": { "$ref": "#/$defs/reference" },
+        "evidence_ref": { "$ref": "#/$defs/reference" },
+        "at": { "type": "string", "format": "date-time" },
+        "assurance": { "$ref": "#/$defs/assuranceProvenance" }
+      }
+    },
+    "interactionEvent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema", "event_id", "interaction_id", "task_id", "assignment_id",
+        "kind", "at", "actor_id", "participant_id", "authorization_id", "proof_id"
+      ],
+      "properties": {
+        "schema": { "const": "asb.task-interaction-event/v1" },
+        "event_id": { "$ref": "#/$defs/identifier" },
+        "interaction_id": { "$ref": "#/$defs/identifier" },
+        "task_id": { "$ref": "#/$defs/identifier" },
+        "assignment_id": { "$ref": "#/$defs/identifier" },
+        "kind": { "$ref": "#/$defs/interactionKind" },
+        "in_reply_to": { "$ref": "#/$defs/identifier" },
+        "supersedes": { "$ref": "#/$defs/identifier" },
+        "finality": { "$ref": "#/$defs/responseFinality" },
+        "content_ref": { "$ref": "#/$defs/reference" },
+        "content_digest": { "$ref": "#/$defs/digest" },
+        "at": { "type": "string", "format": "date-time" },
+        "actor_id": { "$ref": "#/$defs/identifier" },
+        "participant_id": { "$ref": "#/$defs/identifier" },
+        "authorization_id": { "$ref": "#/$defs/identifier" },
+        "proof_id": { "$ref": "#/$defs/identifier" },
+        "evidence_ref": { "$ref": "#/$defs/reference" },
+        "assurance": { "$ref": "#/$defs/assuranceProvenance" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "kind": { "const": "QUESTION" } }, "required": ["kind"] },
+          "then": {
+            "required": ["content_ref", "content_digest"],
+            "not": { "anyOf": [
+              { "required": ["supersedes"] },
+              { "required": ["finality"] }
+            ] }
+          }
+        },
+        {
+          "if": { "properties": { "kind": { "const": "RESPONSE" } }, "required": ["kind"] },
+          "then": {
+            "required": ["in_reply_to", "finality", "content_ref", "content_digest"],
+            "not": { "required": ["supersedes"] }
+          }
+        },
+        {
+          "if": { "properties": { "kind": { "const": "CORRECTION" } }, "required": ["kind"] },
+          "then": {
+            "required": ["in_reply_to", "supersedes", "finality", "content_ref", "content_digest"]
+          }
+        },
+        {
+          "if": { "properties": { "kind": { "const": "WITHDRAWAL" } }, "required": ["kind"] },
+          "then": {
+            "required": ["in_reply_to", "supersedes"],
+            "not": { "anyOf": [
+              { "required": ["finality"] },
+              { "required": ["content_ref"] },
+              { "required": ["content_digest"] }
+            ] }
+          }
+        }
+      ]
+    },
+    "humanAssurance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["profile_id", "assurance_level"],
+      "properties": {
+        "profile_id": { "const": "asb.taskcoord-human-request/v1" },
+        "assurance_level": { "const": "gateway-asserted-for-human" }
+      }
+    },
+    "humanTransition": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/transition"
+        },
+        {
+          "required": ["assurance"],
+          "properties": {
+            "assurance": { "$ref": "#/$defs/humanAssurance" }
+          }
+        }
+      ]
+    },
+    "humanAssignment": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/assignment"
+        },
+        {
+          "properties": {
+            "last_transition": { "$ref": "#/$defs/humanTransition" }
+          }
+        }
+      ]
+    },
+    "humanInteraction": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/interactionEvent"
+        },
+        {
+          "required": ["assurance"],
+          "properties": {
+            "assurance": { "$ref": "#/$defs/humanAssurance" }
+          }
+        }
+      ]
+    },
+    "humanDelegation": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/delegation"
+        },
+        {
+          "required": ["assurance"],
+          "properties": {
+            "assurance": { "$ref": "#/$defs/humanAssurance" }
+          }
+        }
+      ]
+    },
+    "challengeResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["challenge_id", "nonce", "expires_at", "request_digest"],
+      "properties": {
+        "challenge_id": { "$ref": "#/$defs/digest" },
+        "nonce": { "$ref": "#/$defs/digest" },
+        "expires_at": { "type": "string", "format": "date-time" },
+        "request_digest": { "$ref": "#/$defs/digest" }
+      }
+    },
+    "executeOfferResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["operation", "assignment", "record"],
+      "properties": {
+        "operation": { "const": "ASSIGNMENT_OFFER" },
+        "assignment": { "$ref": "#/$defs/humanAssignment" },
+        "record": { "$ref": "#/$defs/humanTransition" }
+      }
+    },
+    "executeTransitionResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["operation", "assignment", "record"],
+      "properties": {
+        "operation": { "const": "ASSIGNMENT_TRANSITION" },
+        "assignment": { "$ref": "#/$defs/humanAssignment" },
+        "record": { "$ref": "#/$defs/humanTransition" }
+      }
+    },
+    "executeDelegationResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "operation",
+        "parent_assignment",
+        "parent_record",
+        "child_assignment",
+        "child_record",
+        "delegation"
+      ],
+      "properties": {
+        "operation": { "const": "ASSIGNMENT_DELEGATION" },
+        "parent_assignment": { "$ref": "#/$defs/humanAssignment" },
+        "parent_record": { "$ref": "#/$defs/humanTransition" },
+        "child_assignment": { "$ref": "#/$defs/humanAssignment" },
+        "child_record": { "$ref": "#/$defs/humanTransition" },
+        "delegation": { "$ref": "#/$defs/humanDelegation" }
+      }
+    },
+    "executeInteractionResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["operation", "interaction"],
+      "properties": {
+        "operation": { "const": "INTERACTION_APPEND" },
+        "interaction": { "$ref": "#/$defs/humanInteraction" }
+      }
+    },
+    "errorBase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["error", "code", "retryable", "request_id"],
+      "properties": {
+        "error": { "type": "string" },
+        "code": { "type": "string" },
+        "retryable": { "type": "boolean" },
+        "request_id": {
+          "type": "string",
+          "pattern": "^asbreq-[0-9a-f]{32}$"
+        }
+      }
+    },
+    "invalidRequestError": {
+      "allOf": [
+        { "$ref": "#/$defs/errorBase" },
+        {
+          "properties": {
+            "error": { "const": "request is invalid" },
+            "code": { "const": "INVALID_REQUEST" },
+            "retryable": { "const": false }
+          }
+        }
+      ]
+    },
+    "unsupportedMediaTypeError": {
+      "allOf": [
+        { "$ref": "#/$defs/errorBase" },
+        {
+          "properties": {
+            "error": { "const": "Content-Type must be application/json" },
+            "code": { "const": "UNSUPPORTED_MEDIA_TYPE" },
+            "retryable": { "const": false }
+          }
+        }
+      ]
+    },
+    "authenticationRequiredError": {
+      "allOf": [
+        { "$ref": "#/$defs/errorBase" },
+        {
+          "properties": {
+            "error": { "const": "authenticated TLS client is required" },
+            "code": { "const": "AUTHENTICATION_REQUIRED" },
+            "retryable": { "const": false }
+          }
+        }
+      ]
+    },
+    "challengeRejectedError": {
+      "allOf": [
+        { "$ref": "#/$defs/errorBase" },
+        {
+          "properties": {
+            "error": { "const": "challenge is invalid or unavailable" },
+            "code": { "const": "CHALLENGE_REJECTED" },
+            "retryable": { "const": false }
+          }
+        }
+      ]
+    },
+    "operationRejectedError": {
+      "allOf": [
+        { "$ref": "#/$defs/errorBase" },
+        {
+          "properties": {
+            "error": { "const": "operation is not authorized" },
+            "code": { "const": "OPERATION_REJECTED" },
+            "retryable": { "const": false }
+          }
+        }
+      ]
+    },
+    "notFoundError": {
+      "allOf": [
+        { "$ref": "#/$defs/errorBase" },
+        {
+          "properties": {
+            "error": { "const": "resource was not found" },
+            "code": { "const": "NOT_FOUND" },
+            "retryable": { "const": false }
+          }
+        }
+      ]
+    },
+    "stateConflictError": {
+      "allOf": [
+        { "$ref": "#/$defs/errorBase" },
+        {
+          "properties": {
+            "error": { "const": "operation conflicts with current state" },
+            "code": { "const": "STATE_CONFLICT" },
+            "retryable": { "const": false }
+          }
+        }
+      ]
+    },
+    "methodNotAllowedError": {
+      "allOf": [
+        { "$ref": "#/$defs/errorBase" },
+        {
+          "properties": {
+            "error": { "const": "method is not allowed" },
+            "code": { "const": "METHOD_NOT_ALLOWED" },
+            "retryable": { "const": false }
+          }
+        }
+      ]
+    },
+    "rateLimitedError": {
+      "allOf": [
+        { "$ref": "#/$defs/errorBase" },
+        {
+          "properties": {
+            "error": { "const": "too many outstanding challenges" },
+            "code": { "const": "RATE_LIMITED" },
+            "retryable": { "const": true }
+          }
+        }
+      ]
+    },
+    "operationOutcomeUnknownError": {
+      "allOf": [
+        { "$ref": "#/$defs/errorBase" },
+        {
+          "properties": {
+            "error": { "const": "operation outcome is unknown" },
+            "code": { "const": "OPERATION_OUTCOME_UNKNOWN" },
+            "retryable": { "const": false }
+          }
+        }
+      ]
+    },
+    "internalError": {
+      "allOf": [
+        { "$ref": "#/$defs/errorBase" },
+        {
+          "properties": {
+            "error": { "const": "internal service error" },
+            "code": { "const": "INTERNAL_ERROR" },
+            "retryable": { "const": false }
+          }
+        }
+      ]
+    },
+    "errorResponse": {
+      "oneOf": [
+        { "$ref": "#/$defs/invalidRequestError" },
+        { "$ref": "#/$defs/unsupportedMediaTypeError" },
+        { "$ref": "#/$defs/authenticationRequiredError" },
+        { "$ref": "#/$defs/challengeRejectedError" },
+        { "$ref": "#/$defs/operationRejectedError" },
+        { "$ref": "#/$defs/notFoundError" },
+        { "$ref": "#/$defs/stateConflictError" },
+        { "$ref": "#/$defs/methodNotAllowedError" },
+        { "$ref": "#/$defs/rateLimitedError" },
+        { "$ref": "#/$defs/operationOutcomeUnknownError" },
+        { "$ref": "#/$defs/internalError" }
+      ]
+    }
+  }
+}

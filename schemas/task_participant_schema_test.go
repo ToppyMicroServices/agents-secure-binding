@@ -47,6 +47,7 @@ func TestTaskParticipantSchemaAcceptsDurableDocuments(t *testing.T) {
 		ParticipantID:   "agent:requester",
 		AuthorizationID: "authorization:offer:1",
 		ProofID:         "proof:offer:1",
+		Assurance:       taskcoord.GatewayAssertedForHumanProvenance(),
 	}
 
 	documents := map[string]any{
@@ -88,6 +89,7 @@ func TestTaskParticipantSchemaAcceptsDurableDocuments(t *testing.T) {
 			PolicyRef:             "urn:policy:delegation:1",
 			EvidenceRef:           "urn:evidence:delegation:1",
 			At:                    at,
+			Assurance:             taskcoord.GatewayAssertedForHumanProvenance(),
 		},
 		"interaction": taskcoord.InteractionEvent{
 			Schema:          taskcoord.InteractionEventSchemaV1,
@@ -103,6 +105,7 @@ func TestTaskParticipantSchemaAcceptsDurableDocuments(t *testing.T) {
 			ParticipantID:   participant.ParticipantID,
 			AuthorizationID: "authorization:question:1",
 			ProofID:         "proof:question:1",
+			Assurance:       taskcoord.GatewayAssertedForHumanProvenance(),
 		},
 		"agent discovery": taskcoord.AgentDiscoveryRecord{
 			Schema:        taskcoord.AgentDiscoveryRecordSchemaV1,
@@ -171,6 +174,92 @@ func TestTaskParticipantSchemaAcceptsDurableDocuments(t *testing.T) {
 				t.Fatalf("valid document rejected: %v", err)
 			}
 		})
+	}
+}
+
+func TestTaskParticipantSchemaKeepsLegacyAssuranceUnspecifiedAndRejectsSpoofing(t *testing.T) {
+	t.Parallel()
+	schema := compileTaskParticipantSchema(t)
+	legacy := map[string]any{
+		"schema":           taskcoord.InteractionEventSchemaV1,
+		"event_id":         "event:legacy:1",
+		"interaction_id":   "interaction:legacy:1",
+		"task_id":          "task:legacy:1",
+		"assignment_id":    "assignment:legacy:1",
+		"kind":             "QUESTION",
+		"content_ref":      "urn:content:legacy:1",
+		"content_digest":   strings.Repeat("a", 64),
+		"at":               "2026-08-12T12:00:00Z",
+		"actor_id":         "service:legacy",
+		"participant_id":   "participant:legacy",
+		"authorization_id": "authorization:legacy:1",
+		"proof_id":         "proof:legacy:1",
+	}
+	if err := validateDocument(schema, legacy); err != nil {
+		t.Fatalf("legacy event without assurance rejected: %v", err)
+	}
+
+	for name, assurance := range map[string]map[string]any{
+		"unsupported profile": {
+			"profile_id":      "asb.other-human-profile/v1",
+			"assurance_level": "gateway-asserted-for-human",
+		},
+		"caller elevation": {
+			"profile_id":      taskcoord.HumanRequestProfileV1,
+			"assurance_level": "human-held-key-exact-request",
+		},
+		"partial provenance": {
+			"profile_id": taskcoord.HumanRequestProfileV1,
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			document := make(map[string]any, len(legacy)+1)
+			for key, value := range legacy {
+				document[key] = value
+			}
+			document["assurance"] = assurance
+			if err := validateDocument(schema, document); err == nil {
+				t.Fatal("spoofed assurance provenance was accepted")
+			}
+		})
+	}
+}
+
+func TestTaskParticipantSchemaValidatesOptionalDelegationAssurance(t *testing.T) {
+	t.Parallel()
+	schema := compileTaskParticipantSchema(t)
+	delegation := map[string]any{
+		"event_id":                "event:delegation:legacy",
+		"decision_id":             "decision:delegation:legacy",
+		"parent_assignment_id":    "assignment:parent",
+		"child_assignment_id":     "assignment:child",
+		"parent_task_id":          "task:parent",
+		"child_task_id":           "task:child",
+		"from_participant_id":     "agent:delegator",
+		"to_participant_id":       "human:delegate",
+		"parent_authority_digest": strings.Repeat("a", 64),
+		"child_authority_digest":  strings.Repeat("b", 64),
+		"policy_ref":              "urn:policy:delegation:legacy",
+		"evidence_ref":            "urn:evidence:delegation:legacy",
+		"at":                      "2026-08-12T12:00:00Z",
+	}
+	if err := validateDocument(schema, delegation); err != nil {
+		t.Fatalf("legacy delegation without assurance rejected: %v", err)
+	}
+
+	delegation["assurance"] = map[string]any{
+		"profile_id":      taskcoord.HumanRequestProfileV1,
+		"assurance_level": taskcoord.HumanAssuranceGatewayAssertedForHuman,
+	}
+	if err := validateDocument(schema, delegation); err != nil {
+		t.Fatalf("delegation with implemented assurance rejected: %v", err)
+	}
+	delegation["assurance"] = map[string]any{
+		"profile_id":      taskcoord.HumanRequestProfileV1,
+		"assurance_level": taskcoord.HumanAssuranceHumanHeldKeyExactRequest,
+	}
+	if err := validateDocument(schema, delegation); err == nil {
+		t.Fatal("delegation with unimplemented assurance elevation was accepted")
 	}
 }
 

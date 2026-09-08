@@ -29,6 +29,7 @@ func NewInteractionEvent(def InteractionEventDefinition, auth AuthenticatedInter
 		AuthorizationID: auth.AuthorizationID,
 		ProofID:         auth.ProofID,
 		EvidenceRef:     def.EvidenceRef,
+		Assurance:       cloneAssuranceProvenance(auth.Assurance),
 	}
 	if err := validateInteractionAuthorization(def, auth, def.At); err != nil {
 		return InteractionEvent{}, err
@@ -74,6 +75,11 @@ func validateInteractionAuthorization(def InteractionEventDefinition, auth Authe
 	}
 	if at.Before(auth.IssuedAt) || !at.Before(auth.ExpiresAt) {
 		return fmt.Errorf("%w: interaction is outside authorization validity window", ErrAuthenticationRequired)
+	}
+	if auth.Assurance != nil {
+		if err := auth.Assurance.Validate(); err != nil {
+			return fmt.Errorf("%w: invalid assurance provenance: %v", ErrAuthenticationRequired, err)
+		}
 	}
 	return nil
 }

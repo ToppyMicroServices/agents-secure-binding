@@ -11,19 +11,32 @@ on:
       - "PUBLICATION_TODO.md"
       - "go.mod"
       - "go.sum"
+      - "Makefile"
+      - "internal/canonicaltranscript/**"
+      - "internal/strictjson/**"
+      - "pkg/actionlifecycle/**"
       - "pkg/agtp/**"
       - "pkg/atls/**"
       - "pkg/clients/**"
+      - "pkg/humanrelay/**"
+      - "pkg/operationjournal/**"
       - "pkg/production/**"
+      - "pkg/taskcoord/**"
+      - "schemas/**"
       - "cmd/redis-failover-redteam/**"
       - "examples/a2a-multiprocess/**"
+      - "examples/human-coordination-e2e/**"
       - "examples/protected-change-consumer/**"
+      - "testdata/human-coordination-*"
       - "docs/draft06-a2a-profile.md"
       - "docs/API_COMPATIBILITY.md"
       - "docs/production-deployment-profile.md"
       - "docs/azure-sev-snp-attestation-bridge.md"
       - "docs/redis-failover-runbook.md"
       - "docs/security-red-team-tests.md"
+      - "docs/human-coordination-red-team-tests.md"
+      - "docs/*human*"
+      - "docs/task-action-*"
       - "docs/live-red-team-report.md"
   push:
     branches:
@@ -34,19 +47,32 @@ on:
       - "PUBLICATION_TODO.md"
       - "go.mod"
       - "go.sum"
+      - "Makefile"
+      - "internal/canonicaltranscript/**"
+      - "internal/strictjson/**"
+      - "pkg/actionlifecycle/**"
       - "pkg/agtp/**"
       - "pkg/atls/**"
       - "pkg/clients/**"
+      - "pkg/humanrelay/**"
+      - "pkg/operationjournal/**"
       - "pkg/production/**"
+      - "pkg/taskcoord/**"
+      - "schemas/**"
       - "cmd/redis-failover-redteam/**"
       - "examples/a2a-multiprocess/**"
+      - "examples/human-coordination-e2e/**"
       - "examples/protected-change-consumer/**"
+      - "testdata/human-coordination-*"
       - "docs/draft06-a2a-profile.md"
       - "docs/API_COMPATIBILITY.md"
       - "docs/production-deployment-profile.md"
       - "docs/azure-sev-snp-attestation-bridge.md"
       - "docs/redis-failover-runbook.md"
       - "docs/security-red-team-tests.md"
+      - "docs/human-coordination-red-team-tests.md"
+      - "docs/*human*"
+      - "docs/task-action-*"
       - "docs/live-red-team-report.md"
 
 permissions:
@@ -77,3 +103,19 @@ jobs:
             ./cmd/redis-failover-redteam \
             ./examples/protected-change-consumer \
             ./examples/a2a-multiprocess
+
+  human-coordination-red-team:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: 1.26.6
+          cache-dependency-path: go.sum
+
+      - name: Run bounded Human Coordination red-team gate
+        run: make human-coordination-red-team

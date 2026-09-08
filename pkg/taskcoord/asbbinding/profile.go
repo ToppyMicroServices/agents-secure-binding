@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"time"
 
@@ -23,6 +24,7 @@ var (
 	ErrAmbiguousPolicy            = errors.New("asbbinding: application authorization policy is ambiguous")
 	ErrMissingASBProof            = errors.New("asbbinding: missing ASB proof material")
 	ErrInvalidProjection          = errors.New("asbbinding: invalid verified projection")
+	ErrMissingDelegationVerifier  = errors.New("asbbinding: missing delegation decision verifier")
 )
 
 // Evidence carries signed ASB material and verifier-local acceptance state.
@@ -43,6 +45,40 @@ type Profile struct {
 	Now          func() time.Time
 }
 
+// DelegationDecisionVerifier produces a trusted, current policy decision for
+// one exact delegation request. Ingress invokes it only after the ASB grant and
+// session proof have been verified. Implementations must not copy a
+// client-supplied policy projection into the result.
+type DelegationDecisionVerifier interface {
+	VerifyDelegation(
+		context.Context,
+		taskcoord.Assignment,
+		DelegationRequest,
+		time.Time,
+	) (taskcoord.VerifiedDelegation, error)
+}
+
+// DelegationDecisionVerifierFunc adapts a function to
+// DelegationDecisionVerifier.
+type DelegationDecisionVerifierFunc func(
+	context.Context,
+	taskcoord.Assignment,
+	DelegationRequest,
+	time.Time,
+) (taskcoord.VerifiedDelegation, error)
+
+func (f DelegationDecisionVerifierFunc) VerifyDelegation(
+	ctx context.Context,
+	parent taskcoord.Assignment,
+	request DelegationRequest,
+	at time.Time,
+) (taskcoord.VerifiedDelegation, error) {
+	if f == nil {
+		return taskcoord.VerifiedDelegation{}, ErrMissingDelegationVerifier
+	}
+	return f(ctx, parent, request, at)
+}
+
 func (p Profile) Offer(ctx context.Context, request OfferRequest, evidence Evidence) (taskcoord.Transition, error) {
 	digest, err := OfferDigest(request)
 	if err != nil {
@@ -55,6 +91,25 @@ func (p Profile) Offer(ctx context.Context, request OfferRequest, evidence Evide
 	accepted, err := p.accept(ctx, request.ParticipantID, digest, evidence, now)
 	if err != nil {
 		return taskcoord.Transition{}, err
+	}
+	return p.offerAccepted(ctx, request, accepted, now)
+}
+
+func (p Profile) offerAccepted(
+	ctx context.Context,
+	request OfferRequest,
+	accepted acceptance,
+	now time.Time,
+) (taskcoord.Transition, error) {
+	digest, err := OfferDigest(request)
+	if err != nil {
+		return taskcoord.Transition{}, err
+	}
+	if err := accepted.requireDigest(digest); err != nil {
+		return taskcoord.Transition{}, err
+	}
+	if request.DueAt != nil && !request.DueAt.After(now) {
+		return taskcoord.Transition{}, invalid("due_at must be after verifier time")
 	}
 	target, err := p.resolveParticipant(ctx, request.TargetParticipantID)
 	if err != nil {
@@ -104,6 +159,31 @@ func (p Profile) Apply(ctx context.Context, current taskcoord.Assignment, reques
 	if err != nil {
 		return taskcoord.Transition{}, err
 	}
+	return p.applyAccepted(current, request, accepted, now)
+}
+
+func (p Profile) applyAccepted(
+	current taskcoord.Assignment,
+	request TransitionRequest,
+	accepted acceptance,
+	now time.Time,
+) (taskcoord.Transition, error) {
+	if err := current.Validate(); err != nil {
+		return taskcoord.Transition{}, err
+	}
+	if current.TaskID != request.TaskID || current.AssignmentID != request.AssignmentID {
+		return taskcoord.Transition{}, invalid("request target does not match current Assignment")
+	}
+	if current.Revision != request.ExpectedRevision {
+		return taskcoord.Transition{}, invalid("request revision does not match current Assignment")
+	}
+	digest, err := TransitionDigest(request)
+	if err != nil {
+		return taskcoord.Transition{}, err
+	}
+	if err := accepted.requireDigest(digest); err != nil {
+		return taskcoord.Transition{}, err
+	}
 	transition, err := taskcoord.Apply(current, taskcoord.Event{
 		ID:               request.EventID,
 		Kind:             request.Operation,
@@ -126,17 +206,31 @@ func (p Profile) Delegate(
 	ctx context.Context,
 	parent taskcoord.Assignment,
 	request DelegationRequest,
-	verified taskcoord.VerifiedDelegation,
+	verifier DelegationDecisionVerifier,
 	evidence Evidence,
+) (taskcoord.DelegationTransition, error) {
+	if isNilDelegationVerifier(verifier) {
+		return taskcoord.DelegationTransition{}, ErrMissingDelegationVerifier
+	}
+	return p.delegate(ctx, parent, request, evidence, verifier.VerifyDelegation)
+}
+
+type delegationDecisionFunc func(
+	context.Context,
+	taskcoord.Assignment,
+	DelegationRequest,
+	time.Time,
+) (taskcoord.VerifiedDelegation, error)
+
+func (p Profile) delegate(
+	ctx context.Context,
+	parent taskcoord.Assignment,
+	request DelegationRequest,
+	evidence Evidence,
+	decision delegationDecisionFunc,
 ) (taskcoord.DelegationTransition, error) {
 	if err := parent.Validate(); err != nil {
 		return taskcoord.DelegationTransition{}, err
-	}
-	if err := verified.Validate(); err != nil {
-		return taskcoord.DelegationTransition{}, err
-	}
-	if verified.DecisionID != request.DecisionID {
-		return taskcoord.DelegationTransition{}, invalid("verified delegation decision does not match request")
 	}
 	if parent.TaskID != request.ParentTaskID || parent.AssignmentID != request.ParentAssignmentID {
 		return taskcoord.DelegationTransition{}, invalid("request parent does not match current Assignment")
@@ -155,6 +249,51 @@ func (p Profile) Delegate(
 	accepted, err := p.accept(ctx, request.ParticipantID, digest, evidence, now)
 	if err != nil {
 		return taskcoord.DelegationTransition{}, err
+	}
+	return p.delegateAccepted(ctx, parent, request, accepted, now, decision)
+}
+
+func (p Profile) delegateAccepted(
+	ctx context.Context,
+	parent taskcoord.Assignment,
+	request DelegationRequest,
+	accepted acceptance,
+	now time.Time,
+	decision delegationDecisionFunc,
+) (taskcoord.DelegationTransition, error) {
+	if err := parent.Validate(); err != nil {
+		return taskcoord.DelegationTransition{}, err
+	}
+	if parent.TaskID != request.ParentTaskID || parent.AssignmentID != request.ParentAssignmentID {
+		return taskcoord.DelegationTransition{}, invalid("request parent does not match current Assignment")
+	}
+	if parent.Revision != request.ExpectedRevision {
+		return taskcoord.DelegationTransition{}, invalid("request revision does not match current Assignment")
+	}
+	digest, err := DelegationDigest(request)
+	if err != nil {
+		return taskcoord.DelegationTransition{}, err
+	}
+	if err := accepted.requireDigest(digest); err != nil {
+		return taskcoord.DelegationTransition{}, err
+	}
+	if request.DueAt != nil && !request.DueAt.After(now) {
+		return taskcoord.DelegationTransition{}, invalid("due_at must be after verifier time")
+	}
+	// The decision verifier is a deployment trust boundary. Give it isolated
+	// snapshots so pointer fields cannot alter the ASB-bound request or current
+	// Assignment after their validation.
+	decisionParent := cloneAssignmentSnapshot(parent)
+	decisionRequest := cloneDelegationRequest(request)
+	verified, err := decision(ctx, decisionParent, decisionRequest, now)
+	if err != nil {
+		return taskcoord.DelegationTransition{}, fmt.Errorf("asbbinding: verify delegation decision: %w", err)
+	}
+	if err := verified.Validate(); err != nil {
+		return taskcoord.DelegationTransition{}, err
+	}
+	if verified.DecisionID != request.DecisionID {
+		return taskcoord.DelegationTransition{}, invalid("verified delegation decision does not match request")
 	}
 	target, err := p.resolveParticipant(ctx, request.TargetParticipantID)
 	if err != nil {
@@ -207,6 +346,21 @@ func (p Profile) NewInteractionEvent(ctx context.Context, request InteractionReq
 	if err != nil {
 		return taskcoord.InteractionEvent{}, err
 	}
+	return p.newInteractionEventAccepted(request, accepted, now)
+}
+
+func (p Profile) newInteractionEventAccepted(
+	request InteractionRequest,
+	accepted acceptance,
+	now time.Time,
+) (taskcoord.InteractionEvent, error) {
+	digest, err := InteractionDigest(request)
+	if err != nil {
+		return taskcoord.InteractionEvent{}, err
+	}
+	if err := accepted.requireDigest(digest); err != nil {
+		return taskcoord.InteractionEvent{}, err
+	}
 	definition := taskcoord.InteractionEventDefinition{
 		EventID:       request.EventID,
 		InteractionID: request.InteractionID,
@@ -241,6 +395,7 @@ func (p Profile) NewInteractionEvent(ctx context.Context, request InteractionReq
 		VerifierNonce:   accepted.nonce,
 		IssuedAt:        accepted.issuedAt,
 		ExpiresAt:       accepted.expiresAt,
+		Assurance:       taskcoord.GatewayAssertedForHumanProvenance(),
 	}
 	event, err := taskcoord.NewInteractionEvent(definition, auth)
 	if err != nil {
@@ -253,6 +408,7 @@ func (p Profile) NewInteractionEvent(ctx context.Context, request InteractionReq
 }
 
 type acceptance struct {
+	requestDigest   Digest
 	human           taskcoord.Participant
 	actorID         string
 	authorizationID string
@@ -262,6 +418,13 @@ type acceptance struct {
 	expiresAt       time.Time
 	replay          identitypolicy.ReplayCache
 	statement       identitypolicy.VerifiedSessionBindingStatement
+}
+
+func (a acceptance) requireDigest(digest Digest) error {
+	if a.requestDigest != digest {
+		return ErrRequestContextMismatch
+	}
+	return nil
 }
 
 func (a acceptance) commitReplay() error {
@@ -283,6 +446,7 @@ func (a acceptance) operation(kind taskcoord.OperationKind, taskID, assignmentID
 		VerifierNonce:   a.nonce,
 		IssuedAt:        a.issuedAt,
 		ExpiresAt:       a.expiresAt,
+		Assurance:       taskcoord.GatewayAssertedForHumanProvenance(),
 	}
 }
 
@@ -296,7 +460,7 @@ func (p Profile) accept(ctx context.Context, participantID string, digest Digest
 	if strings.TrimSpace(evidence.GrantJWT) == "" || strings.TrimSpace(evidence.SessionBindingJWT) == "" {
 		return acceptance{}, ErrMissingASBProof
 	}
-	if evidence.Options.ReplayCache == nil {
+	if isNilDependency(evidence.Options.ReplayCache) {
 		return acceptance{}, clients.ErrMissingReplayCache
 	}
 	expectedContextHash := RequestContextSHA256(digest)
@@ -365,6 +529,7 @@ func (p Profile) accept(ctx context.Context, participantID string, digest Digest
 		return acceptance{}, err
 	}
 	return acceptance{
+		requestDigest:   digest,
 		human:           human,
 		actorID:         actorID,
 		authorizationID: grant.JWTID,
@@ -395,7 +560,7 @@ func (p Profile) resolveParticipant(ctx context.Context, participantID string) (
 	if ctx == nil {
 		return taskcoord.Participant{}, errors.New("asbbinding: missing context")
 	}
-	if p.Participants == nil {
+	if isNilDependency(p.Participants) {
 		return taskcoord.Participant{}, ErrMissingParticipantResolver
 	}
 	participant, err := p.Participants.LoadParticipant(ctx, participantID)
@@ -424,6 +589,40 @@ func cloneTime(value *time.Time) *time.Time {
 	}
 	cloned := *value
 	return &cloned
+}
+
+func cloneAssignmentSnapshot(value taskcoord.Assignment) taskcoord.Assignment {
+	cloned := value
+	cloned.AcceptedAt = cloneTime(value.AcceptedAt)
+	cloned.DueAt = cloneTime(value.DueAt)
+	if value.LastTransition.Assurance != nil {
+		assurance := *value.LastTransition.Assurance
+		cloned.LastTransition.Assurance = &assurance
+	}
+	return cloned
+}
+
+func cloneDelegationRequest(value DelegationRequest) DelegationRequest {
+	cloned := value
+	cloned.DueAt = cloneTime(value.DueAt)
+	return cloned
+}
+
+func isNilDelegationVerifier(verifier DelegationDecisionVerifier) bool {
+	return isNilDependency(verifier)
+}
+
+func isNilDependency(dependency any) bool {
+	if dependency == nil {
+		return true
+	}
+	value := reflect.ValueOf(dependency)
+	switch value.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+		return value.IsNil()
+	default:
+		return false
+	}
 }
 
 func latestTime(values ...time.Time) time.Time {

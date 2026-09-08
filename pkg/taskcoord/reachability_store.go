@@ -29,7 +29,45 @@ type HumanReachabilityDirectory interface {
 	RevokeHumanReachabilityGrant(context.Context, HumanReachabilityRevocation) error
 }
 
+// HumanReachabilityRelayTransaction is the atomic authorization boundary used
+// by a relay intent store. Implementations must recheck the requester and Human
+// Participant status, consent revocation, grant revocation, exact scope, and
+// expiry in the same transaction that commits the relay intent and its outbox
+// record. The callback must be invoked at most once and must not re-enter the
+// directory.
+//
+// A production implementation cannot satisfy this contract with a lookup
+// followed by a separate database write. The authoritative Participant,
+// consent, grant, intent, and outbox state must share one serializable commit
+// boundary (or an equivalent compare-and-swap operation).
+type HumanReachabilityRelayTransaction interface {
+	CommitWithActiveHumanReachabilityGrant(
+		context.Context,
+		AuthenticatedReachabilityAccess,
+		func(HumanReachabilityGrant) error,
+	) error
+}
+
+// HumanReachabilityDispatchTransaction is the revocation/dispatch
+// serialization boundary for a trusted relay worker. The active-grant check
+// and callback must use the same per-grant guard as consent and grant
+// revocation. The callback may begin an external effect and therefore must be
+// invoked at most once and must not re-enter the directory.
+//
+// A production adapter should not hold a general database transaction open
+// during network I/O. It may instead use a grant-scoped distributed lock or a
+// gateway-consumed one-shot permit that provides the same ordering.
+type HumanReachabilityDispatchTransaction interface {
+	CommitWithActiveHumanReachabilityGrantForDispatch(
+		context.Context,
+		HumanReachabilityDispatchAccess,
+		func(HumanReachabilityGrant) error,
+	) error
+}
+
 var _ HumanReachabilityDirectory = (*MemoryReachabilityDirectory)(nil)
+var _ HumanReachabilityRelayTransaction = (*MemoryReachabilityDirectory)(nil)
+var _ HumanReachabilityDispatchTransaction = (*MemoryReachabilityDirectory)(nil)
 
 type candidateBinding struct {
 	humanID     string
@@ -71,6 +109,22 @@ type MemoryReachabilityDirectory struct {
 // stub using the local wall clock for expiry checks.
 func NewMemoryReachabilityDirectory(participants ParticipantResolver) *MemoryReachabilityDirectory {
 	return newMemoryReachabilityDirectory(participants, time.Now)
+}
+
+// NewMemoryReachabilityDirectoryWithClock returns an in-process privacy-safe
+// directory stub using now for expiry checks. It is intended for deterministic
+// tests and other callers that must control the expiry boundary.
+func NewMemoryReachabilityDirectoryWithClock(
+	participants ParticipantResolver,
+	now func() time.Time,
+) (*MemoryReachabilityDirectory, error) {
+	if isNilDependency(participants) {
+		return nil, invalidReachability("Participant resolver is required")
+	}
+	if now == nil {
+		return nil, invalidReachability("clock is required")
+	}
+	return newMemoryReachabilityDirectory(participants, now), nil
 }
 
 func newMemoryReachabilityDirectory(participants ParticipantResolver, now func() time.Time) *MemoryReachabilityDirectory {
@@ -132,8 +186,10 @@ func (d *MemoryReachabilityDirectory) RegisterHumanMatchConsent(ctx context.Cont
 	return nil
 }
 
-// RevokeHumanMatchConsent records an immutable Human withdrawal. A revoked
-// consent is never returned, including for a backdated query.
+// RevokeHumanMatchConsent records an immutable Human withdrawal. A committed
+// revocation is effective immediately; At is audit data and does not defer or
+// reorder that decision. A revoked consent is never returned, including for a
+// backdated query.
 func (d *MemoryReachabilityDirectory) RevokeHumanMatchConsent(ctx context.Context, revocation HumanMatchConsentRevocation) error {
 	if err := revocation.Validate(); err != nil {
 		return err
@@ -428,8 +484,119 @@ func (d *MemoryReachabilityDirectory) LoadActiveHumanReachabilityGrant(ctx conte
 	return latest.grant, nil
 }
 
+// CommitWithActiveHumanReachabilityGrant serializes the final active-grant
+// decision with consent/grant revocation and the supplied relay commit. The
+// in-memory Participant registry used by this reference implementation is
+// immutable after registration. Production adapters must additionally
+// serialize Participant status changes in the same durable transaction.
+func (d *MemoryReachabilityDirectory) CommitWithActiveHumanReachabilityGrant(
+	ctx context.Context,
+	access AuthenticatedReachabilityAccess,
+	commit func(HumanReachabilityGrant) error,
+) error {
+	if err := access.Validate(); err != nil {
+		return err
+	}
+	if d == nil || d.now == nil {
+		return invalidReachability("clock is required")
+	}
+	if commit == nil {
+		return invalidReachability("relay commit callback is required")
+	}
+	now := d.currentTime()
+	if now.Before(access.IssuedAt) || !now.Before(access.ExpiresAt) {
+		return invalidReachability("grant access request is not currently valid")
+	}
+
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	requester, err := d.resolveParticipant(ctx, access.RequesterParticipantID)
+	if err != nil || requester.Kind != ParticipantAgent || requester.Status != ParticipantActive {
+		return fmt.Errorf("%w: grant %s", ErrNotFound, access.GrantID)
+	}
+	committed, ok := d.grants[access.GrantID]
+	if !ok ||
+		committed.grant.RequesterParticipantID != access.RequesterParticipantID ||
+		committed.grant.Purpose != access.Purpose ||
+		committed.grant.Capability != access.Capability ||
+		committed.grant.Channel != access.Channel {
+		return fmt.Errorf("%w: grant %s", ErrNotFound, access.GrantID)
+	}
+	if _, revoked := d.grantRevocations[access.GrantID]; revoked {
+		return fmt.Errorf("%w: grant %s", ErrNotFound, access.GrantID)
+	}
+	if _, revoked := d.consentRevocations[committed.consentID]; revoked {
+		return fmt.Errorf("%w: grant %s", ErrNotFound, access.GrantID)
+	}
+	human, err := d.resolveParticipant(ctx, committed.humanID)
+	if err != nil || human.Kind != ParticipantHuman || human.Status != ParticipantActive {
+		return fmt.Errorf("%w: grant %s", ErrNotFound, access.GrantID)
+	}
+	now = d.currentTime()
+	if now.Before(access.IssuedAt) || !now.Before(access.ExpiresAt) ||
+		now.Before(committed.grant.IssuedAt) || !now.Before(committed.grant.ExpiresAt) {
+		return fmt.Errorf("%w: grant %s", ErrNotFound, access.GrantID)
+	}
+	return commit(committed.grant)
+}
+
+// CommitWithActiveHumanReachabilityGrantForDispatch serializes the final
+// dispatch decision with consent/grant revocation. This reference
+// implementation holds its per-directory lock through the callback so a
+// revocation that commits first prevents the callback, while a callback that
+// starts first completes its dispatch state commit before revocation returns.
+func (d *MemoryReachabilityDirectory) CommitWithActiveHumanReachabilityGrantForDispatch(
+	ctx context.Context,
+	access HumanReachabilityDispatchAccess,
+	dispatch func(HumanReachabilityGrant) error,
+) error {
+	if err := access.Validate(); err != nil {
+		return err
+	}
+	if d == nil || d.now == nil {
+		return invalidReachability("clock is required")
+	}
+	if dispatch == nil {
+		return invalidReachability("relay dispatch callback is required")
+	}
+
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	requester, err := d.resolveParticipant(ctx, access.RequesterParticipantID)
+	if err != nil || requester.Kind != ParticipantAgent || requester.Status != ParticipantActive {
+		return fmt.Errorf("%w: grant %s", ErrNotFound, access.GrantID)
+	}
+	committed, ok := d.grants[access.GrantID]
+	if !ok ||
+		committed.grant.RequesterParticipantID != access.RequesterParticipantID ||
+		committed.grant.Purpose != access.Purpose ||
+		committed.grant.Capability != access.Capability ||
+		committed.grant.Channel != access.Channel {
+		return fmt.Errorf("%w: grant %s", ErrNotFound, access.GrantID)
+	}
+	if _, revoked := d.grantRevocations[access.GrantID]; revoked {
+		return fmt.Errorf("%w: grant %s", ErrNotFound, access.GrantID)
+	}
+	if _, revoked := d.consentRevocations[committed.consentID]; revoked {
+		return fmt.Errorf("%w: grant %s", ErrNotFound, access.GrantID)
+	}
+	human, err := d.resolveParticipant(ctx, committed.humanID)
+	if err != nil || human.Kind != ParticipantHuman || human.Status != ParticipantActive {
+		return fmt.Errorf("%w: grant %s", ErrNotFound, access.GrantID)
+	}
+	now := d.currentTime()
+	if now.Before(committed.grant.IssuedAt) || !now.Before(committed.grant.ExpiresAt) {
+		return fmt.Errorf("%w: grant %s", ErrNotFound, access.GrantID)
+	}
+	return dispatch(committed.grant)
+}
+
 // RevokeHumanReachabilityGrant records an immutable revocation by either the
-// consenting Human or the exact Agent requester.
+// consenting Human or the exact Agent requester. A committed revocation is
+// effective immediately; At is audit data and does not defer or reorder that
+// decision.
 func (d *MemoryReachabilityDirectory) RevokeHumanReachabilityGrant(ctx context.Context, revocation HumanReachabilityRevocation) error {
 	if err := revocation.Validate(); err != nil {
 		return err
@@ -478,7 +645,7 @@ func (d *MemoryReachabilityDirectory) resolvePair(ctx context.Context, firstID, 
 }
 
 func (d *MemoryReachabilityDirectory) resolveParticipant(ctx context.Context, participantID string) (Participant, error) {
-	if d == nil || d.participants == nil {
+	if d == nil || isNilDependency(d.participants) {
 		return Participant{}, invalidReachability("Participant resolver is required")
 	}
 	return d.participants.LoadParticipant(ctx, participantID)

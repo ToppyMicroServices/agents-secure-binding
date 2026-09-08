@@ -80,7 +80,7 @@ func (d *MemoryAgentDirectory) SearchAgents(ctx context.Context, query AgentSear
 	if err := query.Validate(); err != nil {
 		return nil, err
 	}
-	if d == nil || d.participants == nil || d.now == nil {
+	if d == nil || isNilDependency(d.participants) || d.now == nil {
 		return nil, invalidDiscovery("Participant resolver and clock are required")
 	}
 	now := d.now()
@@ -109,7 +109,7 @@ func (d *MemoryAgentDirectory) SearchAgents(ctx context.Context, query AgentSear
 }
 
 func (d *MemoryAgentDirectory) resolveParticipant(ctx context.Context, participantID string) (Participant, error) {
-	if d == nil || d.participants == nil {
+	if d == nil || isNilDependency(d.participants) {
 		return Participant{}, invalidDiscovery("Participant resolver is required")
 	}
 	return d.participants.LoadParticipant(ctx, participantID)
