@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>Human Review · ASB</title>
+  <link rel="stylesheet" href="/app.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">本文へ移動</a>
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="ASB Human Review ホーム"><span class="brand-mark" aria-hidden="true">A</span><span>ASB <span class="brand-divider">/</span> Human Review</span></a>
+    <span class="environment"><span aria-hidden="true"></span>ローカル実験版</span>
+  </header>
+  <main id="main">
+    <section id="login-view" class="login-layout" aria-labelledby="login-heading">
+      <div class="intro">
+        <p class="eyebrow">AGENT → HUMAN → ACTION</p>
+        <h1 id="login-heading">実行する前に、<br>あなたが確認する。</h1>
+        <p class="lead">Agentが提案した設定変更を、差分を見て承認・拒否します。変更するのは、このアプリ内の練習用設定だけです。OSや外部サービスの設定は変更しません。</p>
+        <div class="flow" aria-label="提案、確認、適用の流れ"><span>01 <strong>提案</strong></span><i aria-hidden="true">→</i><span>02 <strong>確認</strong></span><i aria-hidden="true">→</i><span>03 <strong>適用</strong></span></div>
+      </div>
+      <form id="login-form" class="panel login-panel">
+        <p class="eyebrow">LOCAL GATEWAY</p>
+        <h2>レビュー画面を開く</h2>
+        <p class="muted">起動したターミナルの非公開ログインURLを、そのままブラウザーで開いてください。手動でログインする場合は、URLの <code>#login=</code> より後のトークンだけを入力します。</p>
+        <label for="login-token">ログイントークン</label>
+        <input id="login-token" type="password" autocomplete="off" spellcheck="false" required maxlength="256" placeholder="起動したターミナルから貼り付け">
+        <button class="button primary wide" id="login-button" type="submit">ログイン <span aria-hidden="true">→</span></button>
+        <p id="login-message" class="form-message" role="status" aria-live="polite"></p>
+        <p class="small muted">ログインURLとトークンは共有しないでください。トークンはブラウザーに保存せず、セッションは最大8時間で終了します。</p>
+      </form>
+    </section>
+
+    <section id="dashboard" hidden aria-labelledby="dashboard-heading">
+      <div class="page-heading">
+        <div><p class="eyebrow">HUMAN REVIEW INBOX</p><h1 id="dashboard-heading">変更を確認する</h1><p class="muted">承認した変更を、このアプリ内の練習用設定に適用します。OSや外部サービスには影響しません。</p></div>
+        <div class="toolbar"><button id="refresh-button" class="button secondary" type="button">一覧を更新</button><button id="logout-button" class="button quiet" type="button">ログアウト</button></div>
+      </div>
+      <div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
+      <div class="overview">
+        <section class="setting-panel panel" aria-labelledby="setting-heading">
+          <p class="eyebrow">CURRENT SETTING</p><h2 id="setting-heading">メンテナンスモード</h2>
+          <div class="setting-value"><strong id="current-setting">—</strong><span id="current-revision" class="muted">読み込み中</span></div>
+          <p class="small muted">対象: local / maintenance_mode</p>
+        </section>
+        <section class="review-summary panel" aria-labelledby="queue-heading"><p class="eyebrow">YOUR QUEUE</p><div class="queue-count"><strong id="pending-count">—</strong><h2 id="queue-heading">確認待ち</h2></div><p id="last-updated" class="small muted">状態を取得しています</p></section>
+      </div>
+      <div class="section-heading"><h2>確認待ちの変更</h2><span class="small muted">自動更新は参照のみ。判断は自動送信しません。</span></div>
+      <p id="inbox-window" class="small muted" hidden></p>
+      <div id="pending-list" class="operation-list"></div>
+      <div id="empty-state" class="empty-state panel" hidden><span class="empty-icon" aria-hidden="true">✓</span><h3>確認待ちの変更はありません</h3><p class="muted">Agentが新しい変更を提案すると、ここに表示されます。</p></div>
+      <section class="history-section" aria-labelledby="history-heading"><div class="section-heading"><h2 id="history-heading">これまでの判断</h2><span id="history-count" class="small muted"></span></div><div id="history-list" class="operation-list"></div><p id="empty-history" class="muted">判断の記録はまだありません。</p></section>
+      <aside class="assurance-note"><strong>この画面の認証範囲</strong><p>Human Participant <code id="human-participant"></code> の操作を、Gateway Actor <code id="gateway-actor"></code> がASBへ送信します。保証レベルは <code id="assurance"></code> です。Human本人の鍵による署名や本人確認を証明するものではありません。</p><p>単一ホスト・software-onlyの実験用ワークフローです。SNP・TDXなどの実機証明や、本番運用のqualificationは含みません。</p></aside>
+    </section>
+  </main>
+  <footer><span>Agents Secure Binding</span><span>ローカルの判断を、実行結果につなぐ。</span></footer>
+
+  <dialog id="decision-dialog" aria-labelledby="decision-heading" aria-describedby="decision-description">
+    <form id="decision-form">
+      <p class="eyebrow">CONFIRM YOUR DECISION</p><h2 id="decision-heading"></h2><p id="decision-description"></p>
+      <div class="dialog-change"><span>メンテナンスモード</span><strong id="decision-change"></strong></div>
+      <p class="small muted">操作ID <code id="decision-operation"></code></p>
+      <p id="decision-warning" class="small muted"></p>
+      <div class="dialog-actions"><button id="cancel-decision" class="button secondary" type="button">戻る</button><button id="confirm-decision" class="button primary" type="submit"></button></div>
+    </form>
+  </dialog>
+
+  <template id="operation-template">
+    <article class="operation panel">
+      <div class="operation-heading"><div><p class="small muted proposer"></p><h3>メンテナンスモードの変更</h3></div><span class="state-tag"></span></div>
+      <div class="change-comparison"><div><span class="small muted">変更前</span><strong class="before-value"></strong><span class="small muted before-revision"></span></div><span class="change-arrow" aria-hidden="true">→</span><div><span class="small muted">提案された変更後</span><strong class="proposed-value"></strong><span class="small muted">local / maintenance_mode</span></div></div>
+      <p class="operation-outcome" hidden></p>
+      <details class="operation-details"><summary>操作の詳細</summary><dl><dt>操作ID</dt><dd class="operation-id"></dd><dt>提案digest</dt><dd class="proposal-digest"></dd><dt>提案日時</dt><dd class="created-at"></dd><dt class="decided-label" hidden>判断日時</dt><dd class="decided-at" hidden></dd></dl></details>
+      <div class="operation-actions"><p class="small muted">この差分を確認して判断してください。</p><div><button class="button secondary decline-button" type="button">拒否する</button><button class="button primary approve-button" type="button">承認する <span aria-hidden="true">→</span></button></div></div>
+    </article>
+  </template>
+</body>
+</html>

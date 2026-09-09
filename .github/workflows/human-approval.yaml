@@ -1,0 +1,109 @@
+name: Local Human Approval
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, feat/human-coordination-product-v1]
+    paths:
+      - ".github/workflows/human-approval.yaml"
+      - "cmd/asb-human/**"
+      - "internal/humanapp/**"
+      - "internal/strictjson/**"
+      - "internal/canonicaltranscript/**"
+      - "pkg/atls/**"
+      - "pkg/production/**"
+      - "examples/protected-change-consumer/**"
+      - "docs/local-human-approval.md"
+      - "docs/asb-human-binary-quickstart.md"
+      - "go.mod"
+      - "go.sum"
+  pull_request:
+    paths:
+      - ".github/workflows/human-approval.yaml"
+      - "cmd/asb-human/**"
+      - "internal/humanapp/**"
+      - "internal/strictjson/**"
+      - "internal/canonicaltranscript/**"
+      - "pkg/atls/**"
+      - "pkg/production/**"
+      - "examples/protected-change-consumer/**"
+      - "docs/local-human-approval.md"
+      - "docs/asb-human-binary-quickstart.md"
+      - "go.mod"
+      - "go.sum"
+
+permissions:
+  contents: read
+
+jobs:
+  runtime:
+    name: Runtime (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    env:
+      GOWORK: "off"
+      GOFLAGS: "-mod=readonly"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: 1.26.6
+          cache-dependency-path: go.sum
+      - run: go mod verify
+      - name: Test application and real command processes
+        run: go test -race -count=1 -timeout=15m ./internal/humanapp ./cmd/asb-human
+      - run: go vet ./internal/humanapp ./cmd/asb-human
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Check browser logic without installing frontend dependencies
+        run: node --test internal/humanapp/web_ui_test.mjs
+      - name: Run the documented first-use check
+        run: go run ./cmd/asb-human self-test
+
+  cross-build:
+    name: Compile (${{ matrix.goos }}/${{ matrix.goarch }})
+    needs: runtime
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goos: darwin
+            goarch: arm64
+            binary: asb-human
+          - goos: linux
+            goarch: amd64
+            binary: asb-human
+          - goos: windows
+            goarch: amd64
+            binary: asb-human.exe
+    env:
+      GOWORK: "off"
+      GOFLAGS: "-mod=readonly"
+      CGO_ENABLED: "0"
+      GOOS: ${{ matrix.goos }}
+      GOARCH: ${{ matrix.goarch }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: 1.26.6
+          cache-dependency-path: go.sum
+      - run: go build -trimpath -o build/${{ matrix.binary }} ./cmd/asb-human
+      - name: Package the preview with its usage guide and checksum
+        working-directory: build
+        run: |
+          cp ../docs/asb-human-binary-quickstart.md USAGE.md
+          sha256sum "${{ matrix.binary }}" > SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: asb-human-${{ matrix.goos }}-${{ matrix.goarch }}-${{ github.sha }}
+          path: build/
+          if-no-files-found: error
+          retention-days: 14

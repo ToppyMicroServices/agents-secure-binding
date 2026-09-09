@@ -30,6 +30,12 @@ The following are separate claims:
 | Agent-to-Human relay | `asb.human-coordination.relay/v1` | In-process Store and local gateway sink only |
 | Production overlay | `asb.human-coordination.production/v1` | Unavailable; live qualification and production adapters are incomplete |
 
+The separate [local approval application](local-human-approval.md) implements
+a browser workflow and a real SQLite transaction for one local setting. Its
+replay records, approval, effect and original response share one transaction.
+This is application-level recovery evidence; it does not implement the generic
+TaskCoord, Task–Action or relay production adapters listed above.
+
 Human matching is an optional capability. A deployment that does not provide
 matching can still implement Human assignments through an already established,
 consent-scoped gateway. A deployment that does provide matching must declare

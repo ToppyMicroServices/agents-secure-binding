@@ -16,22 +16,67 @@
 
 <p align="center">
   <a href="#why-asb">Why ASB</a> ·
-  <a href="#components-and-status">Status</a> ·
   <a href="#quick-start">Quick start</a> ·
+  <a href="#components-and-status">Status</a> ·
   <a href="#security-contract">Security contract</a> ·
   <a href="#agent-to-human-participation">Agent to Human</a> ·
   <a href="#documentation">Documentation</a>
 </p>
 
-Agents Secure Binding (ASB) is a verifier-side identity, session, and context
-binding layer. It accepts an interaction only when the authority grant,
-holder-of-key proof, accepted TLS session, exact request, replay state, any
-required attestation facts, and verifier-local policy all describe the same
-intended action.
+Agents Secure Binding (ASB) helps a service check which Agent is making a
+request, what it is allowed to do, and whether its proof belongs to this exact
+request and connection. It provides the verification layer; applications
+remain responsible for their own approval rules and effects.
 
 > The LLM is a content generator, not the security principal. ASB authenticates
 > the runtime that acted and the authority it exercised; model output cannot
 > grant itself permission.
+
+## Quick start
+
+Install [Go 1.26.6](https://go.dev/doc/install) and run these commands from this source checkout. The local app
+below is a **current-branch experimental preview**, not part of `v2.0.0-rc.2`.
+The first run downloads Go dependencies and compiles the app; later runs reuse
+the build cache. No TEE device, LLM account, Node.js, Docker, or separate
+SQLite installation is needed.
+
+### Check that it works
+
+```text
+go run ./cmd/asb-human self-test
+```
+
+The self-test submits, approves, and declines proposals over real authenticated
+loopback connections, then checks saved results after reopening the database.
+It prints a final `PASS` line or exits with an error. It simulates the Human
+reviewer, uses temporary state, and removes that state when it finishes. No
+browser interaction is needed. This tests local software behavior, not hardware
+assurance or a person's identity.
+
+### Make the decision yourself
+
+```text
+go run ./cmd/asb-human demo --data-dir ./.asb-human
+```
+
+Open the private login link printed in the terminal. A separate Agent process
+proposes changing the app's own `maintenance_mode` setting. Review the before
+and after values in the browser, then approve or decline:
+
+- Approval shows 「適用済み」 in the browser (`APPLIED` in the Agent result)
+  and saves the new setting.
+- Decline shows 「拒否済み」 (`DENIED`) and leaves the setting unchanged.
+
+The Agent prints the result. Press Ctrl+C to stop the service; the decision,
+setting, and recovery receipts remain in `.asb-human`. The browser UI is shared
+across the macOS, Linux, and Windows builds; check the [runtime CI results](https://github.com/ToppyMicroServices/agents-secure-binding/actions/workflows/human-approval.yaml)
+for the commit you use. This is a one-host, one-user
+preview, not a general TaskCoord production service. `demo` chooses free ports
+automatically; always use the link from the current run.
+
+See the [local approval guide](docs/local-human-approval.md) for building a
+reusable executable, troubleshooting, separate processes, and restart recovery.
+For protocol-only examples, see [other local demonstrations](#other-local-demonstrations).
 
 ## Why ASB
 
@@ -51,6 +96,10 @@ ASB does not ask an Agent to declare what should be trusted. Expected service,
 workload, task, authority, and attestation policy come from verifier-controlled
 configuration.
 
+Acceptance binds the authority grant, holder-of-key proof, accepted TLS
+session, exact request, replay state, and any required attestation facts to
+that local policy.
+
 ## Components and status
 
 | Surface | Current status | Boundary |
@@ -64,8 +113,9 @@ configuration.
 | Agent ↔ Human TaskCoord | **Experimental, current branch / next prerelease candidate** | Human Participant, gateway Actor, bounded TLS ingress, and a Redis/Valkey store candidate; live backend qualification incomplete |
 | Agent → Human relay | **Experimental, current branch / next prerelease candidate** | One active reachability grant queues one opaque relay intent; local gateway only, no real delivery provider |
 | Task–Action lifecycle | **Experimental, current branch / next prerelease candidate** | Separate responsibility and execution state machines; reference store only for the Action binding |
+| Local Human approval app | **Experimental, current branch** | Browser inbox, real software-only ASB/mTLS, and SQLite-backed local setting changes; one trusted host and user |
 
-`v2.0.0-rc.2` does not include the three current-branch Human Coordination
+`v2.0.0-rc.2` does not include the current-branch Human Coordination
 surfaces; they are candidates for a later prerelease. No production-readiness
 claim is made for those candidates or for SNP, TDX, and Cocos.
 
@@ -90,9 +140,10 @@ versions. It translates Cocos runtime evidence into ASB interfaces; it is not
 part of ASB Core. See the [attestation module boundary](docs/attestation-module-boundary.md)
 and [Cocos integration guide](integrations/cocos/README.md).
 
-## Quick start
+## Other local demonstrations
 
-### Small software-only demonstration
+<details>
+<summary>Agent-to-Agent: one software-only TLS exchange</summary>
 
 ```sh
 go run ./examples/a2a
@@ -103,7 +154,10 @@ authenticated TLS 1.3 connection, derives a live TLS exporter, and sends one
 grant- and session-bound task. It also demonstrates rejection of scope
 escalation, wrong audience, wrong session, and replay.
 
-### macOS and local debug lab
+</details>
+
+<details>
+<summary>Agent-to-Agent: macOS debug lab and optional local models</summary>
 
 ```sh
 make mac-debug-a2a
@@ -114,8 +168,7 @@ endpoints. It retains mTLS, exact session/request binding, signed
 attestation-result verification, and replay handling, but the evidence is
 explicitly labeled `SIMULATED`.
 
-<details>
-<summary>Connect two local OpenAI-compatible model endpoints</summary>
+To connect two local OpenAI-compatible model endpoints:
 
 ```sh
 make a2a-test
@@ -131,14 +184,15 @@ make a2a-test
 Both endpoints must use a loopback hostname. Proxy use and addresses resolving
 outside loopback are rejected. Do not use production credentials or data.
 
-</details>
-
 The debug lab collects no SNP, TDX, TPM, or vTPM evidence. It is useful for
 protocol debugging on a MacBook; it is not hardware qualification. See the
 [multiprocess guide](examples/a2a-multiprocess/README.md) for reports, Docker,
 multi-process roles, and the experimental two-model workflow.
 
-### Human Coordination on a MacBook
+</details>
+
+<details>
+<summary>Human Coordination: deterministic in-process protocol scenario</summary>
 
 ```sh
 make mac-human-coordination-e2e
@@ -152,6 +206,8 @@ stores and signed simulated evidence, with no network, live TLS, hardware
 attestation, or delivery provider. The report always records
 `production_claim = false`. See the
 [Human Coordination E2E guide](examples/human-coordination-e2e/README.md).
+
+</details>
 
 ## Security contract
 
@@ -220,7 +276,7 @@ prove Human liveness, Human-facing UI confirmation, or legal consent. The
 [Human request binding profile](docs/asb-taskcoord-human-request-binding-v1.md#21-human-assurance-vocabulary)
 defines the full vocabulary and non-guarantees.
 
-The only implemented Human HTTP endpoints are TaskCoord `challenge` and
+The Human TaskCoord HTTP endpoints are `challenge` and
 `execute`; their existing success responses remain `201` and `200`. Every
 response has a server-generated `X-Request-ID`. Public errors keep the string
 `error` field and add `code`, `retryable`, and `request_id`, while internal
@@ -260,10 +316,12 @@ This is a repository-level experimental implementation, not a complete Human
 interaction product. The Redis/Valkey adapter has been exercised against a
 stateful TLS protocol test double, not a live Redis or Valkey deployment or a
 failover topology. The Action binding and Agent relay still use in-process
-reference stores. There is no end-user UI, contact vault, Email/SNS/TEL
-provider, general matching network, relay challenge/execute endpoint, outbox
-publisher, cross-proof Human-ingress outcome journal, or production-qualified
-deployment.
+reference stores. The local approval app has its own browser UI and SQLite
+outcome journal; it does not provide those features for generic TaskCoord or
+relay operations. That broader coordination surface still lacks an end-user
+UI, contact vault, Email/SNS/TEL provider, general matching network, relay
+challenge/execute endpoint, outbox publisher, cross-proof Human-ingress outcome
+journal, and production-qualified deployment.
 
 Agent-authored TaskCoord operations, non-initial Action mutations, and
 consent/grant administration currently accept verifier-created internal
@@ -294,6 +352,7 @@ read the [debug-simple evidence boundary](examples/human-coordination-e2e/README
 | Agent-to-Human relay | `pkg/humanrelay` | Exact ASB relay profile, privacy-minimized intent, and local Mac/CI gateway |
 | Task execution | `pkg/actionlifecycle`, `pkg/taskcoord/actionbinding` | Durable Action state model and explicit Assignment binding |
 | Shared TaskCoord store | `pkg/production/redis_taskcoord.go` | Redis/Valkey atomic state and transactional outbox candidate |
+| Local approval app | `cmd/asb-human`, `internal/humanapp` | Portable CLI, browser inbox, and SQLite-backed local setting changes |
 | Platform modules | `modules/attestation/snp`, `modules/attestation/tdx` | Independently versioned experimental hardware appraisers |
 | Optional integration | `integrations/cocos` | Cocos evidence adapter outside the root module graph |
 | A2A lab | `examples/a2a-multiprocess` | Runnable security scenarios and report schema |
@@ -326,6 +385,7 @@ may need a less restricted environment.
 
 | Question | Start here |
 | --- | --- |
+| How can I try an Agent request and approve it myself? | [Local approval guide](docs/local-human-approval.md) · [Local validation record](docs/local-human-approval-validation.md) |
 | What behavior is authoritative in this repository? | [SSOT](docs/SSOT.md) |
 | What attacks and trust boundaries are in scope? | [Threat model](docs/threat-model.md) |
 | Which v1 APIs and deployment choices are supported? | [API compatibility](docs/API_COMPATIBILITY.md) · [Production profile](docs/production-deployment-profile.md) |
@@ -343,7 +403,7 @@ may need a less restricted environment.
 ASB is a non-normative implementation and evidence repository for the stable
 Direct-Agent v1 profile and experimental candidate/v2 profiles. It is not an
 IETF consensus document, complete application protocol, identity provider,
-attestation evidence format, control plane, or Human-facing product.
+attestation evidence format, control plane, or production Human-facing service.
 
 TLS 1.3, certificate validation, exporter computation, and key-schedule
 security remain responsibilities of the deployment TLS stack. Hardware
