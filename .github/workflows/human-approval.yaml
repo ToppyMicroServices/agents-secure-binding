@@ -107,3 +107,76 @@ jobs:
           path: build/
           if-no-files-found: error
           retention-days: 14
+
+  artifact-smoke:
+    name: Run artifact (${{ matrix.goos }}/${{ matrix.goarch }})
+    needs: cross-build
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            goos: linux
+            goarch: amd64
+          - os: macos-latest
+            goos: darwin
+            goarch: arm64
+          - os: windows-latest
+            goos: windows
+            goarch: amd64
+    steps:
+      # Use this run's uploaded bytes: no checkout, Go setup, or rebuild.
+      - name: Download the matching preview artifact
+        uses: actions/download-artifact@v5
+        with:
+          name: asb-human-${{ matrix.goos }}-${{ matrix.goarch }}-${{ github.sha }}
+          path: preview
+      - name: Verify and run the Unix artifact
+        if: runner.os != 'Windows'
+        shell: bash
+        working-directory: preview
+        env:
+          EXPECTED_GOOS: ${{ matrix.goos }}
+        run: |
+          case "${EXPECTED_GOOS}:$(uname -s):$(uname -m)" in
+            linux:Linux:x86_64|darwin:Darwin:arm64) ;;
+            *) echo "Unexpected native runner OS or architecture" >&2; exit 1 ;;
+          esac
+          test -s USAGE.md
+          checksum_pattern='^[0-9a-f]{64}  asb-human$'
+          if [[ ! "$(cat SHA256SUMS)" =~ $checksum_pattern ]]; then
+            echo "Invalid checksum manifest" >&2
+            exit 1
+          fi
+          shasum -a 256 -c SHA256SUMS
+          shasum -a 256 asb-human
+          chmod +x asb-human
+          ./asb-human self-test
+      - name: Verify and run the Windows artifact
+        if: runner.os == 'Windows'
+        shell: pwsh
+        working-directory: preview
+        run: |
+          if (-not $IsWindows -or [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture -ne 'X64') {
+            throw 'Unexpected native runner OS or architecture'
+          }
+          if ((Get-Item -LiteralPath USAGE.md).Length -eq 0) {
+            throw 'Missing usage guide'
+          }
+          $manifest = Get-Content -LiteralPath SHA256SUMS -Raw
+          $entry = [regex]::Match($manifest, '\A([0-9a-f]{64})  asb-human\.exe\r?\n?\z')
+          if (-not $entry.Success) {
+            throw 'Invalid checksum manifest'
+          }
+          $expected = $entry.Groups[1].Value
+          $actual = (Get-FileHash -LiteralPath asb-human.exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actual -cne $expected) {
+            throw 'Artifact checksum mismatch'
+          }
+          Write-Output "$actual  asb-human.exe"
+          .\asb-human.exe self-test
+          if ($LASTEXITCODE -ne 0) {
+            throw "Artifact self-test failed with exit code $LASTEXITCODE"
+          }

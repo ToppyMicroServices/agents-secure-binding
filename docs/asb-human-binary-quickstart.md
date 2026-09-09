@@ -5,6 +5,12 @@ architecture named in the artifact. No Go installation, Node.js, Docker, LLM
 account, or TEE hardware is needed to run it. Keep all extracted files in one
 folder and open a terminal there.
 
+Choose a successful **Local Human Approval** workflow run with a passing
+**Run artifact** job for your OS and architecture. That job downloads the
+archive, checks its binary checksum, and runs that executable's `self-test`
+without rebuilding it. A successful **Compile** job alone is not an execution
+test. The check uses a simulated Human reviewer, not a browser or TEE.
+
 ## macOS or Linux
 
 Restore the executable bit, then run the unattended check:
