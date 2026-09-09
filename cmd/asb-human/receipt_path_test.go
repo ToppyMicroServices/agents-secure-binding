@@ -57,7 +57,7 @@ func TestReceiptPathShellRoundTrip(t *testing.T) {
 		t.Run(path, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 			defer cancel()
-			script := quoteReceiptPath(executable, runtime.GOOS) + " -test.run=^TestReceiptPathShellRoundTrip$ -- " + quoteReceiptPath(path, runtime.GOOS)
+			script := quoteReceiptPath(executable, runtime.GOOS) + " " + quoteReceiptPath("-test.run=^TestReceiptPathShellRoundTrip$", runtime.GOOS) + " -- " + quoteReceiptPath(path, runtime.GOOS)
 			args := []string{"-c", script}
 			if runtime.GOOS == "windows" {
 				args = []string{"-NoProfile", "-NonInteractive", "-Command", "& " + script}
