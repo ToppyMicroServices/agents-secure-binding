@@ -86,8 +86,8 @@ as did scoped `go vet`. Additional checks covered:
   and tidy-diff passed independently.
 - Final CGO-disabled builds succeeded for macOS arm64, Linux amd64 and Windows
   amd64. Only macOS was executed locally. Linux/Windows runtime jobs and
-  downloadable CI artifacts are configured, but this record does not claim a
-  completed remote CI run or published artifact.
+  downloadable CI artifacts were configured, but no completed remote CI run
+  or published artifact was available at that checkpoint.
 
 README, contribution instructions, the source usage guide and the binary
 quick-start were checked against these entry points. The normal source commands
@@ -134,9 +134,55 @@ visually checked. Deliberately delayed-response races were tested in Node,
 not by manipulating the real browser's network.
 
 Workflow syntax, JavaScript syntax and relative document links were checked.
-Linux/Windows execution, remote CI and published artifacts remain unverified.
+At this pre-commit checkpoint, Linux/Windows execution, remote CI and published
+artifacts were still unverified.
 The local `golangci-lint` executable was unavailable; its CI action was not
 reproduced.
+
+## Remote OS verification — 2026-09-09
+
+[Local Human Approval run 34350475409](https://github.com/ToppyMicroServices/agents-secure-binding/actions/runs/34350475409)
+passed all six jobs for signed commit
+`8f1fa52c9b66db491f7d636fd0a9d68d5c772a56`. GitHub reported the commit signature
+as verified. This is the tested application revision; the later documentation
+update does not change its code.
+
+| Native runtime | Runner image | Job duration |
+| --- | --- | --- |
+| Linux amd64 | Ubuntu 24.04 | 1m27s |
+| macOS arm64 | macOS 26 | 1m55s |
+| Windows amd64 | Windows Server 2025 | 7m41s |
+
+Each runtime used Go 1.26.6 with `GOWORK=off` and passed application and CLI
+race tests, vet, nine Node UI-logic tests, and `self-test`. The CLI suite includes
+separate process recovery and an actual shell/native-child round trip of
+receipt paths containing spaces, quotes, backslashes, dollar signs and Japanese
+text. Windows used PowerShell 7 (`pwsh`); Windows PowerShell 5.1 was not tested.
+
+The [initial run](https://github.com/ToppyMicroServices/agents-secure-binding/actions/runs/34348068927)
+failed Windows receipt-guidance assertions: Go `%q` formatting escaped
+backslashes, while the tests looked for raw paths. Recovery arguments now use
+literal PowerShell or POSIX-shell quoting. The
+[first fix run](https://github.com/ToppyMicroServices/agents-secure-binding/actions/runs/34349648190)
+then exposed an unquoted Go test flag in the new shell test driver. Quoting
+that fixed argument resolved the failure. Neither failed run is counted as
+passing evidence; no tests were skipped to obtain the final result.
+
+All three CGO-disabled artifacts were downloaded. Their binary checksums,
+embedded OS/architecture, clean source revision, and bundled usage guide were
+verified. The downloaded macOS executable also passed `self-test`. Linux and
+Windows runtime evidence comes from native CI source builds; their separately
+cross-built artifact executables were not directly run. Browser rendering on
+Linux and Windows was not exercised; Node tests cover UI logic only.
+
+The three push-triggered workflow executions used standard hosted runners in
+this public repository. The timing API reported zero billable runtime for all
+three runs. Final archives total 28,680,188 bytes with 14-day retention; this is
+not an account-wide storage bill audit. No paid hardware was provisioned.
+Existing Actions emitted Node 20 deprecation warnings; no runtime-security
+override was enabled. The full repository CI and production/hardware gates
+were not run by this dedicated application workflow. No self-hosted runner was
+available, and live SNP/TDX qualification remains incomplete.
 
 ## Remaining boundaries
 
