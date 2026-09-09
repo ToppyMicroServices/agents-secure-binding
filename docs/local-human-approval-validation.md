@@ -170,10 +170,11 @@ passing evidence; no tests were skipped to obtain the final result.
 
 All three CGO-disabled artifacts were downloaded. Their binary checksums,
 embedded OS/architecture, clean source revision, and bundled usage guide were
-verified. The downloaded macOS executable also passed `self-test`. Linux and
-Windows runtime evidence comes from native CI source builds; their separately
-cross-built artifact executables were not directly run. Browser rendering on
-Linux and Windows was not exercised; Node tests cover UI logic only.
+verified. The downloaded macOS executable also passed `self-test`. At that
+checkpoint, Linux and Windows runtime evidence came from native CI source
+builds; their separately cross-built artifact executables were not directly
+run. Browser rendering on Linux and Windows was not exercised; Node tests
+cover UI logic only.
 
 The three push-triggered workflow executions used standard hosted runners in
 this public repository. The timing API reported zero billable runtime for all
@@ -183,6 +184,50 @@ Existing Actions emitted Node 20 deprecation warnings; no runtime-security
 override was enabled. The full repository CI and production/hardware gates
 were not run by this dedicated application workflow. No self-hosted runner was
 available, and live SNP/TDX qualification remains incomplete.
+
+## Downloaded artifact execution — 2026-09-09
+
+[Run 34359618082](https://github.com/ToppyMicroServices/agents-secure-binding/actions/runs/34359618082)
+passed all nine jobs for signed commit
+`ca96d8ea0af741bac2da446033ec810787b30e4e`, which GitHub verified. The three
+new jobs downloaded that run's CGO-disabled artifacts, checked the native
+OS/architecture and binary SHA-256, and ran those executables' `self-test`.
+They did not check out source, install Go, or rebuild the application.
+
+| Artifact | Native runner | Execution log |
+| --- | --- | --- |
+| Linux amd64 | Ubuntu 24.04 | [Passed](https://github.com/ToppyMicroServices/agents-secure-binding/actions/runs/34359618082/job/102494475754) |
+| Windows amd64 | Windows Server 2025, PowerShell 7 | [Passed](https://github.com/ToppyMicroServices/agents-secure-binding/actions/runs/34359618082/job/102494475803) |
+| macOS arm64 | macOS 26 | [Passed](https://github.com/ToppyMicroServices/agents-secure-binding/actions/runs/34359618082/job/102494475831) |
+
+Each execution reported approval, denial and recovery checks as successful,
+then removed its temporary credentials and SQLite database. All three
+artifacts were also downloaded for inspection: the binary checksums matched
+the execution logs, embedded build information identified the tested commit
+with `vcs.modified=false`, and each usage guide matched the committed file.
+
+Binary SHA-256 values, labeled by artifact platform:
+
+```text
+linux-amd64    d810ad55fda1a9fd1704fce05e73013d63604246da7d460d16f1c4e8bde397e1
+windows-amd64  3c6316a6224fc377da5b224a0042504fdcea739a27eb3d9d359171c547955d37
+darwin-arm64  9ef8a06931138e6ae1540abd208b3f09f7e25bf418d14b7f68180a0b7dba5c2f
+```
+
+Before push, workflow syntax and structure checks passed. The exact Unix job
+body passed locally with the previous macOS artifact and rejected a bad
+checksum, wrong filename, empty usage guide and wrong OS before execution.
+The PowerShell job was verified by the successful Windows CI execution.
+
+The new jobs took 3, 6 and 7 seconds on Linux, Windows and macOS respectively;
+each has a five-minute limit. The whole workflow took 4m24s. Its timing API
+reported zero billable runtime. The three archives total 28,680,629 bytes
+with 14-day retention; this is not an account-wide storage bill audit.
+
+This closes the Linux/Windows artifact-execution gap for this preview and
+these runner images. It does not establish browser rendering on those OSes,
+Windows PowerShell 5.1 support, live SNP/TDX qualification, or a TDX strict
+collateral success fixture. No paid runner, merge, tag or release was used.
 
 ## Remaining boundaries
 
