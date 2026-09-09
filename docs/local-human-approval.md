@@ -170,6 +170,12 @@ path is `.asb-human/receipts/proposal-change-001.json`. Keep this file: it
 contains the original command, expected revision, IDs, and digest needed to
 recover the same operation.
 
+Recovery messages quote receipt arguments for PowerShell on Windows and POSIX
+shells on macOS/Linux. Errors are emitted as JSON: decode the `error` field
+before copying a suggested argument; JSON backslash escapes are not shell
+syntax. The unquoted path is also in the `proposal_saved` event's `receipt`
+field. Windows Command Prompt is not the documented shell.
+
 If the service stopped, restart `serve` with the same data directory. First
 inspect the saved proposal:
 

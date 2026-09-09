@@ -412,16 +412,17 @@ func runAgent(ctx context.Context, cfg agentOptions, execute executeCommand, std
 	}{"proposal_saved", path, command.OperationID, receipt.ProposalDigest}); err != nil {
 		return err
 	}
+	receiptArg := quoteReceiptPath(path, runtime.GOOS)
 	unknown := func(err error) error {
-		return fmt.Errorf("outcome unknown; run inspect --receipt %q, or resume agent --receipt %q --wait with the same --data-dir and --core-address: %w", path, path, err)
+		return fmt.Errorf("outcome unknown; run inspect --receipt %s, or resume agent --receipt %s --wait with the same --data-dir and --core-address: %w", receiptArg, receiptArg, err)
 	}
 	raw, err := execute(ctx, command)
 	if err != nil {
 		if errors.Is(err, humanapp.ErrConflict) {
-			return fmt.Errorf("proposal submission rejected (conflict); saved receipt preserved at %q. Run inspect --receipt %q with the same --data-dir and --core-address. If no matching operation is found, review the current setting in the browser before intentionally creating a new proposal with a new --operation-id and a new receipt; resuming this receipt will not refresh its revision: %w", path, path, err)
+			return fmt.Errorf("proposal submission rejected (conflict); saved receipt preserved at %s. Run inspect --receipt %s with the same --data-dir and --core-address. If no matching operation is found, review the current setting in the browser before intentionally creating a new proposal with a new --operation-id and a new receipt; resuming this receipt will not refresh its revision: %w", receiptArg, receiptArg, err)
 		}
 		if errors.Is(err, humanapp.ErrInvalid) || errors.Is(err, humanapp.ErrUnauthorized) || errors.Is(err, humanapp.ErrNotFound) {
-			return fmt.Errorf("proposal submission rejected; saved receipt preserved at %q. Resolve the reported error, then inspect the saved operation before deciding whether to resume or create a new proposal: %w", path, err)
+			return fmt.Errorf("proposal submission rejected; saved receipt preserved at %s. Resolve the reported error, then inspect the saved operation before deciding whether to resume or create a new proposal: %w", receiptArg, err)
 		}
 		return unknown(err)
 	}

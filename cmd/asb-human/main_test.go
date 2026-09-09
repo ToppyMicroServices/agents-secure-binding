@@ -109,7 +109,7 @@ func TestReceiptPreservesProposalAcrossLostResponse(t *testing.T) {
 		return nil, errors.New("response connection lost")
 	}
 	err := runAgent(context.Background(), cfg, first, io.Discard)
-	if err == nil || !strings.Contains(err.Error(), "outcome unknown") || !strings.Contains(err.Error(), path) {
+	if err == nil || !strings.Contains(err.Error(), "outcome unknown") || !strings.Contains(err.Error(), "inspect --receipt "+quoteReceiptPath(path, runtime.GOOS)) {
 		t.Fatalf("missing recovery direction: %v", err)
 	}
 	if strings.Join(firstCalls, ",") != "INBOX,PROPOSE" {
@@ -171,7 +171,7 @@ func TestRejectedProposalPreservesReceiptWithoutRebasing(t *testing.T) {
 				return nil, fmt.Errorf("core response: %w", rejection)
 			}
 			err = runAgent(context.Background(), agentOptions{receipt: path, wait: true, poll: 50 * time.Millisecond}, execute, io.Discard)
-			if !errors.Is(err, rejection) || !strings.Contains(err.Error(), "submission rejected") || !strings.Contains(err.Error(), path) || strings.Contains(err.Error(), "outcome unknown") || calls != 1 {
+			if !errors.Is(err, rejection) || !strings.Contains(err.Error(), "submission rejected") || !strings.Contains(err.Error(), quoteReceiptPath(path, runtime.GOOS)) || strings.Contains(err.Error(), "outcome unknown") || calls != 1 {
 				t.Fatalf("incorrect rejection guidance or automatic retry: calls=%d, error=%v", calls, err)
 			}
 			if errors.Is(rejection, humanapp.ErrConflict) {
@@ -227,7 +227,7 @@ func TestAgentOutputFailureRetainsUnknownOutcomeGuidance(t *testing.T) {
 				return responseForTest(t, command, digest, state), nil
 			}
 			err = runAgent(context.Background(), agentOptions{receipt: path, wait: wait, poll: 50 * time.Millisecond}, execute, output)
-			if !errors.Is(err, failure) || !strings.Contains(err.Error(), "outcome unknown") || !strings.Contains(err.Error(), path) {
+			if !errors.Is(err, failure) || !strings.Contains(err.Error(), "outcome unknown") || !strings.Contains(err.Error(), "inspect --receipt "+quoteReceiptPath(path, runtime.GOOS)) {
 				t.Fatalf("lost output must retain receipt recovery guidance: %v", err)
 			}
 			if _, _, err := readReceipt(path); err != nil {
