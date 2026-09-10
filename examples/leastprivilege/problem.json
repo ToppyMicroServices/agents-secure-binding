@@ -1,0 +1,22 @@
+{
+  "schema": "asb.least-privilege.problem/v1",
+  "permissions": [
+    {"id": "reports.read", "cost": 1},
+    {"id": "reports.list", "cost": 2},
+    {"id": "reports.write", "cost": 10},
+    {"id": "roles.assume", "cost": 50},
+    {"id": "secrets.read", "cost": 100}
+  ],
+  "grants": [
+    {"id": "report-reader", "permissions": ["reports.read"]},
+    {"id": "report-browser", "permissions": ["reports.read", "reports.list"]},
+    {"id": "report-admin", "permissions": ["reports.read", "reports.list", "reports.write"]},
+    {"id": "role-switch", "permissions": ["roles.assume"]}
+  ],
+  "required": ["reports.read"],
+  "allowed": ["reports.read", "reports.list", "reports.write", "roles.assume"],
+  "implications": [
+    {"all_of": ["roles.assume", "reports.write"], "then": ["secrets.read"]}
+  ],
+  "forbidden_together": []
+}

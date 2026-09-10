@@ -7,6 +7,9 @@ change the durable JSON snapshot formats.
 
 The machine-readable cross-language vectors are in
 [`testdata/action-transcript-v1-vectors.json`](../testdata/action-transcript-v1-vectors.json).
+`python3 scripts/verify-action-transcript-v1.py` independently recomputes all
+four transcripts and digests with the Python standard library. The Human
+Coordination gates run it alongside the Go vector tests.
 
 ## Digest format
 

@@ -10,7 +10,7 @@ architecture out of that contract.
 
 ## Datatracker snapshot
 
-Status was rechecked on 3 September 2026 against the IETF Datatracker:
+Status was rechecked on 10 September 2026 against the IETF Datatracker:
 
 - [`draft-okutomi-agent-human-interaction-00`](https://datatracker.ietf.org/doc/draft-okutomi-agent-human-interaction/)
   is an Active Internet-Draft (individual), has no RFC stream, and has no
@@ -19,9 +19,11 @@ Status was rechecked on 3 September 2026 against the IETF Datatracker:
 - [`draft-okutomi-session-bound-agent-identity-06`](https://datatracker.ietf.org/doc/draft-okutomi-session-bound-agent-identity/)
   is also an Active Internet-Draft (individual) with no RFC stream. It leaves
   protocol wire formats and deployment choices to binding profiles.
-- [`agentproto`](https://datatracker.ietf.org/wg/agentproto/about/) and
-  [`dmsc`](https://datatracker.ietf.org/wg/dmsc/about/) are BOFs and are not
-  chartered Working Groups.
+- [`agentproto`](https://datatracker.ietf.org/wg/agentproto/about/) is now a
+  proposed Working Group, with its initial charter under internal review.
+  This supersedes the 3 September BOF snapshot; it is not yet chartered.
+- [`dmsc`](https://datatracker.ietf.org/wg/dmsc/about/) remains a BOF without a
+  charter.
 - [`draft-rosenberg-aiproto-cheq-00`](https://datatracker.ietf.org/doc/draft-rosenberg-aiproto-cheq/)
   is an expired individual Internet-Draft. It is useful prior work, but it is
   not an active or adopted specification.

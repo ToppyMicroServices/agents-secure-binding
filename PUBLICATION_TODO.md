@@ -70,10 +70,13 @@ recorded in this file yet.
 
 ## Dependency Alert Status
 
-GitHub Dependabot reports no open alerts for the default branch. The 10 alerts
-reported during the publication-prep push are fixed as of 2026-06-28 13:49 UTC.
+At the 2026-06-28 13:49 UTC checkpoint, GitHub Dependabot reported no open
+alerts for the default branch after the 10 publication-prep alerts were fixed.
+This is a historical snapshot, not the current alert state. The later gRPC
+repair and its integration evidence are recorded in
+[Human Coordination integration status](docs/human-coordination-integration-status.md).
 
-Current dependency graph checks:
+Previously recorded dependency versions (not a current graph check):
 
 - `google.golang.org/grpc` resolves to `v1.82.1`;
 - `github.com/go-jose/go-jose/v4` resolves to `v4.1.4`;

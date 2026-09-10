@@ -1,0 +1,48 @@
+name: Least Privilege
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/leastprivilege.yaml"
+      - "pkg/leastprivilege/**"
+      - "pkg/taskcoord/**"
+      - "cmd/asb-leastprivilege/**"
+      - "examples/leastprivilege/**"
+      - "go.mod"
+      - "go.sum"
+  pull_request:
+    paths:
+      - ".github/workflows/leastprivilege.yaml"
+      - "pkg/leastprivilege/**"
+      - "pkg/taskcoord/**"
+      - "cmd/asb-leastprivilege/**"
+      - "examples/leastprivilege/**"
+      - "go.mod"
+      - "go.sum"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    env:
+      GOWORK: "off"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.x"
+      - name: Test optimizer, authorization and TaskCoord integration
+        run: go test -race -count=1 ./pkg/leastprivilege ./pkg/taskcoord ./pkg/taskcoord/leastprivilegebinding ./cmd/asb-leastprivilege
+      - name: Vet new packages
+        run: go vet ./pkg/leastprivilege ./pkg/taskcoord/leastprivilegebinding ./cmd/asb-leastprivilege
+      - name: Run local authorization demo
+        run: go run ./cmd/asb-leastprivilege demo

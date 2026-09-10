@@ -4,6 +4,24 @@ These are bounded exhaustive model-checking results for
 `HumanIngressCommitRetry.cfg` and `HumanRelayDispatch.cfg`. They are not
 unbounded proofs and do not establish refinement by a production Store.
 
+## Integration rerun — 2026-09-10
+
+Both unchanged models passed SANY and TLC again during main integration, with
+the same state counts and depths reported below: ingress 1,350,793 generated /
+165,185 distinct states (depth 21), and relay 950,381 / 168,100 (depth 17).
+Their queues were empty at completion. TLC took 18 and 17 seconds respectively.
+
+The official v1.8.0 release asset had been replaced since the earlier run.
+The new binary's SHA-256 was checked against the GitHub release API before
+execution: `eefe1ed75d091b3b0263af53add21265546895d12e43dfd68abb9517b7811006`.
+It reports `TLC2 Version 2026.09.10.133702 (rev: 8ab94b6)`; the API records its
+asset creation at `2026-09-10T13:41:20Z`. The historical tool hashes below still
+identify the earlier run and are not substituted with this asset.
+
+The rerun used OpenJDK 21.0.12, the unchanged `run_human.sh`, and
+`JAVA_TOOL_OPTIONS='-Xmx512m -XX:ActiveProcessorCount=2'`. No negative model
+mutation or coverage campaign was repeated in this integration pass.
+
 ## Toolchain and command
 
 - TLA+ tools release asset: v1.8.0
