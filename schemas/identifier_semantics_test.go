@@ -71,7 +71,6 @@ func TestHumanCoordinationIdentifierSchemasShareStructuralRules(t *testing.T) {
 	}
 
 	for _, definition := range definitions {
-		definition := definition
 		t.Run(definition.name, func(t *testing.T) {
 			t.Parallel()
 			schema := compileDefinition(t, definition.url, definition.raw, definition.definition)

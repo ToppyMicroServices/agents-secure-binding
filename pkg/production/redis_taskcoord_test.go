@@ -28,6 +28,10 @@ import (
 	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/taskcoord"
 )
 
+const (
+	testRedisWaitCommand = "WAIT"
+)
+
 func TestRedisTaskCoordLuaScriptsParseWhenLuaIsAvailable(t *testing.T) {
 	t.Parallel()
 	lua, err := exec.LookPath("lua")
@@ -628,7 +632,7 @@ func (b *taskCoordRedisBackend) handle(connection net.Conn) error {
 	if err != nil {
 		return err
 	}
-	if len(wait) != 3 || wait[0] != "WAIT" || wait[1] != "1" {
+	if len(wait) != 3 || wait[0] != testRedisWaitCommand || wait[1] != "1" {
 		return fmt.Errorf("unexpected WAIT: %q", wait)
 	}
 	b.mu.Lock()
@@ -681,12 +685,12 @@ func (b *taskCoordRedisBackend) register(keys, arguments []string) (string, bool
 	if existing, ok := b.values[keys[0]]; ok {
 		if existing == arguments[0] {
 			b.values[keys[1]] = strconv.FormatInt(b.now.UnixMilli(), 10)
-			return "IDEMPOTENT_BARRIER", true, nil
+			return redisTaskStatusIdempotentBarrier, true, nil
 		}
-		return "ALREADY_EXISTS", false, nil
+		return redisTaskStatusAlreadyExists, false, nil
 	}
 	b.values[keys[0]] = arguments[0]
-	return "REGISTERED", true, nil
+	return redisTaskStatusRegistered, true, nil
 }
 
 func (b *taskCoordRedisBackend) lookup(keys []string) (string, bool, error) {
@@ -695,7 +699,7 @@ func (b *taskCoordRedisBackend) lookup(keys []string) (string, bool, error) {
 	}
 	value, ok := b.values[keys[0]]
 	if !ok {
-		return "NOT_FOUND", false, nil
+		return redisTaskStatusNotFound, false, nil
 	}
 	return "FOUND\n" + value, false, nil
 }
@@ -707,37 +711,37 @@ func (b *taskCoordRedisBackend) commitAssignment(keys, arguments []string) (stri
 	if existing, ok := b.values[keys[1]]; ok {
 		if existing == arguments[2] {
 			b.values[keys[4]] = strconv.FormatInt(b.now.UnixMilli(), 10)
-			return "IDEMPOTENT_BARRIER", true, nil
+			return redisTaskStatusIdempotentBarrier, true, nil
 		}
-		return "EVENT_CONFLICT", false, nil
+		return redisTaskStatusEventConflict, false, nil
 	}
 	expected, err := strconv.ParseUint(arguments[0], 10, 64)
 	if err != nil {
-		return "CORRUPT", false, nil
+		return redisJournalStatusCorrupt, false, nil
 	}
 	var next taskcoord.Assignment
 	if err := json.Unmarshal([]byte(arguments[1]), &next); err != nil || next.Revision != expected+1 {
-		return "CORRUPT", false, nil
+		return redisJournalStatusCorrupt, false, nil
 	}
 	currentRaw, exists := b.values[keys[0]]
 	if expected == 0 {
 		if exists {
-			return "ALREADY_EXISTS", false, nil
+			return redisTaskStatusAlreadyExists, false, nil
 		}
 	} else {
 		var current taskcoord.Assignment
 		if !exists || json.Unmarshal([]byte(currentRaw), &current) != nil || current.Revision != expected {
-			return "REVISION_CONFLICT", false, nil
+			return redisTaskStatusRevisionConflict, false, nil
 		}
 		if currentRaw != arguments[5] {
-			return "REVISION_CONFLICT", false, nil
+			return redisTaskStatusRevisionConflict, false, nil
 		}
 	}
 	b.values[keys[0]] = arguments[1]
 	b.values[keys[1]] = arguments[2]
 	b.outbox[arguments[3]] = arguments[4]
 	b.ready = append(b.ready, arguments[3])
-	return "CREATED", true, nil
+	return redisJournalStatusCreated, true, nil
 }
 
 func (b *taskCoordRedisBackend) commitDelegation(keys, arguments []string) (string, bool, error) {
@@ -749,32 +753,32 @@ func (b *taskCoordRedisBackend) commitDelegation(keys, arguments []string) (stri
 	if parentSeen || childSeen {
 		if parentEvent == arguments[3] && childEvent == arguments[4] && b.values[keys[4]] == arguments[5] {
 			b.values[keys[7]] = strconv.FormatInt(b.now.UnixMilli(), 10)
-			return "IDEMPOTENT_BARRIER", true, nil
+			return redisTaskStatusIdempotentBarrier, true, nil
 		}
-		return "EVENT_CONFLICT", false, nil
+		return redisTaskStatusEventConflict, false, nil
 	}
 	expected, err := strconv.ParseUint(arguments[0], 10, 64)
 	if err != nil {
-		return "CORRUPT", false, nil
+		return redisJournalStatusCorrupt, false, nil
 	}
 	var parent, child taskcoord.Assignment
 	if json.Unmarshal([]byte(arguments[1]), &parent) != nil || json.Unmarshal([]byte(arguments[2]), &child) != nil ||
 		parent.Revision != expected+1 || child.Revision != 1 {
-		return "CORRUPT", false, nil
+		return redisJournalStatusCorrupt, false, nil
 	}
 	currentRaw := b.values[keys[0]]
 	var current taskcoord.Assignment
 	if json.Unmarshal([]byte(currentRaw), &current) != nil || current.Revision != expected {
-		return "REVISION_CONFLICT", false, nil
+		return redisTaskStatusRevisionConflict, false, nil
 	}
 	if currentRaw != arguments[8] {
-		return "REVISION_CONFLICT", false, nil
+		return redisTaskStatusRevisionConflict, false, nil
 	}
 	if _, exists := b.values[keys[1]]; exists {
-		return "ALREADY_EXISTS", false, nil
+		return redisTaskStatusAlreadyExists, false, nil
 	}
 	if _, exists := b.values[keys[4]]; exists {
-		return "ALREADY_EXISTS", false, nil
+		return redisTaskStatusAlreadyExists, false, nil
 	}
 	b.values[keys[0]] = arguments[1]
 	b.values[keys[1]] = arguments[2]
@@ -783,7 +787,7 @@ func (b *taskCoordRedisBackend) commitDelegation(keys, arguments []string) (stri
 	b.values[keys[4]] = arguments[5]
 	b.outbox[arguments[6]] = arguments[7]
 	b.ready = append(b.ready, arguments[6])
-	return "CREATED", true, nil
+	return redisJournalStatusCreated, true, nil
 }
 
 func (b *taskCoordRedisBackend) appendInteraction(keys, arguments []string) (string, bool, error) {
@@ -793,42 +797,42 @@ func (b *taskCoordRedisBackend) appendInteraction(keys, arguments []string) (str
 	if existing, ok := b.values[keys[2]]; ok {
 		if existing == arguments[1] {
 			b.values[keys[10]] = strconv.FormatInt(b.now.UnixMilli(), 10)
-			return "IDEMPOTENT_BARRIER", true, nil
+			return redisTaskStatusIdempotentBarrier, true, nil
 		}
-		return "EVENT_CONFLICT", false, nil
+		return redisTaskStatusEventConflict, false, nil
 	}
 	var event taskcoord.InteractionEvent
 	var assignment taskcoord.Assignment
 	var participant taskcoord.Participant
 	if json.Unmarshal([]byte(arguments[0]), &event) != nil || json.Unmarshal([]byte(b.values[keys[0]]), &assignment) != nil ||
 		json.Unmarshal([]byte(b.values[keys[1]]), &participant) != nil {
-		return "NOT_FOUND", false, nil
+		return redisTaskStatusNotFound, false, nil
 	}
 	var reply, superseded *taskcoord.InteractionEvent
 	if event.InReplyTo != "" {
 		var loaded taskcoord.InteractionEvent
 		if json.Unmarshal([]byte(b.values[keys[4]]), &loaded) != nil {
-			return "INVALID_INTERACTION", false, nil
+			return redisTaskStatusInvalidInteraction, false, nil
 		}
 		reply = &loaded
 	}
 	if event.Supersedes != "" {
 		var loaded taskcoord.InteractionEvent
 		if json.Unmarshal([]byte(b.values[keys[5]]), &loaded) != nil {
-			return "INVALID_INTERACTION", false, nil
+			return redisTaskStatusInvalidInteraction, false, nil
 		}
 		superseded = &loaded
 	}
 	if err := taskcoord.ValidateInteractionAppend(event, assignment, participant, reply, superseded); err != nil {
-		return "INVALID_INTERACTION", false, nil
+		return redisTaskStatusInvalidInteraction, false, nil
 	}
 	if event.Kind == taskcoord.InteractionQuestion && event.InReplyTo == "" && len(b.lists[keys[6]]) != 0 {
-		return "INVALID_INTERACTION", false, nil
+		return redisTaskStatusInvalidInteraction, false, nil
 	}
 	maxBytes, _ := strconv.Atoi(arguments[4])
 	currentBytes, _ := strconv.Atoi(b.values[keys[7]])
 	if currentBytes+len(arguments[0]) > maxBytes {
-		return "LIMIT_REACHED", false, nil
+		return redisTaskStatusLimitReached, false, nil
 	}
 	b.values[keys[2]] = arguments[1]
 	b.values[keys[3]] = arguments[0]
@@ -836,7 +840,7 @@ func (b *taskCoordRedisBackend) appendInteraction(keys, arguments []string) (str
 	b.lists[keys[6]] = append(b.lists[keys[6]], keys[3])
 	b.outbox[arguments[2]] = arguments[3]
 	b.ready = append(b.ready, arguments[2])
-	return "APPENDED", true, nil
+	return redisTaskStatusAppended, true, nil
 }
 
 func (b *taskCoordRedisBackend) listInteractions(keys, arguments []string) (string, bool, error) {
@@ -845,7 +849,7 @@ func (b *taskCoordRedisBackend) listInteractions(keys, arguments []string) (stri
 	}
 	ids := b.lists[keys[0]]
 	if len(ids) == 0 {
-		return "NOT_FOUND", false, nil
+		return redisTaskStatusNotFound, false, nil
 	}
 	maxBytes, _ := strconv.Atoi(arguments[0])
 	total := 0
@@ -853,11 +857,11 @@ func (b *taskCoordRedisBackend) listInteractions(keys, arguments []string) (stri
 	for _, id := range ids {
 		raw, ok := b.values[id]
 		if !ok {
-			return "CORRUPT", false, nil
+			return redisJournalStatusCorrupt, false, nil
 		}
 		total += len(raw)
 		if total > maxBytes {
-			return "LIMIT_REACHED", false, nil
+			return redisTaskStatusLimitReached, false, nil
 		}
 		events = append(events, json.RawMessage(raw))
 	}
@@ -874,11 +878,11 @@ func (b *taskCoordRedisBackend) poll(arguments []string) (string, bool, error) {
 	}
 	limit, err := strconv.Atoi(arguments[2])
 	if err != nil || limit < 1 {
-		return "CORRUPT", false, nil
+		return redisJournalStatusCorrupt, false, nil
 	}
 	leaseMillis, err := strconv.ParseInt(arguments[3], 10, 64)
 	if err != nil || leaseMillis < 1 {
-		return "CORRUPT", false, nil
+		return redisJournalStatusCorrupt, false, nil
 	}
 	now := b.now
 	for deliveryID, lease := range b.leases {
@@ -888,7 +892,7 @@ func (b *taskCoordRedisBackend) poll(arguments []string) (string, bool, error) {
 		}
 	}
 	if len(b.ready) == 0 {
-		return "EMPTY", false, nil
+		return redisTaskStatusEmpty, false, nil
 	}
 	if limit > len(b.ready) {
 		limit = len(b.ready)
@@ -899,7 +903,7 @@ func (b *taskCoordRedisBackend) poll(arguments []string) (string, bool, error) {
 	for _, deliveryID := range selected {
 		raw, ok := b.outbox[deliveryID]
 		if !ok {
-			return "CORRUPT", false, nil
+			return redisJournalStatusCorrupt, false, nil
 		}
 		b.leases[deliveryID] = taskCoordRedisLease{
 			owner: arguments[0], consumer: arguments[1], until: now.Add(time.Duration(leaseMillis) * time.Millisecond),
@@ -926,7 +930,7 @@ func (b *taskCoordRedisBackend) acknowledge(arguments []string) (string, bool, e
 	}
 	delete(b.leases, arguments[0])
 	delete(b.outbox, arguments[0])
-	return "ACKED", true, nil
+	return redisTaskStatusAcked, true, nil
 }
 
 func (b *taskCoordRedisBackend) assertSingleSlot(t *testing.T) {

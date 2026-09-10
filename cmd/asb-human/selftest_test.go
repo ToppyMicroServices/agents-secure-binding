@@ -50,8 +50,12 @@ func TestSelfTestCommandReportsScopeAndSuccess(t *testing.T) {
 
 func TestSelfTestRejectsExistingStateAndUnboundedTimeout(t *testing.T) {
 	for _, args := range [][]string{
-		{"--data-dir", t.TempDir()}, {"--core-address", "127.0.0.1:8091"}, {"--timeout", "0"},
-		{"--timeout", "-1s"}, {"--timeout", "6m"}, {"unexpected"},
+		{"--data-dir", t.TempDir()},
+		{"--core-address", "127.0.0.1:8091"},
+		{"--timeout", "0"},
+		{"--timeout", "-1s"},
+		{"--timeout", "6m"},
+		{"unexpected"},
 	} {
 		var stdout bytes.Buffer
 		if err := run(context.Background(), append([]string{"self-test"}, args...), &stdout, io.Discard); err == nil {

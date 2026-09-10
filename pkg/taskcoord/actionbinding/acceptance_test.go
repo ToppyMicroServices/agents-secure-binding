@@ -14,6 +14,12 @@ import (
 	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/taskcoord"
 )
 
+const (
+	testSubstitutedSuffix = ":substituted"
+	testChangedSuffix     = ":changed"
+	testFreshSuffix       = ":fresh"
+)
+
 func TestServiceAcceptRejectsMissingAndTamperedAuthentication(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -55,8 +61,8 @@ func TestServiceAcceptRejectsMissingAndTamperedAuthentication(t *testing.T) {
 	bindTestAcceptance(t, assignment, at.Add(time.Second), &request)
 	tests := map[string]func(*AcceptRequest){
 		"assignment": func(candidate *AcceptRequest) { candidate.AssignmentID = other.AssignmentID },
-		"event":      func(candidate *AcceptRequest) { candidate.EventID += ":substituted" },
-		"action":     func(candidate *AcceptRequest) { candidate.ActionID += ":substituted" },
+		"event":      func(candidate *AcceptRequest) { candidate.EventID += testSubstitutedSuffix },
+		"action":     func(candidate *AcceptRequest) { candidate.ActionID += testSubstitutedSuffix },
 		"digest": func(candidate *AcceptRequest) {
 			candidate.ActionDigest = "sha256:" + strings.Repeat("b", 64)
 		},
@@ -66,11 +72,10 @@ func TestServiceAcceptRejectsMissingAndTamperedAuthentication(t *testing.T) {
 		},
 		"recovery attempts": func(candidate *AcceptRequest) { candidate.RecoveryPolicy.MaxAttempts++ },
 		"idempotency key": func(candidate *AcceptRequest) {
-			candidate.RecoveryPolicy.IdempotencyKey += ":substituted"
+			candidate.RecoveryPolicy.IdempotencyKey += testSubstitutedSuffix
 		},
 	}
 	for name, mutate := range tests {
-		name, mutate := name, mutate
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			_, service := newService(t)
@@ -105,11 +110,11 @@ func TestAcceptanceDigestBindsTrustedAssignmentProjection(t *testing.T) {
 			candidate.LastTransition.Revision++
 		},
 		"task": func(candidate *taskcoord.Assignment) {
-			candidate.TaskID += ":changed"
+			candidate.TaskID += testChangedSuffix
 			candidate.LastTransition.TaskID = candidate.TaskID
 		},
 		"participant": func(candidate *taskcoord.Assignment) {
-			candidate.ParticipantID += ":changed"
+			candidate.ParticipantID += testChangedSuffix
 			candidate.LastTransition.ParticipantID = candidate.ParticipantID
 		},
 		"role": func(candidate *taskcoord.Assignment) { candidate.Role = taskcoord.RoleReviewer },
@@ -118,7 +123,6 @@ func TestAcceptanceDigestBindsTrustedAssignmentProjection(t *testing.T) {
 		},
 	}
 	for name, mutate := range tests {
-		name, mutate := name, mutate
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			candidate := assignment
@@ -409,9 +413,9 @@ func TestServiceAcceptDifferentProofRequiresReconciliation(t *testing.T) {
 	fresh := request
 	freshAuth := *request.Auth
 	fresh.Auth = &freshAuth
-	fresh.Auth.AuthorizationID += ":fresh"
-	fresh.Auth.ProofID += ":fresh"
-	fresh.Auth.VerifierNonce += ":fresh"
+	fresh.Auth.AuthorizationID += testFreshSuffix
+	fresh.Auth.ProofID += testFreshSuffix
+	fresh.Auth.VerifierNonce += testFreshSuffix
 	fresh.Auth.IssuedAt = clock
 	fresh.Auth.ExpiresAt = clock.Add(15 * time.Minute)
 	clock = clock.Add(time.Second)

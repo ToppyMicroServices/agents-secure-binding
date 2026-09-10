@@ -323,7 +323,7 @@ func (b *testRedisJournalBackend) handle(connection net.Conn) error {
 	if err != nil {
 		return err
 	}
-	if len(wait) != 3 || wait[0] != "WAIT" || wait[1] != "1" {
+	if len(wait) != 3 || wait[0] != testRedisWaitCommand || wait[1] != "1" {
 		return fmt.Errorf("unexpected WAIT: %q", wait)
 	}
 	b.mu.Lock()

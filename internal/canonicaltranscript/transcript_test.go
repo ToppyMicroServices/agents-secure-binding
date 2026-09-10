@@ -86,7 +86,6 @@ func TestEncoderRejectsNonCanonicalInputs(t *testing.T) {
 		},
 	}
 	for name, appendInvalid := range tests {
-		name, appendInvalid := name, appendInvalid
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			encoder := New("test/v1")

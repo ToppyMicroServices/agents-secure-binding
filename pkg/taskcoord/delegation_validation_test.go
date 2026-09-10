@@ -11,6 +11,10 @@ import (
 	"time"
 )
 
+const (
+	testOtherAgent = "agent:other"
+)
+
 func TestValidateAssignmentTransitionRejectsSnapshotAndHistoryRewrite(t *testing.T) {
 	t.Parallel()
 	base := time.Date(2026, 8, 12, 10, 0, 0, 0, time.UTC)
@@ -64,7 +68,6 @@ func TestValidateAssignmentTransitionRejectsSnapshotAndHistoryRewrite(t *testing
 		}},
 	}
 	for _, test := range tests {
-		test := test
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 			mutated := release
@@ -191,7 +194,7 @@ func TestValidateDelegationCommitRejectsMutatedProvenanceBindings(t *testing.T) 
 			got.Delegation.ChildTaskID = "task:other-child"
 		}},
 		{name: "from participant", mutate: func(got *DelegationTransition) {
-			got.Delegation.FromParticipantID = "agent:other"
+			got.Delegation.FromParticipantID = testOtherAgent
 		}},
 		{name: "to participant", mutate: func(got *DelegationTransition) {
 			got.Delegation.ToParticipantID = "human:other"
@@ -220,7 +223,7 @@ func TestValidateDelegationCommitRejectsMutatedProvenanceBindings(t *testing.T) 
 			got.Child.CreatedAt = earlier
 		}},
 		{name: "child offered by", mutate: func(got *DelegationTransition) {
-			got.Child.OfferedByParticipantID = "agent:other"
+			got.Child.OfferedByParticipantID = testOtherAgent
 		}},
 		{name: "parent record kind and state", mutate: func(got *DelegationTransition) {
 			got.ParentRecord.Kind = OperationRelease
@@ -234,11 +237,11 @@ func TestValidateDelegationCommitRejectsMutatedProvenanceBindings(t *testing.T) 
 			got.Parent.LastTransition = got.ParentRecord
 		}},
 		{name: "parent record participant", mutate: func(got *DelegationTransition) {
-			got.ParentRecord.ParticipantID = "agent:other"
+			got.ParentRecord.ParticipantID = testOtherAgent
 			got.Parent.LastTransition = got.ParentRecord
 		}},
 		{name: "child record participant", mutate: func(got *DelegationTransition) {
-			got.ChildRecord.ParticipantID = "agent:other"
+			got.ChildRecord.ParticipantID = testOtherAgent
 			got.Child.LastTransition = got.ChildRecord
 		}},
 		{name: "child record actor", mutate: func(got *DelegationTransition) {
@@ -280,7 +283,6 @@ func TestValidateDelegationCommitRejectsMutatedProvenanceBindings(t *testing.T) 
 	}
 
 	for _, test := range tests {
-		test := test
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 			mutated := transition

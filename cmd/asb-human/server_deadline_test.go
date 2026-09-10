@@ -23,11 +23,11 @@ import (
 
 func TestServersBoundIncompleteRequestBodies(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "private")
-	running, err := startServers(serveOptions{dir: dir, coreAddress: "127.0.0.1:0", webAddress: "127.0.0.1:0"})
+	running, err := startServers(t.Context(), serveOptions{dir: dir, coreAddress: "127.0.0.1:0", webAddress: "127.0.0.1:0"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(running.close)
+	t.Cleanup(func() { running.close(t.Context()) })
 	for name, server := range map[string]*http.Server{"core": running.core, "web": running.web} {
 		if server.ReadTimeout != 15*time.Second {
 			t.Fatalf("%s body deadline = %v, want 15s", name, server.ReadTimeout)

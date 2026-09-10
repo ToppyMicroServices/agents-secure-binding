@@ -76,7 +76,7 @@ func runSelfTest(ctx context.Context, stdout io.Writer, temporaryParent string) 
 	}
 	defer func() {
 		if core != nil {
-			err = errors.Join(err, core.close())
+			err = errors.Join(err, core.close(ctx))
 		}
 	}()
 	if err := selfTestSetting(ctx, core.agent, false, 0); err != nil {
@@ -100,9 +100,11 @@ func runSelfTest(ctx context.Context, stdout io.Writer, temporaryParent string) 
 		{"approval", humanapp.KindApprove, humanapp.StateApplied, true, 0},
 		{"denial", humanapp.KindDecline, humanapp.StateDenied, false, 1},
 	} {
-		proposal := humanapp.Command{CommandID: "self-test-propose-" + scenario.id, Kind: humanapp.KindPropose,
+		proposal := humanapp.Command{
+			CommandID: "self-test-propose-" + scenario.id, Kind: humanapp.KindPropose,
 			OperationID: "self-test-" + scenario.id, ExpectedRevision: scenario.revision,
-			Change: &protectedchange.ChangeRequest{ChangeID: "self-test-" + scenario.id, Tenant: humanapp.Tenant, Setting: humanapp.SettingName, Enabled: scenario.value}}
+			Change: &protectedchange.ChangeRequest{ChangeID: "self-test-" + scenario.id, Tenant: humanapp.Tenant, Setting: humanapp.SettingName, Enabled: scenario.value},
+		}
 		digest, err := humanapp.CommandDigest(proposal)
 		if err != nil {
 			return err
@@ -115,8 +117,10 @@ func runSelfTest(ctx context.Context, stdout io.Writer, temporaryParent string) 
 			return errors.New("pending proposal does not preserve the agent's requested change")
 		}
 		original = append(original, recordedCommand{humanapp.ActorAgent, proposal, raw})
-		decision := humanapp.Command{CommandID: "self-test-decide-" + scenario.id, Kind: scenario.decision,
-			OperationID: proposal.OperationID, ExpectedRevision: scenario.revision, ProposalDigest: digest}
+		decision := humanapp.Command{
+			CommandID: "self-test-decide-" + scenario.id, Kind: scenario.decision,
+			OperationID: proposal.OperationID, ExpectedRevision: scenario.revision, ProposalDigest: digest,
+		}
 		raw, decided, err := selfTestOperation(ctx, core.gateway, decision, digest, scenario.state)
 		if err != nil {
 			return fmt.Errorf("simulated %s: %w", scenario.id, err)
@@ -140,7 +144,7 @@ func runSelfTest(ctx context.Context, stdout io.Writer, temporaryParent string) 
 			return err
 		}
 	}
-	if err := core.close(); err != nil {
+	if err := core.close(ctx); err != nil {
 		core = nil
 		return fmt.Errorf("close before restart: %w", err)
 	}
@@ -228,7 +232,7 @@ func startSelfTestCore(ctx context.Context, dir string) (_ *selfTestCore, err er
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	store, err := humanapp.OpenStore(filepath.Join(dir, "self-test.sqlite"))
+	store, err := humanapp.OpenStoreContext(ctx, filepath.Join(dir, "self-test.sqlite"))
 	if err != nil {
 		return nil, err
 	}
@@ -263,14 +267,17 @@ func startSelfTestCore(ctx context.Context, dir string) (_ *selfTestCore, err er
 	if err != nil {
 		return nil, err
 	}
-	running := &selfTestCore{store: store, agent: agent, gateway: gateway, done: make(chan error, 1),
-		server: &http.Server{Handler: core.Handler(), ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 5 * time.Second, MaxHeaderBytes: 32 << 10}}
+	running := &selfTestCore{
+		store: store, agent: agent, gateway: gateway, done: make(chan error, 1),
+		server: &http.Server{Handler: core.Handler(), ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 5 * time.Second, MaxHeaderBytes: 32 << 10},
+	}
 	go func() { running.done <- running.server.Serve(tls.NewListener(listener, tlsConfig)) }()
 	return running, nil
 }
 
-func (s *selfTestCore) close() error {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+func (s *selfTestCore) close(ctx context.Context) error {
+	// Cleanup still gets its bounded drain window after self-test cancellation.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
 	err := s.server.Shutdown(ctx)
 	if err != nil {

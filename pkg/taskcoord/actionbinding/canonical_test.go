@@ -125,17 +125,19 @@ func TestAcceptanceAttemptFingerprintBindsVerifierProjection(t *testing.T) {
 	}
 
 	tests := map[string]func(*actionlifecycle.AuthenticatedOperation){
-		"actor":         func(candidate *actionlifecycle.AuthenticatedOperation) { candidate.ActorID += ":changed" },
-		"authorization": func(candidate *actionlifecycle.AuthenticatedOperation) { candidate.AuthorizationID += ":changed" },
-		"proof":         func(candidate *actionlifecycle.AuthenticatedOperation) { candidate.ProofID += ":changed" },
-		"action":        func(candidate *actionlifecycle.AuthenticatedOperation) { candidate.ActionID += ":changed" },
+		"actor": func(candidate *actionlifecycle.AuthenticatedOperation) { candidate.ActorID += testChangedSuffix },
+		"authorization": func(candidate *actionlifecycle.AuthenticatedOperation) {
+			candidate.AuthorizationID += testChangedSuffix
+		},
+		"proof":  func(candidate *actionlifecycle.AuthenticatedOperation) { candidate.ProofID += testChangedSuffix },
+		"action": func(candidate *actionlifecycle.AuthenticatedOperation) { candidate.ActionID += testChangedSuffix },
 		"action digest": func(candidate *actionlifecycle.AuthenticatedOperation) {
 			candidate.ActionDigest = "sha256:" + strings.Repeat("3", 64)
 		},
 		"mutation digest": func(candidate *actionlifecycle.AuthenticatedOperation) {
 			candidate.MutationDigest = "sha256:" + strings.Repeat("4", 64)
 		},
-		"nonce": func(candidate *actionlifecycle.AuthenticatedOperation) { candidate.VerifierNonce += ":changed" },
+		"nonce": func(candidate *actionlifecycle.AuthenticatedOperation) { candidate.VerifierNonce += testChangedSuffix },
 		"issued at": func(candidate *actionlifecycle.AuthenticatedOperation) {
 			candidate.IssuedAt = candidate.IssuedAt.Add(time.Nanosecond)
 		},
@@ -144,7 +146,6 @@ func TestAcceptanceAttemptFingerprintBindsVerifierProjection(t *testing.T) {
 		},
 	}
 	for name, mutate := range tests {
-		name, mutate := name, mutate
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			candidate := base

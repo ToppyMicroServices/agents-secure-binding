@@ -20,8 +20,14 @@ import (
 	"github.com/google/uuid"
 )
 
-const testWebOrigin = "http://127.0.0.1:43117"
-const testWebLoginToken = "test-only-private-token-000000000000000000000000"
+const (
+	testWebOrigin     = "http://127.0.0.1:43117"
+	testWebLoginToken = "test-only-private-token-000000000000000000000000"
+)
+
+const (
+	testRemoteAddress = "127.0.0.1:52111"
+)
 
 func TestWebSessionsCoexistOnDifferentLocalPorts(t *testing.T) {
 	jar, err := cookiejar.New(nil)
@@ -37,7 +43,7 @@ func TestWebSessionsCoexistOnDifferentLocalPorts(t *testing.T) {
 		}
 		u, _ := url.Parse(origin)
 		req := httptest.NewRequest("POST", origin+"/api/session", strings.NewReader(`{"token":"`+testWebLoginToken+`"}`))
-		req.RemoteAddr = "127.0.0.1:52111"
+		req.RemoteAddr = testRemoteAddress
 		req.Header.Set("Origin", origin)
 		req.Header.Set("Content-Type", "application/json")
 		for _, cookie := range jar.Cookies(u) {
@@ -53,7 +59,7 @@ func TestWebSessionsCoexistOnDifferentLocalPorts(t *testing.T) {
 	for i, origin := range origins {
 		u, _ := url.Parse(origin)
 		req := httptest.NewRequest("GET", origin+"/api/session", nil)
-		req.RemoteAddr = "127.0.0.1:52111"
+		req.RemoteAddr = testRemoteAddress
 		for _, cookie := range jar.Cookies(u) {
 			req.AddCookie(cookie)
 		}
@@ -90,7 +96,7 @@ func webTestRequest(t *testing.T, handler http.Handler, method, path string, inp
 		}
 	}
 	request := httptest.NewRequest(method, testWebOrigin+path, bytes.NewReader(body))
-	request.RemoteAddr = "127.0.0.1:52111"
+	request.RemoteAddr = testRemoteAddress
 	if method == http.MethodPost {
 		request.Header.Set("Origin", testWebOrigin)
 		request.Header.Set("Content-Type", "application/json")
@@ -127,9 +133,11 @@ func loginWebTest(t *testing.T, handler http.Handler) testWebSession {
 
 func TestWebSessionInboxDecisionAndLogout(t *testing.T) {
 	var commands []Command
-	op := Operation{OperationID: "change-1", ProposalDigest: "sha256:" + strings.Repeat("a", 64),
+	op := Operation{
+		OperationID: "change-1", ProposalDigest: "sha256:" + strings.Repeat("a", 64),
 		Change: protectedchange.ChangeRequest{ChangeID: "change-1", Tenant: Tenant, Setting: SettingName, Enabled: true},
-		Before: Setting{Tenant: Tenant, Name: SettingName, Revision: 4}, State: StatePending, Proposer: ActorAgent}
+		Before: Setting{Tenant: Tenant, Name: SettingName, Revision: 4}, State: StatePending, Proposer: ActorAgent,
+	}
 	handler := newTestWebHandler(t, func(_ context.Context, command Command) ([]byte, error) {
 		if err := command.Validate(); err != nil {
 			t.Fatal(err)
@@ -220,7 +228,7 @@ func TestWebSessionExpiresAndHTTPSCookieIsSecure(t *testing.T) {
 		t.Fatal(err)
 	}
 	request := httptest.NewRequest("POST", "https://127.0.0.1:43117/api/session", strings.NewReader(`{"token":"`+testWebLoginToken+`"}`))
-	request.RemoteAddr = "127.0.0.1:52111"
+	request.RemoteAddr = testRemoteAddress
 	request.Header.Set("Origin", "https://127.0.0.1:43117")
 	request.Header.Set("Content-Type", "application/json")
 	response := httptest.NewRecorder()
@@ -257,7 +265,7 @@ func TestWebRequiresSessionOriginCSRFAndExactDecisionFields(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			request := httptest.NewRequest("POST", testWebOrigin+"/api/decision", strings.NewReader(test.body))
-			request.RemoteAddr = "127.0.0.1:52111"
+			request.RemoteAddr = testRemoteAddress
 			request.Header.Set("Origin", testWebOrigin)
 			request.Header.Set("Content-Type", "application/json")
 			request.Header.Set("X-CSRF-Token", session.csrf)

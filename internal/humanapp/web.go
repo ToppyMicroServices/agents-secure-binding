@@ -323,21 +323,23 @@ func (h *webHandler) setCookie(w http.ResponseWriter, value string, expires time
 
 func (h *webHandler) writeSession(w http.ResponseWriter, session webSession) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	_ = json.NewEncoder(w).Encode(map[string]any{"authenticated": true, "csrf_token": session.csrf, "expires_at": session.expires.UTC(), "gateway_actor": ActorGateway, "human_participant": HumanParticipant, "assurance": Assurance, "mode": "local-preview"})
+	writeJSONResponse(w, http.StatusOK, map[string]any{"authenticated": true, "csrf_token": session.csrf, "expires_at": session.expires.UTC(), "gateway_actor": ActorGateway, "human_participant": HumanParticipant, "assurance": Assurance, "mode": "local-preview"})
 }
 
 func (h *webHandler) unauthorized(w http.ResponseWriter) {
 	webError(w, http.StatusUnauthorized, "LOGIN_REQUIRED", "起動時に表示されたトークンでログインしてください。", false)
 }
+
 func (h *webHandler) methodNotAllowed(w http.ResponseWriter, allow string) {
 	w.Header().Set("Allow", allow)
 	webError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "この操作は受け付けられません。", false)
 }
+
 func webError(w http.ResponseWriter, status int, code, message string, unknown bool) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(map[string]any{"code": code, "message": message, "outcome_unknown": unknown})
+	writeJSONResponse(w, status, map[string]any{"code": code, "message": message, "outcome_unknown": unknown})
 }
+
 func randomWebToken() (string, error) {
 	var raw [32]byte
 	if _, err := rand.Read(raw[:]); err != nil {

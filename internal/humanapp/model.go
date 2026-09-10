@@ -201,10 +201,12 @@ func CommandPolicy(c Command, actor string) identitypolicy.Policy {
 	return identitypolicy.Policy{
 		Mode: identitypolicy.ModeRequired, SetMode: identitypolicy.SetModeExact,
 		Require: identitypolicy.Requirements{L3: true, L4: true, L5: true, L6: true},
-		Expected: identitypolicy.Values{Service: "human-approval", Agent: actor, TaskID: taskID,
+		Expected: identitypolicy.Values{
+			Service: "human-approval", Agent: actor, TaskID: taskID,
 			IntentRef: "humanapp:intent:" + strings.ToLower(c.Kind), CapabilityRef: "humanapp:capability:" + strings.ToLower(c.Kind),
 			Scopes: []string{"humanapp." + strings.ToLower(c.Kind)}, Resources: []string{"humanapp://local/" + taskID},
-			AuthorizationDetails: []string{"humanapp:" + c.Kind}},
+			AuthorizationDetails: []string{"humanapp:" + c.Kind},
+		},
 	}
 }
 

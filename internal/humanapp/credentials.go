@@ -30,14 +30,14 @@ func Initialize(dir string) error {
 	if strings.TrimSpace(dir) == "" {
 		return ErrInvalid
 	}
-	if err := os.MkdirAll(dir, 0700); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
 	info, err := os.Lstat(dir)
 	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
 		return fmt.Errorf("data directory must be a real directory")
 	}
-	if runtime.GOOS != "windows" && info.Mode().Perm()&0077 != 0 {
+	if runtime.GOOS != "windows" && info.Mode().Perm()&0o077 != 0 {
 		return fmt.Errorf("data directory must be private (mode 0700)")
 	}
 	if marker, err := os.ReadFile(filepath.Join(dir, "initialized")); err == nil {
@@ -125,7 +125,7 @@ func Initialize(dir string) error {
 }
 
 func writePrivate(dir, name string, data []byte) error {
-	f, err := os.OpenFile(filepath.Join(dir, name), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	f, err := os.OpenFile(filepath.Join(dir, name), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
 		return err
 	}

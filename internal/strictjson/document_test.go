@@ -19,7 +19,6 @@ func TestValidateDocumentRejectsAmbiguousJSON(t *testing.T) {
 		"trailing value":           []byte(`{"value":1}{"value":2}`),
 	}
 	for name, raw := range tests {
-		raw := raw
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			if err := ValidateDocument(raw, 1<<20); err == nil {

@@ -43,6 +43,12 @@ var (
 	ingressActorSecret   = []byte("actor-secret-for-live-ingress-test")
 )
 
+const (
+	testMissingOracleAssignment      = "assignment:oracle:missing"
+	testMissingOracleTask            = "task:oracle:missing"
+	testUnauthorizedOperationMessage = "operation is not authorized"
+)
+
 func TestHumanTaskCoordIngressDemo(t *testing.T) {
 	now := time.Date(2026, 8, 13, 10, 0, 0, 0, time.UTC)
 	server, client, store := newLiveIngress(t, now)
@@ -746,8 +752,8 @@ func TestIngressAuthenticatesBeforeAssignmentLookup(t *testing.T) {
 		{name: "transition missing", operation: OperationAssignmentTransition, request: func() TransitionRequest {
 			request := transition
 			request.EventID = "event:oracle:transition:missing"
-			request.AssignmentID = "assignment:oracle:missing"
-			request.TaskID = "task:oracle:missing"
+			request.AssignmentID = testMissingOracleAssignment
+			request.TaskID = testMissingOracleTask
 			return request
 		}()},
 		{name: "transition stale", operation: OperationAssignmentTransition, request: func() TransitionRequest {
@@ -761,8 +767,8 @@ func TestIngressAuthenticatesBeforeAssignmentLookup(t *testing.T) {
 			request := interaction
 			request.EventID = "event:oracle:interaction:missing"
 			request.InteractionID = "interaction:oracle:missing"
-			request.AssignmentID = "assignment:oracle:missing"
-			request.TaskID = "task:oracle:missing"
+			request.AssignmentID = testMissingOracleAssignment
+			request.TaskID = testMissingOracleTask
 			return request
 		}()},
 		{name: "interaction wrong task", operation: OperationInteractionAppend, request: func() InteractionRequest {
@@ -776,8 +782,8 @@ func TestIngressAuthenticatesBeforeAssignmentLookup(t *testing.T) {
 		{name: "delegation missing", operation: OperationAssignmentDelegation, request: func() DelegationRequest {
 			request := delegation
 			request.EventID = "event:oracle:delegation:missing"
-			request.ParentAssignmentID = "assignment:oracle:missing"
-			request.ParentTaskID = "task:oracle:missing"
+			request.ParentAssignmentID = testMissingOracleAssignment
+			request.ParentTaskID = testMissingOracleTask
 			return request
 		}()},
 		{name: "delegation stale", operation: OperationAssignmentDelegation, request: func() DelegationRequest {
@@ -801,9 +807,9 @@ func TestIngressAuthenticatesBeforeAssignmentLookup(t *testing.T) {
 				Request: mustJSON(t, test.request), GrantJWT: grant + "corrupt",
 				SessionBindingJWT: proof,
 			})
-			if status != http.StatusForbidden || message != "operation is not authorized" {
+			if status != http.StatusForbidden || message != testUnauthorizedOperationMessage {
 				t.Fatalf("authorization response = %d %q, want %d %q",
-					status, message, http.StatusForbidden, "operation is not authorized")
+					status, message, http.StatusForbidden, testUnauthorizedOperationMessage)
 			}
 		})
 	}
@@ -854,9 +860,9 @@ func TestIngressVerifiesProofBeforeAcceptedUntilAndParticipantLookup(t *testing.
 		ChallengeID: challenge.ChallengeID, Operation: OperationAssignmentTransition,
 		Request: mustJSON(t, request), GrantJWT: grant + "corrupt", SessionBindingJWT: proof,
 	})
-	if status != http.StatusForbidden || message != "operation is not authorized" {
+	if status != http.StatusForbidden || message != testUnauthorizedOperationMessage {
 		t.Fatalf("authorization response = %d %q, want %d %q",
-			status, message, http.StatusForbidden, "operation is not authorized")
+			status, message, http.StatusForbidden, testUnauthorizedOperationMessage)
 	}
 	if got := policyCalls.Load(); got != 0 {
 		t.Fatalf("AcceptedUntil ran before proof verification: %d calls", got)
@@ -892,9 +898,9 @@ func TestIngressCollapsesAcceptedUntilErrorAfterProof(t *testing.T) {
 		ChallengeID: challenge.ChallengeID, Operation: OperationAssignmentTransition,
 		Request: mustJSON(t, request), GrantJWT: grant, SessionBindingJWT: proof,
 	})
-	if status != http.StatusForbidden || message != "operation is not authorized" {
+	if status != http.StatusForbidden || message != testUnauthorizedOperationMessage {
 		t.Fatalf("policy response = %d %q, want %d %q",
-			status, message, http.StatusForbidden, "operation is not authorized")
+			status, message, http.StatusForbidden, testUnauthorizedOperationMessage)
 	}
 	if got := policyCalls.Load(); got != 1 {
 		t.Fatalf("AcceptedUntil calls = %d, want 1 after verified proof", got)

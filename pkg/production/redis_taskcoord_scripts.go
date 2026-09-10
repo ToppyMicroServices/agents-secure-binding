@@ -41,6 +41,7 @@ if not raw then return 'NOT_FOUND' end
 return 'FOUND\n' .. raw
 `
 
+//nolint:dupword // Adjacent Lua end tokens close nested blocks.
 const redisTaskCommitAssignmentScript = redisTaskPrelude + `
 local expected = tonumber(ARGV[1])
 local next = decoded(ARGV[2])
@@ -126,6 +127,7 @@ redis.call('ZADD', KEYS[7], now, ARGV[7])
 return 'CREATED'
 `
 
+//nolint:dupword // Adjacent Lua end tokens close nested blocks.
 const redisTaskAppendInteractionScript = redisTaskPrelude + `
 local event = decoded(ARGV[1])
 local committed = decoded(ARGV[2])
@@ -212,6 +214,7 @@ end
 return 'FOUND\n' .. cjson.encode(result)
 `
 
+//nolint:dupword // Adjacent Lua end tokens close nested blocks.
 const redisTaskPollOutboxScript = redisTaskPrelude + `
 local limit = tonumber(ARGV[3])
 local lease_ms = tonumber(ARGV[4])

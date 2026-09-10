@@ -29,9 +29,11 @@ import (
 	"github.com/google/uuid"
 )
 
-const authorityIssuer = "urn:asb-human:local-authority"
-const authorityKeyID = "local-authority"
-const localAudience = "asb-human.local"
+const (
+	authorityIssuer = "urn:asb-human:local-authority"
+	authorityKeyID  = "local-authority"
+	localAudience   = "asb-human.local"
+)
 
 type challenge struct {
 	ID        string    `json:"challenge_id"`
@@ -109,7 +111,7 @@ func (s *CoreServer) serveHTTP(w http.ResponseWriter, r *http.Request) {
 			writeAPIError(w, err)
 			return
 		}
-		_ = json.NewEncoder(w).Encode(proof)
+		writeJSONResponse(w, http.StatusOK, proof)
 		return
 	}
 	var envelope executeEnvelope
@@ -213,13 +215,14 @@ func (s *CoreServer) execute(r *http.Request, actor string, envelope executeEnve
 	if err != nil || binding.TLSExporterSHA256 != p.binding.TLSExporterSHA256 || binding.LeafPublicKeySHA256 != p.binding.LeafPublicKeySHA256 {
 		return nil, ErrUnauthorized
 	}
-	return s.store.Execute(r.Context(), cmd, func(replay identitypolicy.ReplayCache) (production.AcceptedIdentity, error) {
+	ctx := r.Context()
+	return s.store.Execute(ctx, cmd, func(replay identitypolicy.ReplayCache) (production.AcceptedIdentity, error) {
 		profile := production.SoftwareOnlyProfile{
 			GrantAuthority:   localAuthority(authorityIssuer, authorityKeyID, s.credentials.authority.Public()),
 			BindingAuthority: localAuthority(actor, actor, s.credentials.peers[actor].PublicKey),
 			IdentityPolicy:   CommandPolicy(cmd, actor), ReplayCache: replay,
 		}
-		accepted, err := profile.Verify(r.Context(), production.SoftwareOnlyVerifyRequest{GrantJWT: envelope.GrantJWT, SessionBindingJWT: envelope.SessionJWT, ExpectedBinding: binding})
+		accepted, err := profile.Verify(ctx, production.SoftwareOnlyVerifyRequest{GrantJWT: envelope.GrantJWT, SessionBindingJWT: envelope.SessionJWT, ExpectedBinding: binding})
 		if err != nil {
 			if errors.Is(err, ErrUnavailable) {
 				return production.AcceptedIdentity{}, ErrUnavailable
@@ -252,11 +255,24 @@ func writeAPIError(w http.ResponseWriter, err error) {
 	case errors.Is(err, ErrConflict):
 		status, code, message = http.StatusConflict, "CONFLICT", ErrConflict.Error()
 	}
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(struct {
+	writeJSONResponse(w, status, struct {
 		Code    string `json:"code"`
 		Message string `json:"message"`
 	}{code, message})
+}
+
+// writeJSONResponse encodes fresh responses before committing their status.
+// A socket write failure ends this response; it cannot undo an earlier commit.
+func writeJSONResponse(w http.ResponseWriter, status int, value any) {
+	raw, err := json.Marshal(value)
+	if err != nil {
+		status = http.StatusServiceUnavailable
+		raw = []byte(`{"code":"OUTCOME_UNKNOWN","message":"response unavailable"}`)
+	}
+	w.WriteHeader(status)
+	if _, err := w.Write(append(raw, '\n')); err != nil {
+		return
+	}
 }
 
 // Client derives its holder proof from its own live TLS connection. A fresh
