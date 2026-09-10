@@ -65,9 +65,11 @@ type HumanReachabilityDispatchTransaction interface {
 	) error
 }
 
-var _ HumanReachabilityDirectory = (*MemoryReachabilityDirectory)(nil)
-var _ HumanReachabilityRelayTransaction = (*MemoryReachabilityDirectory)(nil)
-var _ HumanReachabilityDispatchTransaction = (*MemoryReachabilityDirectory)(nil)
+var (
+	_ HumanReachabilityDirectory           = (*MemoryReachabilityDirectory)(nil)
+	_ HumanReachabilityRelayTransaction    = (*MemoryReachabilityDirectory)(nil)
+	_ HumanReachabilityDispatchTransaction = (*MemoryReachabilityDirectory)(nil)
+)
 
 type candidateBinding struct {
 	humanID     string

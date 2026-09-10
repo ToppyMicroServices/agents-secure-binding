@@ -28,8 +28,10 @@ import (
 )
 
 func proposalForTest(id string, revision uint64) humanapp.Command {
-	return humanapp.Command{CommandID: "cmd-" + id, Kind: humanapp.KindPropose, OperationID: id, ExpectedRevision: revision,
-		Change: &protectedchange.ChangeRequest{ChangeID: id, Tenant: humanapp.Tenant, Setting: humanapp.SettingName, Enabled: true}}
+	return humanapp.Command{
+		CommandID: "cmd-" + id, Kind: humanapp.KindPropose, OperationID: id, ExpectedRevision: revision,
+		Change: &protectedchange.ChangeRequest{ChangeID: id, Tenant: humanapp.Tenant, Setting: humanapp.SettingName, Enabled: true},
+	}
 }
 
 func responseForTest(t *testing.T, command humanapp.Command, digest, state string) []byte {
@@ -74,9 +76,9 @@ func TestListenerConflictNamesThePortAndRecoveryFlag(t *testing.T) {
 			} else {
 				cfg.webAddress = busy.Addr().String()
 			}
-			running, err := startServers(cfg)
+			running, err := startServers(t.Context(), cfg)
 			if running != nil {
-				running.close()
+				running.close(t.Context())
 				t.Fatal("listener conflict unexpectedly started the service")
 			}
 			if err == nil || !strings.Contains(err.Error(), busy.Addr().String()) || !strings.Contains(err.Error(), "--"+listener+"-listen=127.0.0.1:0") {
@@ -102,7 +104,10 @@ func TestReceiptPreservesProposalAcrossLostResponse(t *testing.T) {
 			t.Fatalf("request sent before its receipt was saved: %v", err)
 		}
 		initial = append([]byte(nil), receipt.Command...)
-		got, _ := json.Marshal(command)
+		got, err := json.Marshal(command)
+		if err != nil {
+			t.Fatal(err)
+		}
 		if !bytes.Equal(got, initial) || saved.ExpectedRevision != 7 {
 			t.Fatal("sent a different command from the receipt")
 		}
@@ -122,7 +127,10 @@ func TestReceiptPreservesProposalAcrossLostResponse(t *testing.T) {
 			t.Fatal("restart fetched a new revision")
 		}
 		if command.Kind == humanapp.KindPropose {
-			raw, _ := json.Marshal(command)
+			raw, err := json.Marshal(command)
+			if err != nil {
+				t.Fatal(err)
+			}
 			if !bytes.Equal(raw, initial) {
 				t.Fatal("restart changed proposal bytes")
 			}
@@ -308,7 +316,7 @@ func TestReceiptNeverOverwritesAndRejectsConflictingFlags(t *testing.T) {
 	if err != nil || !bytes.Equal(before, after) {
 		t.Fatal("existing receipt changed")
 	}
-	if runtime.GOOS != "windows" {
+	if runtime.GOOS != goosWindows {
 		info, err := os.Stat(path)
 		if err != nil || info.Mode().Perm() != 0o600 {
 			t.Fatalf("receipt permission: %v %v", info, err)
@@ -478,7 +486,7 @@ func fieldString(t *testing.T, event map[string]json.RawMessage, name string) st
 func buildCommand(t *testing.T) string {
 	t.Helper()
 	name := "asb-human"
-	if runtime.GOOS == "windows" {
+	if runtime.GOOS == goosWindows {
 		name += ".exe"
 	}
 	path := filepath.Join(t.TempDir(), name)

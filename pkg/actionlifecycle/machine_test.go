@@ -13,10 +13,16 @@ import (
 	"time"
 )
 
-const testDigest = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-const testAcceptanceContextDigest = "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+const (
+	testDigest                  = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	testAcceptanceContextDigest = "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+)
 
 var testStart = time.Date(2026, 8, 9, 1, 0, 0, 0, time.UTC)
+
+const (
+	testSubstitutedSuffix = "-substituted"
+)
 
 func TestNewSnapshotRequiresBoundAcceptanceAuthentication(t *testing.T) {
 	t.Parallel()
@@ -52,16 +58,15 @@ func TestNewSnapshotRequiresBoundAcceptanceAuthentication(t *testing.T) {
 		t.Fatalf("durable acceptance digest did not reject recovery tampering: %v", err)
 	}
 	tests := map[string]func(*Definition){
-		"event":    func(candidate *Definition) { candidate.EventID += "-substituted" },
-		"action":   func(candidate *Definition) { candidate.ActionID += "-substituted" },
-		"owner":    func(candidate *Definition) { candidate.OwnerID += "-substituted" },
+		"event":    func(candidate *Definition) { candidate.EventID += testSubstitutedSuffix },
+		"action":   func(candidate *Definition) { candidate.ActionID += testSubstitutedSuffix },
+		"owner":    func(candidate *Definition) { candidate.OwnerID += testSubstitutedSuffix },
 		"recovery": func(candidate *Definition) { candidate.RecoveryPolicy.MaxAttempts++ },
 		"context": func(candidate *Definition) {
 			candidate.AcceptanceContextDigest = "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
 		},
 	}
 	for name, mutate := range tests {
-		name, mutate := name, mutate
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			candidate := definition
@@ -354,7 +359,6 @@ func TestSnapshotValidationRejectsImpossibleDurableHistory(t *testing.T) {
 		},
 	}
 	for name, mutate := range tests {
-		name, mutate := name, mutate
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			if err := mutate(accepted).Validate(); !errors.Is(err, ErrInvalidSnapshot) {
@@ -417,7 +421,6 @@ func TestSnapshotValidationRejectsImpossibleDurableHistory(t *testing.T) {
 		"revision-two TAKEOVER":      takenOver,
 	}
 	for name, snapshot := range tooEarly {
-		name, snapshot := name, snapshot
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			snapshot.Revision = 2
@@ -456,7 +459,6 @@ func TestMinimumTransitionRevision(t *testing.T) {
 		{name: "resolve reconciliation", kind: EventResolveReconciliation, from: StateIndeterminate, want: 5},
 	}
 	for _, test := range tests {
-		test := test
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 			if got := minimumTransitionRevision(test.kind, test.from); got != test.want {

@@ -25,7 +25,6 @@ func TestDecodeSnapshotRejectsDuplicateMembersAndOversize(t *testing.T) {
 		"oversized":           append(append([]byte(nil), raw...), bytes.Repeat([]byte{' '}, MaxSnapshotBytes-len(raw)+1)...),
 	}
 	for name, document := range tests {
-		document := document
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			if _, err := DecodeSnapshot(bytes.NewReader(document)); !errors.Is(err, ErrInvalidSnapshot) {

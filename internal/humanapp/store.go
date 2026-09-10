@@ -46,6 +46,17 @@ type Store struct {
 // SQLite coordinates concurrent transactions; the process uses one connection
 // so authentication and the resulting application write have one owner.
 func OpenStore(path string) (*Store, error) {
+	return OpenStoreContext(context.Background(), path)
+}
+
+// OpenStoreContext opens a database with bounded, cancelable initialization.
+func OpenStoreContext(ctx context.Context, path string) (*Store, error) {
+	if ctx == nil {
+		return nil, ErrInvalid
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, storeError(err)
+	}
 	if strings.TrimSpace(path) == "" {
 		return nil, ErrInvalid
 	}
@@ -80,15 +91,15 @@ func OpenStore(path string) (*Store, error) {
 	db.SetMaxOpenConns(1)
 	db.SetMaxIdleConns(1)
 	store := &Store{db: db, now: time.Now}
-	if err := store.initialize(); err != nil {
+	if err := store.initialize(ctx); err != nil {
 		_ = db.Close()
 		return nil, err
 	}
 	return store, nil
 }
 
-func (s *Store) initialize() error {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+func (s *Store) initialize(ctx context.Context) error {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	if _, err := s.db.ExecContext(ctx, "PRAGMA busy_timeout = 5000"); err != nil {
 		return storeError(err)

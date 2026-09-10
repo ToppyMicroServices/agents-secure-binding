@@ -8,13 +8,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/golang-jwt/jwt/v5"
-
 	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/atls/identitypolicy"
 	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/clients"
 	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/humanrelay"
 	relaybinding "github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/humanrelay/asbbinding"
 	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/taskcoord"
+	"github.com/golang-jwt/jwt/v5"
 )
 
 func TestHumanProtocolRedTeamRejectsCrossProfileAndAudienceConfusion(t *testing.T) {

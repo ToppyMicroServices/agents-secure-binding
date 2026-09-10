@@ -24,6 +24,10 @@ import (
 
 var storeTestTime = time.Date(2026, time.September, 8, 0, 0, 0, 0, time.UTC)
 
+const (
+	testApprovalPhase = "approval"
+)
+
 func openTestStore(t *testing.T, path string) *Store {
 	t.Helper()
 	store, err := OpenStore(path)
@@ -206,7 +210,7 @@ func TestStoreWrongReviewBindingRollsBack(t *testing.T) {
 		t.Run(change, func(t *testing.T) {
 			store := openTestStore(t, filepath.Join(t.TempDir(), "state.sqlite"))
 			_, proposed := executeStore(t, store, testProposal("proposal", true, 0), ActorAgent, "propose")
-			correct := testDecision("approval", KindApprove, *proposed.Operation)
+			correct := testDecision(testApprovalPhase, KindApprove, *proposed.Operation)
 			wrong := correct
 			if change == "digest" {
 				wrong.ProposalDigest = "sha256:" + strings.Repeat("0", 64)
@@ -318,17 +322,17 @@ func TestStoreAuthenticatesBeforeOperationLookup(t *testing.T) {
 }
 
 func TestStoreCommitFailureRollsBackProposalAndApproval(t *testing.T) {
-	for _, phase := range []string{"proposal", "approval"} {
+	for _, phase := range []string{"proposal", testApprovalPhase} {
 		t.Run(phase, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "state.sqlite")
 			store := openTestStore(t, path)
 			command := testProposal("proposal", true, 0)
 			actor := ActorAgent
 			var operation Operation
-			if phase == "approval" {
+			if phase == testApprovalPhase {
 				_, proposed := executeStore(t, store, command, ActorAgent, "initial-proposal")
 				operation = *proposed.Operation
-				command = testDecision("approval", KindApprove, operation)
+				command = testDecision(testApprovalPhase, KindApprove, operation)
 				actor = ActorGateway
 			}
 			store.beforeCommit = func() error { return errors.New("injected commit failure") }
@@ -345,11 +349,11 @@ func TestStoreCommitFailureRollsBackProposalAndApproval(t *testing.T) {
 			if phase == "proposal" && len(inbox.Operations) != 0 {
 				t.Fatal("uncommitted proposal survived restart")
 			}
-			if phase == "approval" && (len(inbox.Operations) != 1 || inbox.Operations[0].State != StatePending) {
+			if phase == testApprovalPhase && (len(inbox.Operations) != 1 || inbox.Operations[0].State != StatePending) {
 				t.Fatalf("uncommitted approval survived restart: %+v", inbox.Operations)
 			}
 			_, recovered := executeStore(t, store, command, actor, "attempt-proof")
-			if phase == "approval" {
+			if phase == testApprovalPhase {
 				requireSetting(t, recovered, true, 1)
 			}
 		})
@@ -449,7 +453,7 @@ func TestStoreRestartWithoutDatabaseClose(t *testing.T) {
 	if path := os.Getenv(childDatabase); path != "" {
 		store := openTestStore(t, path)
 		_, proposal := executeStore(t, store, testProposal("process", true, 0), ActorAgent, "proposal")
-		result, _ := executeStore(t, store, testDecision("approve-process", KindApprove, *proposal.Operation), ActorGateway, "approval")
+		result, _ := executeStore(t, store, testDecision("approve-process", KindApprove, *proposal.Operation), ActorGateway, testApprovalPhase)
 		if _, err := os.Stdout.Write(result); err != nil {
 			t.Fatal(err)
 		}

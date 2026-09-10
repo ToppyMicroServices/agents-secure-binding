@@ -102,7 +102,6 @@ func TestMemoryStoreConcurrentBindingHasOneWinner(t *testing.T) {
 	results := make(chan result, len(requests))
 	var workers sync.WaitGroup
 	for index := range requests {
-		index := index
 		workers.Add(1)
 		go func() {
 			defer workers.Done()

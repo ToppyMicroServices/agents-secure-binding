@@ -214,7 +214,7 @@ func (s *testRedisServer) handle(conn net.Conn) error {
 	if err != nil {
 		return err
 	}
-	if len(wait) != 3 || wait[0] != "WAIT" || wait[1] != "1" {
+	if len(wait) != 3 || wait[0] != testRedisWaitCommand || wait[1] != "1" {
 		return fmt.Errorf("unexpected replication command: %q", wait)
 	}
 	if _, err := strconv.ParseInt(wait[2], 10, 64); err != nil {

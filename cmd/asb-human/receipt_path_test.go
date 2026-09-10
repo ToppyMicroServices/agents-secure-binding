@@ -15,9 +15,9 @@ import (
 
 func TestQuoteReceiptPath(t *testing.T) {
 	for _, tc := range []struct{ goos, path, want string }{
-		{"windows", `C:\Users\A B\receipt.json`, `'C:\Users\A B\receipt.json'`},
-		{"windows", `C:\O'Brien\$value; & ` + "`" + `.json`, `'C:\O''Brien\$value; & ` + "`" + `.json'`},
-		{"windows", `C:\‘review’\receipt.json`, `'C:\‘‘review’’\receipt.json'`},
+		{goosWindows, `C:\Users\A B\receipt.json`, `'C:\Users\A B\receipt.json'`},
+		{goosWindows, `C:\O'Brien\$value; & ` + "`" + `.json`, `'C:\O''Brien\$value; & ` + "`" + `.json'`},
+		{goosWindows, `C:\‘review’\receipt.json`, `'C:\‘‘review’’\receipt.json'`},
 		{"linux", `/tmp/O'Brien/$value; & ` + "`" + `.json`, `'/tmp/O'"'"'Brien/$value; & ` + "`" + `.json'`},
 		{"darwin", `/tmp/日本語 folder/receipt.json`, `'/tmp/日本語 folder/receipt.json'`},
 	} {
@@ -41,7 +41,7 @@ func TestReceiptPathShellRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	shell := "sh"
-	if runtime.GOOS == "windows" {
+	if runtime.GOOS == goosWindows {
 		shell = "pwsh"
 	}
 	if _, err := exec.LookPath(shell); err != nil {
@@ -59,7 +59,7 @@ func TestReceiptPathShellRoundTrip(t *testing.T) {
 			defer cancel()
 			script := quoteReceiptPath(executable, runtime.GOOS) + " " + quoteReceiptPath("-test.run=^TestReceiptPathShellRoundTrip$", runtime.GOOS) + " -- " + quoteReceiptPath(path, runtime.GOOS)
 			args := []string{"-c", script}
-			if runtime.GOOS == "windows" {
+			if runtime.GOOS == goosWindows {
 				args = []string{"-NoProfile", "-NonInteractive", "-Command", "& " + script}
 			}
 			command := exec.CommandContext(ctx, shell, args...)

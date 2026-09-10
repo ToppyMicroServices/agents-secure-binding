@@ -59,10 +59,16 @@ type serveOptions struct {
 	demo, enabled                bool
 }
 
+const (
+	commandDemo = "demo"
+	goosWindows = "windows"
+)
+
 func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
-	defer cancel()
-	if err := run(ctx, os.Args[1:], os.Stdout, os.Stderr); err != nil {
+	err := run(ctx, os.Args[1:], os.Stdout, os.Stderr)
+	cancel()
+	if err != nil {
 		_ = writeJSON(os.Stderr, map[string]string{"error": err.Error()})
 		os.Exit(1)
 	}
@@ -100,8 +106,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	var operationID, receiptPath, digest string
 	switch args[0] {
 	case "init":
-	case "serve", "demo":
-		serveCfg.demo = args[0] == "demo"
+	case "serve", commandDemo:
+		serveCfg.demo = args[0] == commandDemo
 		coreAddress, webAddress := defaultCoreAddress, defaultWebAddress
 		if serveCfg.demo {
 			coreAddress, webAddress = "127.0.0.1:0", "127.0.0.1:0"
@@ -146,7 +152,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 			return err
 		}
 		return writeJSON(stdout, map[string]string{"event": "initialized", "data_dir": dir})
-	case "serve", "demo":
+	case "serve", commandDemo:
 		serveCfg.dir = dir
 		return serve(ctx, serveCfg, stdout, stderr)
 	case "agent":
@@ -245,7 +251,7 @@ func readReceipt(path string) (proposalReceipt, humanapp.Command, error) {
 	if !info.Mode().IsRegular() || info.Size() > humanapp.MaxRequestBytes+1024 {
 		return receipt, command, errors.New("receipt must be a small regular file")
 	}
-	if runtime.GOOS != "windows" && info.Mode().Perm()&0o077 != 0 {
+	if runtime.GOOS != goosWindows && info.Mode().Perm()&0o077 != 0 {
 		return receipt, command, errors.New("receipt permissions must restrict access to its owner")
 	}
 	file, err := os.Open(path)
@@ -314,7 +320,7 @@ func saveReceipt(path string, command humanapp.Command) error {
 	if err := file.Close(); err != nil {
 		return err
 	}
-	if runtime.GOOS != "windows" {
+	if runtime.GOOS != goosWindows {
 		directory, err := os.Open(filepath.Dir(path))
 		if err != nil {
 			return err
@@ -527,7 +533,7 @@ type runningServers struct {
 	errors                           chan error
 }
 
-func startServers(cfg serveOptions) (*runningServers, error) {
+func startServers(ctx context.Context, cfg serveOptions) (*runningServers, error) {
 	if err := validateLoopback(cfg.coreAddress); err != nil {
 		return nil, fmt.Errorf("core listener: %w", err)
 	}
@@ -537,7 +543,7 @@ func startServers(cfg serveOptions) (*runningServers, error) {
 	if err := humanapp.Initialize(cfg.dir); err != nil {
 		return nil, err
 	}
-	store, err := humanapp.OpenStore(filepath.Join(cfg.dir, "human-approval.sqlite"))
+	store, err := humanapp.OpenStoreContext(ctx, filepath.Join(cfg.dir, "human-approval.sqlite"))
 	if err != nil {
 		return nil, err
 	}
@@ -601,8 +607,9 @@ func startServers(cfg serveOptions) (*runningServers, error) {
 	return running, nil
 }
 
-func (s *runningServers) close() {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+func (s *runningServers) close(ctx context.Context) {
+	// Graceful draining must outlive the cancellation that stopped serve.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
 	if s.web.Shutdown(ctx) != nil {
 		_ = s.web.Close()
@@ -614,11 +621,11 @@ func (s *runningServers) close() {
 }
 
 func serve(ctx context.Context, cfg serveOptions, stdout, stderr io.Writer) error {
-	running, err := startServers(cfg)
+	running, err := startServers(ctx, cfg)
 	if err != nil {
 		return err
 	}
-	defer running.close()
+	defer running.close(ctx)
 	if err := writeJSON(stdout, struct {
 		Event       string `json:"event"`
 		CoreAddress string `json:"core_address"`

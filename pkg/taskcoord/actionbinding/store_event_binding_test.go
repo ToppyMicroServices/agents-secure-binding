@@ -112,7 +112,7 @@ func TestMemoryStoreReappliesExecutionEventBeforeCommit(t *testing.T) {
 		t.Fatal(err)
 	}
 	substituted := cloneEvent(start)
-	substituted.Auth.AuthorizationID += ":substituted"
+	substituted.Auth.AuthorizationID += testSubstitutedSuffix
 	clock = start.At
 	if err := store.CommitExecutionTransition(
 		ctx, view.Assignment.Revision, view.Assignment, view.Action.Revision,
@@ -142,7 +142,7 @@ func TestMemoryStoreReappliesDependencyEventsAndKeepsRetriesIdempotent(t *testin
 		t.Fatal(err)
 	}
 	substitutedWait := cloneEvent(waitEvent)
-	substitutedWait.Auth.AuthorizationID += ":substituted"
+	substitutedWait.Auth.AuthorizationID += testSubstitutedSuffix
 	*clock = waitEvent.At
 	if err := store.CommitDependencyWait(
 		ctx, view.Assignment.Revision, view.Assignment, view.Action.Revision, view.Action,
@@ -195,7 +195,7 @@ func TestMemoryStoreReappliesDependencyEventsAndKeepsRetriesIdempotent(t *testin
 		t.Fatal(err)
 	}
 	substitutedResume := cloneEvent(resumeEvent)
-	substitutedResume.Auth.ProofID += ":substituted"
+	substitutedResume.Auth.ProofID += testSubstitutedSuffix
 	*clock = resumeEvent.At
 	if err := store.CommitDependencyResume(
 		ctx, view.Assignment.Revision, view.Assignment, waitTransition.Snapshot.Revision,
@@ -240,7 +240,7 @@ func TestMemoryStoreReappliesTrustedLeaseExpiryEventBeforeCommit(t *testing.T) {
 		t.Fatal(err)
 	}
 	substituted := event
-	substituted.ID += ":substituted"
+	substituted.ID += testSubstitutedSuffix
 	*clock = expiry
 	if err := store.CommitTrustedLeaseExpiry(
 		context.Background(), view.Action.Revision, view.Action, substituted, transition,

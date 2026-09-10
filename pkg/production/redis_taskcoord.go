@@ -21,12 +21,25 @@ import (
 )
 
 const (
-	redisTaskEventSchema                  = "urn:asb:taskcoord:redis:event:v1"
-	maxRedisTaskValueBytes                = taskcoord.MaxDocumentBytes
-	hardMaxInteractionHistoryBytes        = 16 << 20
-	hardMaxOutboxBatch             uint16 = 32
-	hardMaxOutboxLease                    = 24 * time.Hour
-	maxRedisTaskReplyOverhead             = 64 << 10
+	redisTaskStatusAppended                  = "APPENDED"
+	redisTaskStatusFound                     = "FOUND"
+	redisTaskStatusNotFound                  = "NOT_FOUND"
+	redisTaskStatusRevisionConflict          = "REVISION_CONFLICT"
+	redisTaskStatusInvalidInteraction        = "INVALID_INTERACTION"
+	redisTaskStatusLimitReached              = "LIMIT_REACHED"
+	redisTaskStatusRegistered                = "REGISTERED"
+	redisTaskStatusClaimed                   = "CLAIMED"
+	redisTaskStatusIdempotentBarrier         = "IDEMPOTENT_BARRIER"
+	redisTaskStatusEmpty                     = "EMPTY"
+	redisTaskStatusAcked                     = "ACKED"
+	redisTaskStatusAlreadyExists             = "ALREADY_EXISTS"
+	redisTaskStatusEventConflict             = "EVENT_CONFLICT"
+	redisTaskEventSchema                     = "urn:asb:taskcoord:redis:event:v1"
+	maxRedisTaskValueBytes                   = taskcoord.MaxDocumentBytes
+	hardMaxInteractionHistoryBytes           = 16 << 20
+	hardMaxOutboxBatch                uint16 = 32
+	hardMaxOutboxLease                       = 24 * time.Hour
+	maxRedisTaskReplyOverhead                = 64 << 10
 )
 
 // RedisTaskCoordStore is a shared Redis/Valkey TaskCoord Store with a
@@ -412,7 +425,7 @@ func (s *RedisTaskCoordStore) PollOutbox(ctx context.Context, poll taskcoord.Out
 	if err := taskCoordStatusError(reply.status); err != nil {
 		return nil, err
 	}
-	if reply.status == "EMPTY" {
+	if reply.status == redisTaskStatusEmpty {
 		return []taskcoord.OutboxDelivery{}, nil
 	}
 	var stored []redisOutboxDelivery
@@ -598,7 +611,7 @@ func parseTaskCoordReply(payload string) (redisTaskReply, error) {
 
 func redisTaskCoordWriteStatus(status string) bool {
 	switch status {
-	case "REGISTERED", "CREATED", "APPENDED", "CLAIMED", "ACKED", "IDEMPOTENT_BARRIER":
+	case redisTaskStatusRegistered, redisJournalStatusCreated, redisTaskStatusAppended, redisTaskStatusClaimed, redisTaskStatusAcked, redisTaskStatusIdempotentBarrier:
 		return true
 	default:
 		return false
@@ -607,17 +620,17 @@ func redisTaskCoordWriteStatus(status string) bool {
 
 func taskCoordStatusError(status string) error {
 	switch status {
-	case "REGISTERED", "CREATED", "APPENDED", "IDEMPOTENT", "IDEMPOTENT_BARRIER", "FOUND", "CLAIMED", "EMPTY", "ACKED":
+	case redisTaskStatusRegistered, redisJournalStatusCreated, redisTaskStatusAppended, redisJournalStatusIdempotent, redisTaskStatusIdempotentBarrier, redisTaskStatusFound, redisTaskStatusClaimed, redisTaskStatusEmpty, redisTaskStatusAcked:
 		return nil
-	case "NOT_FOUND":
+	case redisTaskStatusNotFound:
 		return taskcoord.ErrNotFound
-	case "ALREADY_EXISTS":
+	case redisTaskStatusAlreadyExists:
 		return taskcoord.ErrAlreadyExists
-	case "REVISION_CONFLICT":
+	case redisTaskStatusRevisionConflict:
 		return taskcoord.ErrRevisionConflict
-	case "EVENT_CONFLICT":
+	case redisTaskStatusEventConflict:
 		return taskcoord.ErrEventConflict
-	case "INVALID_INTERACTION":
+	case redisTaskStatusInvalidInteraction:
 		return taskcoord.ErrInvalidInteraction
 	case "PARTICIPANT_UNAVAILABLE":
 		return taskcoord.ErrParticipantUnavailable
@@ -625,7 +638,7 @@ func taskCoordStatusError(status string) error {
 		return taskcoord.ErrOutboxConflict
 	case "LEASE_EXPIRED":
 		return taskcoord.ErrOutboxLeaseExpired
-	case "LIMIT_REACHED":
+	case redisTaskStatusLimitReached:
 		return taskcoord.ErrStoreLimit
 	default:
 		return taskcoord.ErrStoreUnavailable
