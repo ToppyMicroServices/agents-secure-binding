@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -39,6 +40,9 @@ type fixture struct {
 
 func newFixture(t *testing.T) *fixture {
 	t.Helper()
+	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
+		t.Skip("durable authority supports Linux and macOS")
+	}
 	f := &fixture{now: time.Now().UTC().Truncate(time.Second), policies: NewPolicies()}
 	var err error
 	_, f.authority, err = ed25519.GenerateKey(rand.Reader)

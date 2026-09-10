@@ -21,7 +21,6 @@ import (
 	"math/big"
 	"net/http"
 	"net/http/httptest"
-	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -43,9 +42,6 @@ type httpFixture struct {
 
 func newHTTPFixture(t *testing.T, configure func(*fixture, *HTTPConfig)) *httpFixture {
 	t.Helper()
-	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
-		t.Skip("durable authority supports Linux and macOS")
-	}
 	f := newFixture(t)
 	config := HTTPConfig{Service: f.service}
 	if configure != nil {
