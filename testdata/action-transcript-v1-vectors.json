@@ -1,0 +1,94 @@
+{
+  "profile": "asb.action-transcript-golden/v1",
+  "encoding": {
+    "string": "u16be(byte_length) || exact UTF-8 bytes",
+    "uint32": "four-byte unsigned big-endian",
+    "uint64": "eight-byte unsigned big-endian",
+    "time": "i64be(Unix seconds) || u32be(nanoseconds)",
+    "optional": "00 when absent; 01 || value when present",
+    "unicode_normalization": "none",
+    "maximum_transcript_bytes": 16384
+  },
+  "vectors": {
+    "acceptance_context": {
+      "input": {
+        "assignment_id": "a",
+        "expected_assignment_revision": 2,
+        "task_id": "t",
+        "participant_id": "p",
+        "role": "OWNER",
+        "authority_digest": "0000000000000000000000000000000000000000000000000000000000000000",
+        "assignment_status": "ACCEPTED"
+      },
+      "transcript_hex": "00216173622e7461736b2d616374696f6e2d6163636570742d636f6e746578742f7631000161000000000000000200017400017000054f574e455200403030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303000084143434550544544",
+      "digest": "sha256:965b87ed6a9f2e6cddf277658572fa4b735a2e65666ad1745e1a662ccb7a93de"
+    },
+    "acceptance_request": {
+      "input": {
+        "operation": "ACCEPT",
+        "event_id": "e",
+        "action_id": "a",
+        "action_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        "owner_id": "p",
+        "recovery_mode": "MANUAL",
+        "recovery_max_attempts": 1,
+        "recovery_idempotency_key": "",
+        "acceptance_context_digest": "sha256:965b87ed6a9f2e6cddf277658572fa4b735a2e65666ad1745e1a662ccb7a93de"
+      },
+      "transcript_hex": "001c6173622e616374696f6e2d6163636570742d726571756573742f7631000641434345505400016500016100477368613235363a3131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313100017000064d414e55414c00000001000000477368613235363a39363562383765643661396632653663646466323737363538353732666134623733356132653635363636616431373435653161363632636362376139336465",
+      "digest": "sha256:2b95550763c89ee3060509497ba2b0406df53088e05bce6313e4d99e8684b1f9"
+    },
+    "acceptance_attempt": {
+      "input": {
+        "actor_id": "actor",
+        "authorization_id": "authorization",
+        "proof_id": "proof",
+        "operation": "ACCEPT",
+        "action_id": "a",
+        "action_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        "mutation_digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+        "verifier_nonce": "nonce",
+        "issued_at": "2026-09-01T00:00:00.123456789Z",
+        "expires_at": "2026-09-01T00:05:00.987654321Z"
+      },
+      "transcript_hex": "00216173622e7461736b2d616374696f6e2d6163636570742d617474656d70742f763100056163746f72000d617574686f72697a6174696f6e000570726f6f66000641434345505400016100477368613235363a3131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313131313100477368613235363a3232323232323232323232323232323232323232323232323232323232323232323232323232323232323232323232323232323232323232323232323232323200056e6f6e6365000000006a961580075bcd15000000006a9616ac3ade68b1",
+      "digest": "sha256:6c53680a1dc1248669b04422373ae8fcb42a10de2ccc9b4462abe7d4c9155fe3"
+    },
+    "mutation_request": {
+      "input": {
+        "event_id": "evt",
+        "kind": "WAIT",
+        "expected_revision": 1,
+        "at": "2026-09-01T00:00:00.123456789Z",
+        "reason_code": "SCHEDULED",
+        "reason_detail": "",
+        "fence": {
+          "lease_id": "l",
+          "executor_id": "x",
+          "generation": 2
+        },
+        "lease": null,
+        "resume_condition": {
+          "type": "TIME",
+          "not_before": "2026-09-01T00:01:00Z",
+          "probe_after": null,
+          "target": "",
+          "dependency_action_id": "",
+          "signal": ""
+        },
+        "checkpoint": {
+          "sequence": 1,
+          "payload_digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+          "storage_ref": "urn:c",
+          "created_at": "2026-09-01T00:00:00.123456789Z"
+        },
+        "evidence_ref": "",
+        "reconciliation_result": "",
+        "result_ref": "",
+        "error_code": ""
+      },
+      "transcript_hex": "001e6173622e616374696f6e2d6d75746174696f6e2d726571756573742f763100036576740004574149540000000000000001000000006a961580075bcd1500095343484544554c454400000100016c00017800000000000000020001000454494d4501000000006a9615bc000000000000000000000001000000000000000100477368613235363a32323232323232323232323232323232323232323232323232323232323232323232323232323232323232323232323232323232323232323232323232323232000575726e3a63000000006a961580075bcd150000000000000000",
+      "digest": "sha256:0c1f96ac6db0a6d02d2a7f61c72a0045a4ca0b81214098d197a56bfa0a1b63cb"
+    }
+  }
+}

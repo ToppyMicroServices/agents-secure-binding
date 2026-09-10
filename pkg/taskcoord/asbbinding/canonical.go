@@ -20,7 +20,7 @@ import (
 )
 
 const (
-	ProfileID                 = "asb.taskcoord-human-request/v1"
+	ProfileID                 = taskcoord.HumanRequestProfileV1
 	RequestDigestDomain       = "ASB-TASKCOORD-HUMAN-REQUEST-v1"
 	RequestContextDomain      = "ASB-TASKCOORD-HUMAN-CONTEXT-v1"
 	AuthorizationDetailPrefix = "urn:asb:taskcoord-human-request:v1:sha256:"

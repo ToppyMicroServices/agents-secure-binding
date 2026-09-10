@@ -6,6 +6,10 @@ session-bound agent identity clients.
 For the current coverage report and LRTT backlog, see
 `docs/live-red-team-report.md`.
 
+The separate bounded Human Coordination gate and its live-qualification limits
+are recorded in
+[human-coordination-red-team-tests.md](human-coordination-red-team-tests.md).
+
 ## Scope
 
 Most tests exercise the production-facing client hook:

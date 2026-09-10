@@ -91,7 +91,7 @@ func (s *MemoryStore) LoadDelegation(_ context.Context, eventID string) (Delegat
 	if !ok {
 		return DelegationRecord{}, fmt.Errorf("%w: delegation %s", ErrNotFound, eventID)
 	}
-	return delegation, nil
+	return cloneDelegationRecord(delegation), nil
 }
 
 // LoadInteractionEvent returns one immutable event by its event identifier.
@@ -102,7 +102,7 @@ func (s *MemoryStore) LoadInteractionEvent(_ context.Context, eventID string) (I
 	if !ok {
 		return InteractionEvent{}, fmt.Errorf("%w: interaction event %s", ErrNotFound, eventID)
 	}
-	return event, nil
+	return cloneInteractionEvent(event), nil
 }
 
 // ListInteractionEvents returns a detached append-order history for one
@@ -119,7 +119,7 @@ func (s *MemoryStore) ListInteractionEvents(_ context.Context, interactionID str
 	}
 	events := make([]InteractionEvent, 0, len(ids))
 	for _, eventID := range ids {
-		events = append(events, s.interactionEvents[eventID])
+		events = append(events, cloneInteractionEvent(s.interactionEvents[eventID]))
 	}
 	return events, nil
 }
@@ -159,24 +159,18 @@ func (s *MemoryStore) AppendInteractionEvent(_ context.Context, event Interactio
 	if err := s.validateInteractionRelations(event); err != nil {
 		return err
 	}
-	s.interactionEvents[event.EventID] = event
+	s.interactionEvents[event.EventID] = cloneInteractionEvent(event)
 	s.interactionOrder[event.InteractionID] = append(s.interactionOrder[event.InteractionID], event.EventID)
 	return nil
 }
 
 // CommitAssignment atomically applies one initial offer or CAS transition.
 func (s *MemoryStore) CommitAssignment(_ context.Context, expectedRevision uint64, next Assignment, record TransitionRecord) error {
-	if err := next.Validate(); err != nil {
+	if err := ValidateAssignmentCommit(expectedRevision, next, record); err != nil {
 		return err
 	}
-	if err := record.Validate(); err != nil {
-		return fmt.Errorf("%w: %v", ErrInvalidTransition, err)
-	}
-	if next.LastTransition != record {
-		return fmt.Errorf("%w: record does not match snapshot", ErrInvalidTransition)
-	}
-	if next.Revision != expectedRevision+1 {
-		return fmt.Errorf("%w: next revision must equal expected revision plus one", ErrInvalidTransition)
+	if expectedRevision != 0 && record.Kind == OperationDelegate {
+		return fmt.Errorf("%w: delegation requires CommitDelegation", ErrInvalidTransition)
 	}
 	nextHash, err := assignmentHash(next)
 	if err != nil {
@@ -192,7 +186,7 @@ func (s *MemoryStore) CommitAssignment(_ context.Context, expectedRevision uint6
 		if committed.assignmentID == next.AssignmentID &&
 			committed.revision == next.Revision &&
 			committed.snapshotHash == nextHash &&
-			committed.record == record {
+			sameTransitionRecord(committed.record, record) {
 			return nil
 		}
 		return fmt.Errorf("%w: %s", ErrEventConflict, record.EventID)
@@ -202,15 +196,20 @@ func (s *MemoryStore) CommitAssignment(_ context.Context, expectedRevision uint6
 		if exists {
 			return fmt.Errorf("%w: assignment %s", ErrAlreadyExists, next.AssignmentID)
 		}
-	} else if !exists || current.Revision != expectedRevision {
-		return fmt.Errorf("%w: assignment %s", ErrRevisionConflict, next.AssignmentID)
+	} else {
+		if !exists || current.Revision != expectedRevision {
+			return fmt.Errorf("%w: assignment %s", ErrRevisionConflict, next.AssignmentID)
+		}
+		if err := ValidateAssignmentTransition(current, next, record); err != nil {
+			return err
+		}
 	}
 	s.assignments[next.AssignmentID] = cloneAssignment(next)
 	s.events[record.EventID] = committedEvent{
 		assignmentID: next.AssignmentID,
 		revision:     next.Revision,
 		snapshotHash: nextHash,
-		record:       record,
+		record:       cloneTransitionRecord(record),
 	}
 	return nil
 }
@@ -245,12 +244,13 @@ func (s *MemoryStore) CommitDelegation(_ context.Context, expectedParentRevision
 			parentCommitted.assignmentID == transition.Parent.AssignmentID &&
 			parentCommitted.revision == transition.Parent.Revision &&
 			parentCommitted.snapshotHash == parentHash &&
-			parentCommitted.record == transition.ParentRecord &&
+			sameTransitionRecord(parentCommitted.record, transition.ParentRecord) &&
 			childCommitted.assignmentID == transition.Child.AssignmentID &&
 			childCommitted.revision == transition.Child.Revision &&
 			childCommitted.snapshotHash == childHash &&
-			childCommitted.record == transition.ChildRecord {
-			if stored, ok := s.delegations[transition.Delegation.EventID]; ok && stored == transition.Delegation {
+			sameTransitionRecord(childCommitted.record, transition.ChildRecord) {
+			if stored, ok := s.delegations[transition.Delegation.EventID]; ok &&
+				sameDelegationRecord(stored, transition.Delegation) {
 				return nil
 			}
 		}
@@ -259,6 +259,9 @@ func (s *MemoryStore) CommitDelegation(_ context.Context, expectedParentRevision
 	parent, ok := s.assignments[transition.Parent.AssignmentID]
 	if !ok || parent.Revision != expectedParentRevision {
 		return fmt.Errorf("%w: parent assignment %s", ErrRevisionConflict, transition.Parent.AssignmentID)
+	}
+	if err := ValidateAssignmentTransition(parent, transition.Parent, transition.ParentRecord); err != nil {
+		return err
 	}
 	if _, exists := s.assignments[transition.Child.AssignmentID]; exists {
 		return fmt.Errorf("%w: child assignment %s", ErrAlreadyExists, transition.Child.AssignmentID)
@@ -269,18 +272,18 @@ func (s *MemoryStore) CommitDelegation(_ context.Context, expectedParentRevision
 
 	s.assignments[transition.Parent.AssignmentID] = cloneAssignment(transition.Parent)
 	s.assignments[transition.Child.AssignmentID] = cloneAssignment(transition.Child)
-	s.delegations[transition.Delegation.EventID] = transition.Delegation
+	s.delegations[transition.Delegation.EventID] = cloneDelegationRecord(transition.Delegation)
 	s.events[transition.ParentRecord.EventID] = committedEvent{
 		assignmentID: transition.Parent.AssignmentID,
 		revision:     transition.Parent.Revision,
 		snapshotHash: parentHash,
-		record:       transition.ParentRecord,
+		record:       cloneTransitionRecord(transition.ParentRecord),
 	}
 	s.events[transition.ChildRecord.EventID] = committedEvent{
 		assignmentID: transition.Child.AssignmentID,
 		revision:     transition.Child.Revision,
 		snapshotHash: childHash,
-		record:       transition.ChildRecord,
+		record:       cloneTransitionRecord(transition.ChildRecord),
 	}
 	return nil
 }
@@ -358,7 +361,28 @@ func sameInteractionEvent(a, b InteractionEvent) bool {
 		a.ParticipantID == b.ParticipantID &&
 		a.AuthorizationID == b.AuthorizationID &&
 		a.ProofID == b.ProofID &&
-		a.EvidenceRef == b.EvidenceRef
+		a.EvidenceRef == b.EvidenceRef &&
+		sameAssuranceProvenance(a.Assurance, b.Assurance)
+}
+
+func cloneInteractionEvent(in InteractionEvent) InteractionEvent {
+	out := in
+	out.Assurance = cloneAssuranceProvenance(in.Assurance)
+	return out
+}
+
+func cloneDelegationRecord(in DelegationRecord) DelegationRecord {
+	out := in
+	out.Assurance = cloneAssuranceProvenance(in.Assurance)
+	return out
+}
+
+func sameDelegationRecord(left, right DelegationRecord) bool {
+	leftAssurance := left.Assurance
+	rightAssurance := right.Assurance
+	left.Assurance = nil
+	right.Assurance = nil
+	return left == right && sameAssuranceProvenance(leftAssurance, rightAssurance)
 }
 
 func assignmentHash(assignment Assignment) ([sha256.Size]byte, error) {
@@ -388,14 +412,59 @@ func validateDelegationTransition(expectedParentRevision uint64, transition Dele
 	if transition.Parent.Revision != expectedParentRevision+1 || transition.Child.Revision != 1 {
 		return fmt.Errorf("%w: invalid delegation revisions", ErrInvalidTransition)
 	}
-	if transition.Parent.LastTransition != transition.ParentRecord || transition.Child.LastTransition != transition.ChildRecord {
+	if !sameTransitionRecord(transition.Parent.LastTransition, transition.ParentRecord) ||
+		!sameTransitionRecord(transition.Child.LastTransition, transition.ChildRecord) {
 		return fmt.Errorf("%w: delegation records do not match snapshots", ErrInvalidTransition)
+	}
+	if transition.Parent.Status != AssignmentAccepted ||
+		transition.ParentRecord.Kind != OperationDelegate ||
+		transition.ParentRecord.From != AssignmentAccepted ||
+		transition.ParentRecord.To != AssignmentAccepted {
+		return fmt.Errorf("%w: parent delegation audit state is invalid", ErrInvalidDelegation)
+	}
+	if transition.Child.Status != AssignmentOffered ||
+		transition.ChildRecord.Kind != OperationOffer ||
+		transition.ChildRecord.From != "" ||
+		transition.ChildRecord.To != AssignmentOffered {
+		return fmt.Errorf("%w: child delegation offer state is invalid", ErrInvalidDelegation)
 	}
 	if transition.Delegation.EventID != transition.ParentRecord.EventID ||
 		transition.Delegation.ParentAssignmentID != transition.Parent.AssignmentID ||
 		transition.Delegation.ChildAssignmentID != transition.Child.AssignmentID ||
-		transition.Child.ParentAssignmentID != transition.Parent.AssignmentID {
+		transition.Child.ParentAssignmentID != transition.Parent.AssignmentID ||
+		transition.Delegation.ParentTaskID != transition.Parent.TaskID ||
+		transition.Delegation.ChildTaskID != transition.Child.TaskID {
 		return fmt.Errorf("%w: delegation edge does not match snapshots", ErrInvalidDelegation)
+	}
+	if transition.Delegation.FromParticipantID != transition.Parent.ParticipantID ||
+		transition.Delegation.ToParticipantID != transition.Child.ParticipantID ||
+		transition.Child.OfferedByParticipantID != transition.Parent.ParticipantID ||
+		transition.ParentRecord.ParticipantID != transition.Parent.ParticipantID ||
+		transition.ChildRecord.ParticipantID != transition.Parent.ParticipantID {
+		return fmt.Errorf("%w: delegation participant provenance mismatch", ErrInvalidDelegation)
+	}
+	if transition.Delegation.ParentAuthorityDigest != transition.Parent.AuthorityDigest ||
+		transition.Delegation.ChildAuthorityDigest != transition.Child.AuthorityDigest {
+		return fmt.Errorf("%w: delegation authority provenance mismatch", ErrInvalidDelegation)
+	}
+	if !transition.Delegation.At.Equal(transition.ParentRecord.At) ||
+		!transition.Delegation.At.Equal(transition.ChildRecord.At) ||
+		!transition.Delegation.At.Equal(transition.Parent.UpdatedAt) ||
+		!transition.Delegation.At.Equal(transition.Child.CreatedAt) ||
+		!transition.Delegation.At.Equal(transition.Child.UpdatedAt) {
+		return fmt.Errorf("%w: delegation timestamp provenance mismatch", ErrInvalidDelegation)
+	}
+	if transition.ParentRecord.ActorID != transition.ChildRecord.ActorID ||
+		transition.ParentRecord.AuthorizationID != transition.ChildRecord.AuthorizationID ||
+		transition.ParentRecord.ProofID != transition.ChildRecord.ProofID {
+		return fmt.Errorf("%w: delegation authorization provenance mismatch", ErrInvalidDelegation)
+	}
+	if !sameAssuranceProvenance(transition.ParentRecord.Assurance, transition.ChildRecord.Assurance) ||
+		!sameAssuranceProvenance(transition.ParentRecord.Assurance, transition.Delegation.Assurance) {
+		return fmt.Errorf("%w: delegation assurance provenance mismatch", ErrInvalidDelegation)
+	}
+	if transition.ChildRecord.Reason.Detail != "" || transition.ChildRecord.EvidenceRef != "" {
+		return fmt.Errorf("%w: child offer contains non-generated audit data", ErrInvalidDelegation)
 	}
 	if transition.ParentRecord.EventID == transition.ChildRecord.EventID {
 		return fmt.Errorf("%w: parent and child event identifiers must differ", ErrInvalidDelegation)

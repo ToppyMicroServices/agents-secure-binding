@@ -1,5 +1,11 @@
 build
 
+# Local Human approval credentials, SQLite state and agent receipts
+.asb-human/
+local-approval/
+/asb-human
+/asb-human.exe
+
 cmd/manager/img
 
 .cov

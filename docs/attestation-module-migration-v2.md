@@ -53,14 +53,15 @@ agent owns and starts the per-computation ingress proxy.
 
 ## Current release state
 
-The platform-neutral root is published as the `v2.0.0-rc.1` prerelease. The
-experimental platform modules are published as SNP `v0.1.0` and TDX `v0.1.1`.
-The Cocos module resolves these published versions without local replacements.
+The platform-neutral root is published as the `v2.0.0-rc.2` prerelease. The
+experimental platform modules are published as SNP `v0.1.1` and TDX `v0.1.2`.
+The Cocos nested module is published as `integrations/cocos/v0.1.1` and resolves
+those published versions without local replacements.
 
-Before the first Cocos tag, pass `make check-cocos-release` and pull-request CI,
+For a future Cocos tag, pass `make check-cocos-release` and pull-request CI,
 then merge the dependency update. Run the manual `Attestation Release Gate`
 with target `cocos` on the exact merged commit. Only after that gate succeeds,
-sign and push `integrations/cocos/v0.1.0` and wait for its tag-triggered gate.
+sign and push the directory-prefixed tag and wait for its tag-triggered gate.
 
 The root RC and the Cocos tag do not establish live SNP or TDX qualification or
 production readiness.

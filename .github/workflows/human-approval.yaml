@@ -1,0 +1,182 @@
+name: Local Human Approval
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, feat/human-coordination-product-v1]
+    paths:
+      - ".github/workflows/human-approval.yaml"
+      - "cmd/asb-human/**"
+      - "internal/humanapp/**"
+      - "internal/strictjson/**"
+      - "internal/canonicaltranscript/**"
+      - "pkg/atls/**"
+      - "pkg/production/**"
+      - "examples/protected-change-consumer/**"
+      - "docs/local-human-approval.md"
+      - "docs/asb-human-binary-quickstart.md"
+      - "go.mod"
+      - "go.sum"
+  pull_request:
+    paths:
+      - ".github/workflows/human-approval.yaml"
+      - "cmd/asb-human/**"
+      - "internal/humanapp/**"
+      - "internal/strictjson/**"
+      - "internal/canonicaltranscript/**"
+      - "pkg/atls/**"
+      - "pkg/production/**"
+      - "examples/protected-change-consumer/**"
+      - "docs/local-human-approval.md"
+      - "docs/asb-human-binary-quickstart.md"
+      - "go.mod"
+      - "go.sum"
+
+permissions:
+  contents: read
+
+jobs:
+  runtime:
+    name: Runtime (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    env:
+      GOWORK: "off"
+      GOFLAGS: "-mod=readonly"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: 1.26.6
+          cache-dependency-path: go.sum
+      - run: go mod verify
+      - name: Test application and real command processes
+        run: go test -race -count=1 -timeout=15m ./internal/humanapp ./cmd/asb-human
+      - run: go vet ./internal/humanapp ./cmd/asb-human
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Check browser logic without installing frontend dependencies
+        run: node --test internal/humanapp/web_ui_test.mjs
+      - name: Run the documented first-use check
+        run: go run ./cmd/asb-human self-test
+
+  cross-build:
+    name: Compile (${{ matrix.goos }}/${{ matrix.goarch }})
+    needs: runtime
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goos: darwin
+            goarch: arm64
+            binary: asb-human
+          - goos: linux
+            goarch: amd64
+            binary: asb-human
+          - goos: windows
+            goarch: amd64
+            binary: asb-human.exe
+    env:
+      GOWORK: "off"
+      GOFLAGS: "-mod=readonly"
+      CGO_ENABLED: "0"
+      GOOS: ${{ matrix.goos }}
+      GOARCH: ${{ matrix.goarch }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: 1.26.6
+          cache-dependency-path: go.sum
+      - run: go build -trimpath -o build/${{ matrix.binary }} ./cmd/asb-human
+      - name: Package the preview with its usage guide and checksum
+        working-directory: build
+        run: |
+          cp ../docs/asb-human-binary-quickstart.md USAGE.md
+          sha256sum "${{ matrix.binary }}" > SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: asb-human-${{ matrix.goos }}-${{ matrix.goarch }}-${{ github.sha }}
+          path: build/
+          if-no-files-found: error
+          retention-days: 14
+
+  artifact-smoke:
+    name: Run artifact (${{ matrix.goos }}/${{ matrix.goarch }})
+    needs: cross-build
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            goos: linux
+            goarch: amd64
+          - os: macos-latest
+            goos: darwin
+            goarch: arm64
+          - os: windows-latest
+            goos: windows
+            goarch: amd64
+    steps:
+      # Use this run's uploaded bytes: no checkout, Go setup, or rebuild.
+      - name: Download the matching preview artifact
+        uses: actions/download-artifact@v5
+        with:
+          name: asb-human-${{ matrix.goos }}-${{ matrix.goarch }}-${{ github.sha }}
+          path: preview
+      - name: Verify and run the Unix artifact
+        if: runner.os != 'Windows'
+        shell: bash
+        working-directory: preview
+        env:
+          EXPECTED_GOOS: ${{ matrix.goos }}
+        run: |
+          case "${EXPECTED_GOOS}:$(uname -s):$(uname -m)" in
+            linux:Linux:x86_64|darwin:Darwin:arm64) ;;
+            *) echo "Unexpected native runner OS or architecture" >&2; exit 1 ;;
+          esac
+          test -s USAGE.md
+          checksum_pattern='^[0-9a-f]{64}  asb-human$'
+          if [[ ! "$(cat SHA256SUMS)" =~ $checksum_pattern ]]; then
+            echo "Invalid checksum manifest" >&2
+            exit 1
+          fi
+          shasum -a 256 -c SHA256SUMS
+          shasum -a 256 asb-human
+          chmod +x asb-human
+          ./asb-human self-test
+      - name: Verify and run the Windows artifact
+        if: runner.os == 'Windows'
+        shell: pwsh
+        working-directory: preview
+        run: |
+          if (-not $IsWindows -or [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture -ne 'X64') {
+            throw 'Unexpected native runner OS or architecture'
+          }
+          if ((Get-Item -LiteralPath USAGE.md).Length -eq 0) {
+            throw 'Missing usage guide'
+          }
+          $manifest = Get-Content -LiteralPath SHA256SUMS -Raw
+          $entry = [regex]::Match($manifest, '\A([0-9a-f]{64})  asb-human\.exe\r?\n?\z')
+          if (-not $entry.Success) {
+            throw 'Invalid checksum manifest'
+          }
+          $expected = $entry.Groups[1].Value
+          $actual = (Get-FileHash -LiteralPath asb-human.exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actual -cne $expected) {
+            throw 'Artifact checksum mismatch'
+          }
+          Write-Output "$actual  asb-human.exe"
+          .\asb-human.exe self-test
+          if ($LASTEXITCODE -ne 0) {
+            throw "Artifact self-test failed with exit code $LASTEXITCODE"
+          }

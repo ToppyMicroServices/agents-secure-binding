@@ -31,6 +31,8 @@ const (
 // HumanMatchConsent is an internal, immutable opt-in record scoped to one
 // requester, purpose, capability, and relay channel. CandidateID must be an
 // opaque pairwise identifier and must not equal either Participant identifier.
+// This record authorizes contact metadata and reachability, not the exact bytes
+// of a later relay message.
 type HumanMatchConsent struct {
 	Schema                 string              `json:"schema"`
 	ConsentID              string              `json:"consent_id"`
@@ -58,9 +60,11 @@ type HumanMatchQuery struct {
 	Limit                  uint32
 }
 
-// AuthenticatedHumanMatchQuery is a fresh verifier projection for one exact
+// AuthenticatedHumanMatchQuery is a trusted broker projection for one exact
 // Human matching request. The authorization component must bind the complete
-// nested query before this value reaches the directory.
+// nested query before this value reaches the directory. Human Coordination v1
+// has no external matching ASB profile; structural validation does not prove
+// provenance and raw untrusted input must not construct this value directly.
 type AuthenticatedHumanMatchQuery struct {
 	Query           HumanMatchQuery
 	ActorID         string
@@ -115,7 +119,8 @@ type HumanReachabilityGrantDefinition struct {
 
 // HumanReachabilityGrant is a purpose-, requester-, channel-, and time-bound
 // relay capability. It contains neither the Human identifier nor a direct
-// Email, SNS, or telephone endpoint.
+// Email, SNS, or telephone endpoint. It does not represent Human approval of
+// the exact content sent through that capability.
 type HumanReachabilityGrant struct {
 	Schema                 string              `json:"schema"`
 	GrantID                string              `json:"grant_id"`
@@ -129,8 +134,10 @@ type HumanReachabilityGrant struct {
 	ExpiresAt              time.Time           `json:"expires_at"`
 }
 
-// AuthenticatedReachabilityAccess is a fresh verifier projection for loading
-// one requester-bound relay grant.
+// AuthenticatedReachabilityAccess is a trusted broker projection for loading
+// one requester-bound relay grant. Human Coordination v1 has no external
+// reachability-administration ASB profile; raw untrusted input must not
+// construct this value directly.
 type AuthenticatedReachabilityAccess struct {
 	GrantID                string
 	RequesterParticipantID string
@@ -143,6 +150,18 @@ type AuthenticatedReachabilityAccess struct {
 	VerifierNonce          string
 	IssuedAt               time.Time
 	ExpiresAt              time.Time
+}
+
+// HumanReachabilityDispatchAccess is the trusted worker projection used to
+// recheck a queued relay immediately before an external dispatch attempt. It
+// carries no Agent proof window: the original proof authorized queueing, while
+// this projection revalidates the durable reachability grant itself.
+type HumanReachabilityDispatchAccess struct {
+	GrantID                string
+	RequesterParticipantID string
+	Purpose                string
+	Capability             string
+	Channel                ReachabilityChannel
 }
 
 // HumanReachabilityRevocation revokes a relay grant. ParticipantID may be the
@@ -337,6 +356,27 @@ func (a AuthenticatedReachabilityAccess) Validate() error {
 	}
 	if a.IssuedAt.IsZero() || a.ExpiresAt.IsZero() || !a.ExpiresAt.After(a.IssuedAt) {
 		return invalidReachability("invalid grant access validity window")
+	}
+	return nil
+}
+
+// Validate checks the exact trusted scope of an internal relay dispatch.
+func (a HumanReachabilityDispatchAccess) Validate() error {
+	for field, value := range map[string]string{
+		"grant_id":                 a.GrantID,
+		"requester_participant_id": a.RequesterParticipantID,
+		"purpose":                  a.Purpose,
+		"capability":               a.Capability,
+	} {
+		if err := validateID(field, value); err != nil {
+			return invalidReachabilityError(err)
+		}
+	}
+	if strings.ContainsAny(a.Purpose, "*?") || strings.ContainsAny(a.Capability, "*?") {
+		return invalidReachability("dispatch scope must not contain wildcard characters")
+	}
+	if !validReachabilityChannel(a.Channel) {
+		return invalidReachability("unsupported relay channel")
 	}
 	return nil
 }

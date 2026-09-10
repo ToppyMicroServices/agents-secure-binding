@@ -110,7 +110,7 @@ func DecodeHumanReachabilityRevocation(r io.Reader) (HumanReachabilityRevocation
 }
 
 func decodeStrict(r io.Reader, target any) error {
-	if r == nil {
+	if isNilDependency(r) {
 		return fmt.Errorf("missing JSON input")
 	}
 	raw, err := io.ReadAll(io.LimitReader(r, MaxDocumentBytes+1))

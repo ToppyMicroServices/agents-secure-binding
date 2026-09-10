@@ -1,0 +1,941 @@
+{
+  "schema": "asb.human-coordination-conformance/v1",
+  "scope": {
+    "product": "ASB Human Coordination",
+    "excluded_components": [
+      "integrations/cocos",
+      "modules/attestation/snp",
+      "modules/attestation/tdx"
+    ]
+  },
+  "human_assurance": {
+    "current_profile": "asb.taskcoord-human-request/v1",
+    "current_level": "gateway-asserted-for-human",
+    "levels": [
+      {
+        "id": "gateway-asserted-for-human",
+        "implemented": true,
+        "meaning": {
+          "en": "An authenticated gateway Actor exercises an operation-authority grant for an exact request attributed to a Human Participant.",
+          "ja": "認証済みgateway Actorがoperation-authority grantを行使し、exact requestをHuman Participantへ帰属させる。"
+        }
+      },
+      {
+        "id": "authenticated-human-evidence",
+        "implemented": false,
+        "meaning": {
+          "en": "A trusted Human authentication authority supplies separate evidence bound to the operation.",
+          "ja": "trusted Human authentication authorityがoperationへ束縛した別のHuman認証evidenceを供給する。"
+        }
+      },
+      {
+        "id": "human-held-key-exact-request",
+        "implemented": false,
+        "meaning": {
+          "en": "An enrolled Human-held key signs the domain-separated exact request and verifier context.",
+          "ja": "enrolmentされたHuman-held keyがdomain-separated exact requestとverifier contextへ署名する。"
+        }
+      }
+    ],
+    "non_guarantees": [
+      "authenticated-human-evidence",
+      "human-held-key",
+      "human-liveness",
+      "legal-consent",
+      "ui-confirmation"
+    ]
+  },
+  "production_claim": {
+    "available": false,
+    "reason": {
+      "en": "No production conformance claim is available until each selected capability has deployment-specific qualification evidence.",
+      "ja": "選択した各capabilityにdeployment固有のqualification evidenceが揃うまで、production conformanceを主張できない。"
+    }
+  },
+  "operation_boundaries": [
+    {
+      "id": "human-taskcoord",
+      "classification": "external-asb",
+      "operations": ["ASSIGNMENT_OFFER", "ASSIGNMENT_TRANSITION", "ASSIGNMENT_DELEGATION", "INTERACTION_APPEND"],
+      "profile_id": "asb.taskcoord-human-request/v1",
+      "assurance_level": "gateway-asserted-for-human",
+      "transcript_domain": "ASB-TASKCOORD-HUMAN-REQUEST-v1",
+      "actor_source": "verified ASB session binding",
+      "participant_source": "exact request plus trusted Participant registry",
+      "realm_source": "verifier-local deployment context",
+      "freshness": "intersection of grant, session binding, and trusted acceptance windows",
+      "replay": "one-shot ASB session binding committed after request and policy validation",
+      "error_surface": "bounded Human ingress errors or typed programmatic errors",
+      "store_order": "verify proof and policy before mutation; consume replay before Store commit; reconcile unknown commit outcomes",
+      "network_exposure": "human-ingress-and-programmatic-profile",
+      "debug_evidence": "signed-simulated-asb",
+      "tests": [
+        {"format": "go-test", "package": "./pkg/taskcoord/asbbinding", "name": "TestProfileAppliesExactHumanAssignmentRequest"},
+        {"format": "go-test", "package": "./pkg/taskcoord/asbbinding", "name": "TestProfileRejectsOriginalProofOnMutatedRequest"},
+        {"format": "go-test", "package": "./pkg/taskcoord/asbbinding", "name": "TestProfileDelegateRequiresVerifierWithoutConsumingReplay"}
+      ]
+    },
+    {
+      "id": "agent-relay-authorization",
+      "classification": "external-asb",
+      "operations": ["RELAY_INTENT_AUTHORIZE"],
+      "profile_id": "asb.taskcoord-agent-relay/v1",
+      "transcript_domain": "ASB-HUMAN-RELAY-INTENT-v1",
+      "actor_source": "verified ASB session binding",
+      "participant_source": "exact request plus trusted Agent Participant registry",
+      "realm_source": "verifier-local deployment context",
+      "freshness": "intersection of grant, session binding, and trusted acceptance windows",
+      "replay": "one-shot ASB session binding consumed before returning the relay projection",
+      "error_surface": "typed programmatic verification errors",
+      "store_order": "verify and consume proof before trusted relay queue transaction",
+      "network_exposure": "programmatic-profile",
+      "debug_evidence": "signed-simulated-asb",
+      "tests": [
+        {"format": "go-test", "package": "./pkg/humanrelay/asbbinding", "name": "TestProfileVerifiesExactAgentRelayIntent"},
+        {"format": "go-test", "package": "./pkg/humanrelay/asbbinding", "name": "TestProfileRejectsRequestAndSessionMismatch"},
+        {"format": "go-test", "package": "./pkg/humanrelay/asbbinding", "name": "TestProfileConsumesSessionProofOnce"}
+      ]
+    },
+    {
+      "id": "agent-taskcoord",
+      "classification": "trusted-internal",
+      "operations": ["ASSIGNMENT_OFFER", "ASSIGNMENT_TRANSITION", "ASSIGNMENT_DELEGATION", "INTERACTION_APPEND"],
+      "actor_source": "trusted application adapter",
+      "participant_source": "trusted application state and Participant registry",
+      "realm_source": "enclosing application context",
+      "freshness": "enclosing trusted verifier policy",
+      "replay": "enclosing application and Store responsibility",
+      "error_surface": "internal typed Go errors",
+      "store_order": "trusted projection before atomic Store commit",
+      "network_exposure": "none",
+      "debug_evidence": "fixture-projection",
+      "tests": [
+        {"format": "go-test", "package": "./pkg/taskcoord", "name": "TestHumanAssignmentSeparatesParticipantFromActor"},
+        {"format": "go-test", "package": "./pkg/taskcoord", "name": "TestInteractionAuthorizationBindsContent"}
+      ]
+    },
+    {
+      "id": "action-acceptance",
+      "classification": "trusted-internal",
+      "operations": ["ACTION_ACCEPT"],
+      "transcript_domain": "asb.action-accept-request/v1",
+      "actor_source": "trusted application verifier projection",
+      "participant_source": "owner derived from the current Assignment",
+      "realm_source": "enclosing application context",
+      "freshness": "transaction clock for new state; an exact committed attempt remains recoverable after proof expiry",
+      "replay": "business digest plus exact attempt fingerprint returns the first canonical outcome; a different proof requires reconciliation",
+      "error_surface": "internal typed Go errors",
+      "store_order": "load current Assignment then atomically deduplicate or derive transaction time and commit Action, binding, and canonical outcome",
+      "network_exposure": "none",
+      "debug_evidence": "fixture-projection",
+      "tests": [
+        {"format": "go-test", "package": "./pkg/taskcoord/actionbinding", "name": "TestServiceAcceptRejectsMissingAndTamperedAuthentication"},
+        {"format": "go-test", "package": "./pkg/taskcoord/actionbinding", "name": "TestServiceAcceptExactAttemptRetryReturnsCanonicalViewAfterExpiry"},
+        {"format": "go-test", "package": "./pkg/taskcoord/actionbinding", "name": "TestServiceAcceptExpiredAttemptCannotCreateState"},
+        {"format": "go-test", "package": "./pkg/taskcoord/actionbinding", "name": "TestServiceAcceptDifferentProofRequiresReconciliation"}
+      ]
+    },
+    {
+      "id": "action-mutation",
+      "classification": "trusted-internal",
+      "operations": ["ACTION_START", "ACTION_WAIT", "ACTION_PAUSE", "ACTION_RESUME", "ACTION_CANCEL", "ACTION_COMPLETE", "ACTION_FAIL", "ACTION_TAKEOVER", "ACTION_RECONCILE", "ACTION_RENEW_LEASE"],
+      "transcript_domain": "asb.action-mutation-request/v1",
+      "actor_source": "trusted application verifier projection",
+      "participant_source": "not represented in the v1 Action authorization projection",
+      "realm_source": "enclosing application context",
+      "freshness": "authorization and lease windows rechecked by Service and Store",
+      "replay": "Store event deduplication; no external ASB replay profile",
+      "error_surface": "internal typed Go errors",
+      "store_order": "reapply the complete mutation under Store compare-and-swap before commit",
+      "network_exposure": "none",
+      "debug_evidence": "fixture-projection",
+      "tests": [
+        {"format": "go-test", "package": "./pkg/taskcoord/actionbinding", "name": "TestMemoryStoreReappliesAuthorizedEventBeforeCommit"},
+        {"format": "go-test", "package": "./pkg/taskcoord/actionbinding", "name": "TestServiceRechecksAuthorizationAndLeaseAtCommit"}
+      ]
+    },
+    {
+      "id": "human-matching",
+      "classification": "trusted-internal",
+      "operations": ["HUMAN_MATCH"],
+      "actor_source": "trusted broker verifier projection",
+      "participant_source": "requester binding plus current Participant registry",
+      "realm_source": "broker-local namespace",
+      "freshness": "broker clock and projection validity window",
+      "replay": "broker responsibility; no external ASB replay profile",
+      "error_surface": "internal typed Go errors",
+      "store_order": "validate requester and current consent before returning bounded opaque candidates",
+      "network_exposure": "none",
+      "debug_evidence": "fixture-projection",
+      "tests": [
+        {"format": "go-test", "package": "./pkg/taskcoord", "name": "TestHumanMatchingReturnsOnlyOpaqueRelayCandidate"},
+        {"format": "go-test", "package": "./pkg/taskcoord", "name": "TestAgentDiscoveryRejectsHuman"}
+      ]
+    },
+    {
+      "id": "reachability-administration",
+      "classification": "trusted-internal",
+      "operations": ["CONSENT_REGISTER", "CONSENT_REVOKE", "GRANT_ISSUE", "GRANT_REVOKE"],
+      "actor_source": "trusted broker administration",
+      "participant_source": "current Human and requester Participant registry",
+      "realm_source": "broker-local namespace",
+      "freshness": "broker clock and current consent or grant state",
+      "replay": "durable record uniqueness; no external ASB replay profile",
+      "error_surface": "internal typed Go errors",
+      "store_order": "serialize consent, grant, and revocation changes in the trusted directory",
+      "network_exposure": "none",
+      "debug_evidence": "fixture-projection",
+      "tests": [
+        {"format": "go-test", "package": "./pkg/taskcoord", "name": "TestHumanReachabilityGrantContainsOnlyRelayAndCanBeRevoked"},
+        {"format": "go-test", "package": "./pkg/taskcoord", "name": "TestHumanReachabilityRechecksHumanStatus"}
+      ]
+    },
+    {
+      "id": "relay-queue",
+      "classification": "trusted-internal",
+      "operations": ["RELAY_QUEUE"],
+      "actor_source": "AuthenticatedRelayIntent returned by the external ASB relay profile",
+      "participant_source": "exact relay request plus current requester and grant state",
+      "realm_source": "broker-local namespace",
+      "freshness": "queue-time grant, consent, requester, and proof window checks",
+      "replay": "one intent per exact grant transaction",
+      "error_surface": "internal typed Go errors",
+      "store_order": "external ASB verification before atomic grant revalidation and queue commit",
+      "network_exposure": "none",
+      "debug_evidence": "asb-derived-projection",
+      "tests": [
+        {"format": "go-test", "package": "./pkg/humanrelay", "name": "TestServiceRequiresActiveExactGrantAndCollapsesFailures"},
+        {"format": "go-test", "package": "./pkg/humanrelay", "name": "TestQueueRechecksRevocationInsideAtomicCommit"}
+      ]
+    },
+    {
+      "id": "relay-dispatch",
+      "classification": "trusted-internal",
+      "operations": ["RELAY_DISPATCH", "RELAY_RECONCILE"],
+      "actor_source": "trusted relay Worker",
+      "participant_source": "authoritative queued intent and current grant state",
+      "realm_source": "broker-local namespace",
+      "freshness": "dispatch-time grant, consent, requester, and Human status checks",
+      "replay": "durable DISPATCHING reservation prevents blind provider retry",
+      "error_surface": "private worker telemetry and internal typed errors",
+      "store_order": "serialize with revocation and persist DISPATCHING before provider callback",
+      "network_exposure": "none",
+      "debug_evidence": "trusted-worker",
+      "tests": [
+        {"format": "go-test", "package": "./pkg/humanrelay", "name": "TestDispatchGateBlocksRevocationThroughProviderAcknowledgement"},
+        {"format": "go-test", "package": "./pkg/humanrelay", "name": "TestProviderFailureLeavesUnknownDispatchTerminal"}
+      ]
+    }
+  ],
+  "profiles": [
+    {
+      "id": "asb.human-coordination.core/v1",
+      "maturity": "developer-preview",
+      "capability_based": false,
+      "depends_on": [],
+      "requirements": [
+        {
+          "id": "ASB-HC-CORE-001",
+          "normative": {
+            "en": "An implementation MUST keep the accountable Participant distinct from the Actor that submits an operation and MUST bind both identities to the accepted operation.",
+            "ja": "実装は責任主体であるParticipantとoperationを送るActorを分離し、両方のidentityをaccepted operationへ束縛しなければならない。"
+          },
+          "status": "implemented",
+          "capability": "assignment-coordination",
+          "optional_capability": false,
+          "tests": [
+            {"format": "go-test", "package": "./pkg/taskcoord", "name": "TestHumanAssignmentSeparatesParticipantFromActor"},
+            {"format": "go-test", "package": "./pkg/taskcoord", "name": "TestAssigneeOperationRejectsDifferentParticipant"}
+          ],
+          "evidence": ["pkg/taskcoord/model.go", "pkg/taskcoord/machine.go"]
+        },
+        {
+          "id": "ASB-HC-CORE-002",
+          "normative": {
+            "en": "An implementation MUST enforce the Assignment state machine, revision comparison, and terminal-state rules and MUST NOT represent Action waiting or execution outcomes as Assignment states.",
+            "ja": "実装はAssignmentのstate machine、revision比較、terminal state規則を強制しなければならず、Actionの待機や実行結果をAssignment stateとして表してはならない。"
+          },
+          "status": "implemented",
+          "capability": "assignment-coordination",
+          "optional_capability": false,
+          "tests": [
+            {"format": "go-test", "package": "./pkg/taskcoord", "name": "TestAssignmentValidationRejectsImpossibleTransition"},
+            {"format": "go-test", "package": "./pkg/taskcoord", "name": "TestMemoryStoreRejectsStaleRevision"}
+          ],
+          "evidence": ["pkg/taskcoord/machine.go", "pkg/taskcoord/validation.go"]
+        },
+        {
+          "id": "ASB-HC-CORE-003",
+          "normative": {
+            "en": "Every Assignment mutation and Interaction append MUST be bound to a freshly verified operation that fixes the Participant, Actor, operation, Task, Assignment, nonce, proof, authorization, and validity window.",
+            "ja": "すべてのAssignment mutationとInteraction appendは、Participant、Actor、operation、Task、Assignment、nonce、proof、authorization、validity windowを固定するfreshな検証済みoperationに束縛しなければならない。"
+          },
+          "status": "implemented",
+          "capability": "authenticated-operations",
+          "optional_capability": false,
+          "tests": [
+            {"format": "go-test", "package": "./pkg/taskcoord", "name": "TestInteractionAuthorizationBindsContent"},
+            {"format": "go-test", "package": "./pkg/taskcoord/asbbinding", "name": "TestProfileRejectsActorSessionChangingAuthorizedRequest"}
+          ],
+          "evidence": ["pkg/taskcoord/model.go", "pkg/taskcoord/asbbinding/profile.go"]
+        },
+        {
+          "id": "ASB-HC-CORE-004",
+          "normative": {
+            "en": "Assignment roles MUST remain descriptive responsibility labels and MUST NOT grant permission by themselves; authorization authority MUST be evaluated by the enclosing verifier and policy rather than inferred from a role value.",
+            "ja": "Assignment roleは責任を表すdescriptive labelに留め、それ自体からpermissionを付与してはならない。authorization authorityはrole valueから推論せず、enclosing verifierとpolicyで評価しなければならない。"
+          },
+          "status": "implemented",
+          "capability": "assignment-authorization",
+          "optional_capability": false,
+          "tests": [
+            {"format": "go-test", "package": "./pkg/taskcoord", "name": "TestAssigneeOperationRejectsDifferentParticipant"},
+            {"format": "go-test", "package": "./pkg/taskcoord/asbbinding", "name": "TestProfileRequiresReplayAndOwnsExactAuthorizationDetailPolicy"}
+          ],
+          "evidence": ["pkg/taskcoord/model.go", "pkg/taskcoord/machine.go", "pkg/taskcoord/asbbinding/profile.go"]
+        },
+        {
+          "id": "ASB-HC-CORE-005",
+          "normative": {
+            "en": "Delegation MUST atomically append the parent event, create one offered child Assignment, record immutable provenance, and leave the parent Assignment accepted.",
+            "ja": "delegationはparent eventのappend、OFFERED child Assignment一件の作成、immutable provenanceの記録をatomicに行い、parent AssignmentをACCEPTEDのまま保持しなければならない。"
+          },
+          "status": "implemented",
+          "capability": "delegation",
+          "optional_capability": false,
+          "tests": [
+            {"format": "go-test", "package": "./pkg/taskcoord", "name": "TestDelegationCreatesChildWithoutReleasingParent"},
+            {"format": "go-test", "package": "./pkg/taskcoord", "name": "TestValidateDelegationCommitRejectsMutatedProvenanceBindings"}
+          ],
+          "evidence": ["pkg/taskcoord/machine.go", "pkg/taskcoord/store_validation.go"]
+        },
+        {
+          "id": "ASB-HC-CORE-006",
+          "normative": {
+            "en": "Interaction history MUST be append-only and MUST retain questions, multiple responses, corrections, withdrawals, reply lineage, and supersession lineage without overwriting earlier events.",
+            "ja": "Interaction historyはappend-onlyでなければならず、質問、複数回答、訂正、撤回、reply lineage、supersession lineageを過去eventの上書きなしで保持しなければならない。"
+          },
+          "status": "implemented",
+          "capability": "human-interaction-history",
+          "optional_capability": false,
+          "tests": [
+            {"format": "go-test", "package": "./pkg/taskcoord", "name": "TestInteractionHistoryPreservesMultipleResponsesAndCorrection"},
+            {"format": "go-test", "package": "./pkg/taskcoord", "name": "TestInteractionCorrectionRejectsDifferentParticipant"}
+          ],
+          "evidence": ["pkg/taskcoord/store_validation.go", "pkg/taskcoord/memory_store.go"]
+        },
+        {
+          "id": "ASB-HC-CORE-007",
+          "normative": {
+            "en": "Append-only Interactions MUST remain appendable after the related Assignment reaches a terminal state, and an Interaction append MUST NOT mutate the Assignment snapshot, status, or revision.",
+            "ja": "append-only Interactionは関連Assignmentがterminal stateに達した後もappend可能でなければならず、Interaction appendがAssignment snapshot、status、revisionを変更してはならない。"
+          },
+          "status": "implemented",
+          "capability": "human-interaction-history",
+          "optional_capability": false,
+          "tests": [
+            {"format": "go-test", "package": "./pkg/taskcoord", "name": "TestTerminalAssignmentAllowsAuthorizedInteractionAppend"}
+          ],
+          "evidence": ["pkg/taskcoord/store_validation.go", "pkg/taskcoord/memory_store.go"]
+        },
+        {
+          "id": "ASB-HC-CORE-008",
+          "normative": {
+            "en": "A reachability grant MUST be opaque, requester- and purpose-scoped, revocable, and revalidated against current Participant and consent state before use.",
+            "ja": "reachability grantはopaqueで、requesterとpurposeにscopeされ、revocation可能でなければならず、利用前に現在のParticipantとconsent stateを再検証しなければならない。"
+          },
+          "status": "implemented",
+          "capability": "human-reachability",
+          "optional_capability": true,
+          "tests": [
+            {"format": "go-test", "package": "./pkg/taskcoord", "name": "TestHumanReachabilityRechecksHumanStatus"},
+            {"format": "go-test", "package": "./pkg/taskcoord", "name": "TestHumanReachabilityGrantContainsOnlyRelayAndCanBeRevoked"}
+          ],
+          "evidence": ["pkg/taskcoord/reachability.go", "pkg/taskcoord/reachability_store.go"]
+        },
+        {
+          "id": "ASB-HC-CORE-009",
+          "normative": {
+            "en": "A durable Store MUST atomically enforce revision compare-and-swap, exact event deduplication, immutable state, and required outbox writes; the in-memory Store is reference behavior only.",
+            "ja": "durable Storeはrevision compare-and-swap、exact event deduplication、immutable state、必要なoutbox writeをatomicに強制しなければならない。in-memory Storeはreference behaviorにすぎない。"
+          },
+          "status": "reference-only",
+          "capability": "taskcoord-store",
+          "optional_capability": false,
+          "tests": [
+            {"format": "go-test", "package": "./pkg/taskcoord", "name": "TestMemoryStoreRejectsStaleRevision"},
+            {"format": "go-test", "package": "./pkg/taskcoord", "name": "TestMemoryStoreRejectsConflictingIdempotencyPayload"}
+          ],
+          "evidence": ["pkg/taskcoord/store.go", "pkg/taskcoord/memory_store.go", "pkg/taskcoord/outbox.go"]
+        },
+        {
+          "id": "ASB-HC-CORE-010",
+          "normative": {
+            "en": "A realm MUST be bound as verifier-local policy context and namespace, identifiers MUST be interpreted only within that realm, and this profile MUST NOT claim or accept a caller-controlled realm field on Human Coordination wire documents.",
+            "ja": "realmはverifier-localなpolicy contextおよびnamespaceとして束縛し、identifierはそのrealm内だけで解釈しなければならない。このprofileはHuman Coordination wire document上のcaller-controlled realm fieldを定義または受理してはならない。"
+          },
+          "status": "reference-only",
+          "capability": "verifier-context",
+          "optional_capability": false,
+          "tests": [
+            {"format": "go-test", "package": "./schemas", "name": "TestHumanIngressSchemaRejectsUnsupportedOrSensitiveFields"},
+            {"format": "go-test", "package": "./pkg/taskcoord/asbbinding", "name": "TestIngressStrictJSONRejectsDuplicateAndUnknownMembers"}
+          ],
+          "evidence": ["docs/asb-taskcoord-human-request-binding-v1.md", "schemas/asb-taskcoord-human-ingress-v1.schema.json"]
+        },
+        {
+          "id": "ASB-HC-CORE-011",
+          "normative": {
+            "en": "A Human Participant MUST NOT appear in public Agent discovery; Human matching MAY exist only as an optional consent-scoped capability and MUST return opaque bounded candidates without direct contact data.",
+            "ja": "Human Participantをpublic Agent discoveryへ掲載してはならない。Human matchingは任意のconsent-scoped capabilityとしてのみ提供してよく、直接連絡先dataを含まないopaqueでboundedなcandidateだけを返さなければならない。"
+          },
+          "status": "implemented",
+          "capability": "human-matching",
+          "optional_capability": true,
+          "tests": [
+            {"format": "go-test", "package": "./pkg/taskcoord", "name": "TestAgentDiscoveryRejectsHuman"},
+            {"format": "go-test", "package": "./pkg/taskcoord", "name": "TestHumanMatchingReturnsOnlyOpaqueRelayCandidate"}
+          ],
+          "evidence": ["pkg/taskcoord/reachability.go", "pkg/taskcoord/reachability_store.go", "pkg/taskcoord/validation.go"]
+        }
+      ]
+    },
+    {
+      "id": "asb.human-coordination.task-action/v1",
+      "maturity": "developer-preview",
+      "capability_based": false,
+      "depends_on": ["asb.human-coordination.core/v1"],
+      "requirements": [
+        {
+          "id": "ASB-HC-TA-001",
+          "normative": {
+            "en": "Each Assignment MAY have zero or one immutable Action binding, and an implementation MUST reject creation of a second binding for the same Assignment.",
+            "ja": "各Assignmentが持てるimmutable Action bindingは0または1件であり、同じAssignmentへの2件目のbinding作成を拒否しなければならない。"
+          },
+          "status": "implemented",
+          "capability": "task-action-binding",
+          "optional_capability": true,
+          "tests": [
+            {"format": "go-test", "package": "./pkg/taskcoord/actionbinding", "name": "TestMemoryStoreRejectsSecondActionForAssignmentWithoutPartialWrite"},
+            {"format": "go-test", "package": "./pkg/taskcoord/actionbinding", "name": "TestMemoryStoreConcurrentBindingHasOneWinner"}
+          ],
+          "evidence": ["pkg/taskcoord/actionbinding/model.go", "pkg/taskcoord/actionbinding/memory_store.go"]
+        },
+        {
+          "id": "ASB-HC-TA-002",
+          "normative": {
+            "en": "Assignment responsibility and Action execution MUST remain independent; Action completion MUST NOT fulfill an Assignment, and Assignment release or revocation MUST NOT erase or mutate Action history.",
+            "ja": "Assignment responsibilityとAction executionは独立に保たなければならない。Action完了がAssignmentをfulfillしてはならず、AssignmentのreleaseまたはrevocationがAction historyを消去または変更してはならない。"
+          },
+          "status": "implemented",
+          "capability": "task-action-binding",
+          "optional_capability": true,
+          "tests": [
+            {"format": "go-test", "package": "./pkg/taskcoord/actionbinding", "name": "TestBindingKeepsResponsibilityAndExecutionIndependent"},
+            {"format": "go-test", "package": "./pkg/taskcoord/actionbinding", "name": "TestSucceededActionOnlyMakesFulfillmentEligible"}
+          ],
+          "evidence": ["pkg/taskcoord/actionbinding/binding.go", "pkg/taskcoord/actionbinding/projection.go"]
+        },
+        {
+          "id": "ASB-HC-TA-003",
+          "normative": {
+            "en": "Binding creation MUST atomically compare an accepted Assignment, verify the exact acceptance authorization, derive the initial Action, and commit the Action and immutable binding together.",
+            "ja": "binding作成はACCEPTED Assignmentをatomicに比較し、exact acceptance authorizationを検証し、initial Actionを導出して、Actionとimmutable bindingを一括commitしなければならない。"
+          },
+          "status": "implemented",
+          "capability": "task-action-binding",
+          "optional_capability": true,
+          "tests": [
+            {"format": "go-test", "package": "./pkg/taskcoord/actionbinding", "name": "TestServiceAcceptRejectsMissingAndTamperedAuthentication"},
+            {"format": "go-test", "package": "./pkg/taskcoord/actionbinding", "name": "TestMemoryStoreCommitAcceptanceValidatesBeforeDeduplication"}
+          ],
+          "evidence": ["pkg/taskcoord/actionbinding/acceptance.go", "pkg/taskcoord/actionbinding/service.go", "pkg/taskcoord/actionbinding/store.go"]
+        },
+        {
+          "id": "ASB-HC-TA-004",
+          "normative": {
+            "en": "Every authenticated Action mutation MUST bind the complete mutation and MUST be re-applied under Store compare-and-swap with current authorization and lease checks before commit.",
+            "ja": "すべてのauthenticated Action mutationはcomplete mutationを束縛し、commit前に現在のauthorizationとleaseを確認しながらStore compare-and-swap内で再適用しなければならない。"
+          },
+          "status": "implemented",
+          "capability": "action-mutation",
+          "optional_capability": true,
+          "tests": [
+            {"format": "go-test", "package": "./pkg/taskcoord/actionbinding", "name": "TestMemoryStoreReappliesAuthorizedEventBeforeCommit"},
+            {"format": "go-test", "package": "./pkg/actionlifecycle", "name": "TestSnapshotValidationRejectsImpossibleDurableHistory"},
+            {"format": "go-test", "package": "./pkg/actionlifecycle", "name": "TestTransitionAllowedMatchesLifecycleGraph"},
+            {"format": "go-test", "package": "./pkg/taskcoord/actionbinding", "name": "TestServiceRechecksAuthorizationAndLeaseAtCommit"}
+          ],
+          "evidence": ["pkg/taskcoord/actionbinding/store.go", "pkg/taskcoord/actionbinding/memory_store.go"]
+        },
+        {
+          "id": "ASB-HC-TA-005",
+          "normative": {
+            "en": "A waiting Action MUST release its executor lease and MUST resume only through an authenticated operation with the required current time, availability, signal, manual, or dependency evidence.",
+            "ja": "WAITING Actionはexecutor leaseを解放し、必要な現在時刻、availability、signal、manualまたはdependency evidenceを伴うauthenticated operationによってのみresumeしなければならない。"
+          },
+          "status": "implemented",
+          "capability": "action-wait-resume",
+          "optional_capability": true,
+          "tests": [
+            {"format": "go-test", "package": "./pkg/actionlifecycle", "name": "TestWaitingTimeConditionSurvivesWithoutExecutorLease"},
+            {"format": "go-test", "package": "./pkg/actionlifecycle", "name": "TestAvailabilityWaitRequiresEvidenceToResume"}
+          ],
+          "evidence": ["pkg/actionlifecycle/machine.go", "pkg/actionlifecycle/model.go"]
+        },
+        {
+          "id": "ASB-HC-TA-006",
+          "normative": {
+            "en": "Lease expiry MUST orphan an Action without claiming failure, and takeover MUST use an authenticated higher fencing generation or require reconciliation when the outcome is unknown.",
+            "ja": "lease expiryは失敗を主張せずActionをORPHANEDにしなければならない。takeoverはauthenticatedなより高いfencing generationを使うか、outcomeがunknownならreconciliationを要求しなければならない。"
+          },
+          "status": "implemented",
+          "capability": "action-recovery",
+          "optional_capability": true,
+          "tests": [
+            {"format": "go-test", "package": "./pkg/actionlifecycle", "name": "TestLeaseExpiryOrphansAndAuthenticatedTakeoverFencesOldExecutor"},
+            {"format": "go-test", "package": "./pkg/actionlifecycle", "name": "TestReconcileBeforeResumePolicyBlocksDirectTakeover"}
+          ],
+          "evidence": ["pkg/actionlifecycle/machine.go", "pkg/actionlifecycle/model.go"]
+        },
+        {
+          "id": "ASB-HC-TA-007",
+          "normative": {
+            "en": "Dependency waiting and resumption MUST use the current unchanged topology and current satisfaction state, while non-dependency waits MUST remain external escape paths for deadlock analysis.",
+            "ja": "dependency waitとresumeは現在の変更されていないtopologyと現在のsatisfaction stateを使わなければならず、non-dependency waitはdeadlock analysisでexternal escape pathとして残さなければならない。"
+          },
+          "status": "implemented",
+          "capability": "task-dependencies",
+          "optional_capability": true,
+          "tests": [
+            {"format": "go-test", "package": "./pkg/taskcoord/actionbinding", "name": "TestDependencyResumeRequiresSameSatisfiedTopology"},
+            {"format": "go-test", "package": "./pkg/taskcoord/actionbinding", "name": "TestNonDependencyWaitIsAnExternalEscape"}
+          ],
+          "evidence": ["pkg/taskcoord/actionbinding/dependency.go", "pkg/taskcoord/actionbinding/projection.go"]
+        },
+        {
+          "id": "ASB-HC-TA-008",
+          "normative": {
+            "en": "A production Task-Action Store MUST provide the documented multi-record atomic commits, strict durable schemas, event re-application, and restart durability; the repository Store is reference-only.",
+            "ja": "production Task-Action Storeは規定されたmulti-record atomic commit、strict durable schema、event再適用、restart durabilityを提供しなければならない。repositoryのStoreはreference-onlyである。"
+          },
+          "status": "reference-only",
+          "capability": "task-action-store",
+          "optional_capability": true,
+          "tests": [
+            {"format": "go-test", "package": "./pkg/taskcoord/actionbinding", "name": "TestMemoryStoreRejectsDependencyTOCTOUWithoutPartialCommit"},
+            {"format": "go-test", "package": "./schemas", "name": "TestActionLifecycleValidatorsAcceptDurableDocuments"}
+          ],
+          "evidence": ["pkg/taskcoord/actionbinding/store.go", "pkg/taskcoord/actionbinding/memory_store.go", "schemas/task-action-binding-v1.schema.json"]
+        },
+        {
+          "id": "ASB-HC-TA-009",
+          "normative": {
+            "en": "A Task-Action Store MUST keep the acceptance business identity, exact proof-attempt identity, and first canonical result distinct; an exact attempt retry MUST return that result after proof expiry, an expired proof MUST NOT create state, and a different proof MUST require reconciliation without rewriting provenance.",
+            "ja": "Task-Action Storeはacceptanceのbusiness identity、exactなproof-attempt identity、最初のcanonical resultを分離して保持しなければならない。exact attemptのretryはproof期限後もその結果を返し、expired proofでstateを新規作成してはならず、異なるproofはprovenanceを書き換えずreconciliationを要求しなければならない。"
+          },
+          "status": "reference-only",
+          "capability": "task-action-acceptance-idempotency",
+          "optional_capability": true,
+          "tests": [
+            {"format": "go-test", "package": "./pkg/taskcoord/actionbinding", "name": "TestServiceAcceptExactAttemptRetryReturnsCanonicalViewAfterExpiry"},
+            {"format": "go-test", "package": "./pkg/taskcoord/actionbinding", "name": "TestServiceAcceptExpiredAttemptCannotCreateState"},
+            {"format": "go-test", "package": "./pkg/taskcoord/actionbinding", "name": "TestServiceAcceptDifferentProofRequiresReconciliation"},
+            {"format": "go-test", "package": "./pkg/taskcoord/actionbinding", "name": "TestMemoryStoreConcurrentExactAcceptanceRetriesShareCanonicalView"}
+          ],
+          "evidence": ["pkg/taskcoord/actionbinding/acceptance.go", "pkg/taskcoord/actionbinding/store.go", "pkg/taskcoord/actionbinding/memory_store.go", "testdata/action-transcript-v1-vectors.json"]
+        }
+      ]
+    },
+    {
+      "id": "asb.human-coordination.relay/v1",
+      "maturity": "developer-preview",
+      "capability_based": false,
+      "depends_on": ["asb.human-coordination.core/v1"],
+      "requirements": [
+        {
+          "id": "ASB-HC-RLY-001",
+          "normative": {
+            "en": "A relay intent MUST be authorized by a fresh ASB proof that binds the exact Agent, reachability grant, route scope, content reference, and content digest and consumes replay state once.",
+            "ja": "relay intentはexact Agent、reachability grant、route scope、content reference、content digestを束縛しreplay stateを一度だけ消費するfresh ASB proofで認可しなければならない。"
+          },
+          "status": "implemented",
+          "capability": "agent-to-human-relay",
+          "optional_capability": true,
+          "tests": [
+            {"format": "go-test", "package": "./pkg/humanrelay/asbbinding", "name": "TestProfileVerifiesExactAgentRelayIntent"},
+            {"format": "go-test", "package": "./pkg/humanrelay/asbbinding", "name": "TestProfileConsumesSessionProofOnce"}
+          ],
+          "evidence": ["pkg/humanrelay/asbbinding/profile.go", "pkg/humanrelay/asbbinding/canonical.go"]
+        },
+        {
+          "id": "ASB-HC-RLY-002",
+          "normative": {
+            "en": "Queue authorization MUST consume one exact active reachability grant for at most one immutable relay intent and MUST recheck scope, expiry, consent, and Participant state inside the atomic commit. The grant authorizes contact routing and metadata and MUST NOT be treated as Human approval of the exact content.",
+            "ja": "queue authorizationはexactでactiveなreachability grant一件を最大一件のimmutable relay intentへ消費し、atomic commit内でscope、expiry、consent、Participant stateを再検査しなければならない。grantが認可するのはcontact routingとmetadataであり、exact contentに対するHuman approvalとして扱ってはならない。"
+          },
+          "status": "implemented",
+          "capability": "agent-to-human-relay",
+          "optional_capability": true,
+          "tests": [
+            {"format": "go-test", "package": "./pkg/humanrelay", "name": "TestServiceEnforcesOneIntentPerGrantAndExactIdempotency"},
+            {"format": "go-test", "package": "./pkg/humanrelay", "name": "TestQueueRechecksRevocationInsideAtomicCommit"}
+          ],
+          "evidence": ["pkg/humanrelay/service.go", "pkg/humanrelay/store.go"]
+        },
+        {
+          "id": "ASB-HC-RLY-003",
+          "normative": {
+            "en": "Agent-visible relay records MUST omit Human identity, candidate, consent, approval evidence, relay session, provider reference, and direct contact data.",
+            "ja": "Agent-visible relay recordからHuman identity、candidate、consent、approval evidence、relay session、provider reference、直接連絡先dataを除外しなければならない。"
+          },
+          "status": "implemented",
+          "capability": "agent-to-human-relay",
+          "optional_capability": true,
+          "tests": [
+            {"format": "go-test", "package": "./pkg/humanrelay", "name": "TestServiceQueuesAndDispatchesWithoutHumanOrContactLeak"},
+            {"format": "go-test", "package": "./schemas", "name": "TestHumanRelaySchemaRejectsHumanAndContactFields"}
+          ],
+          "evidence": ["pkg/humanrelay/model.go", "schemas/asb-human-relay-v1.schema.json"]
+        },
+        {
+          "id": "ASB-HC-RLY-004",
+          "normative": {
+            "en": "Dispatch MUST serialize its final authorization check with revocation, persist DISPATCHING before a provider callback, and persist CANCELED with no callback when revocation wins.",
+            "ja": "dispatchはfinal authorization checkをrevocationと直列化し、provider callback前にDISPATCHINGを永続化し、revocationが勝った場合はcallbackなしでCANCELEDを永続化しなければならない。"
+          },
+          "status": "reference-only",
+          "capability": "relay-dispatch",
+          "optional_capability": true,
+          "tests": [
+            {"format": "go-test", "package": "./pkg/humanrelay", "name": "TestDispatchCancelsWithoutProviderCallAfterReachabilityWithdrawal"},
+            {"format": "go-test", "package": "./pkg/humanrelay", "name": "TestDispatchGateBlocksRevocationThroughProviderAcknowledgement"}
+          ],
+          "evidence": ["pkg/humanrelay/service.go", "pkg/humanrelay/memory_store.go", "pkg/taskcoord/reachability_store.go"]
+        },
+        {
+          "id": "ASB-HC-RLY-005",
+          "normative": {
+            "en": "Concurrent workers MUST call the provider at most once for an intent, and an unknown provider outcome MUST remain DISPATCHING and MUST NOT be retried blindly.",
+            "ja": "並行workerは一つのintentについてproviderを最大一回だけcallしなければならず、unknown provider outcomeはDISPATCHINGのまま保持してblind retryしてはならない。"
+          },
+          "status": "reference-only",
+          "capability": "relay-dispatch",
+          "optional_capability": true,
+          "tests": [
+            {"format": "go-test", "package": "./pkg/humanrelay", "name": "TestConcurrentDispatchWorkersCallProviderExactlyOnce"},
+            {"format": "go-test", "package": "./pkg/humanrelay", "name": "TestProviderFailureLeavesUnknownDispatchTerminal"}
+          ],
+          "evidence": ["pkg/humanrelay/service.go", "pkg/humanrelay/store.go"]
+        },
+        {
+          "id": "ASB-HC-RLY-006",
+          "normative": {
+            "en": "Every relay event identifier MUST be the lower-hex SHA-256 identifier derived from the versioned status-and-intent transcript and MUST be recomputed during semantic validation.",
+            "ja": "すべてのrelay event identifierはversioned status-and-intent transcriptから導出したlower-hex SHA-256 identifierでなければならず、semantic validation時に再計算しなければならない。"
+          },
+          "status": "implemented",
+          "capability": "agent-to-human-relay",
+          "optional_capability": true,
+          "tests": [
+            {"format": "go-test", "package": "./pkg/humanrelay", "name": "TestRelayEventIDGolden"},
+            {"format": "go-test", "package": "./schemas", "name": "TestHumanRelaySchemaIdentifierBoundary"}
+          ],
+          "evidence": ["pkg/humanrelay/canonical.go", "pkg/humanrelay/validation.go", "schemas/asb-human-relay-v1.schema.json"]
+        },
+        {
+          "id": "ASB-HC-RLY-007",
+          "normative": {
+            "en": "A provider acknowledgement MUST describe transport state only and MUST NOT be interpreted as Human receipt, approval, completion, an Interaction, or an Assignment or Action mutation.",
+            "ja": "provider acknowledgementはtransport stateだけを表し、Human receipt、approval、completion、Interaction、AssignmentまたはAction mutationとして解釈してはならない。"
+          },
+          "status": "implemented",
+          "capability": "agent-to-human-relay",
+          "optional_capability": true,
+          "tests": [
+            {"format": "go-test", "package": "./pkg/humanrelay", "name": "TestStorePreservesFirstProviderAcknowledgementTime"},
+            {"format": "go-test", "package": "./pkg/humanrelay", "name": "TestWorkerRejectsMismatchedProviderAcknowledgement"}
+          ],
+          "evidence": ["pkg/humanrelay/model.go", "pkg/humanrelay/service.go"]
+        },
+        {
+          "id": "ASB-HC-RLY-008",
+          "normative": {
+            "en": "A deployment claiming production relay delivery MUST provide a restart-durable store, cross-process fenced dispatch, provider reconciliation, protected contact vault, abuse controls, and qualified provider adapters.",
+            "ja": "production relay deliveryを主張するdeploymentはrestart-durable store、cross-process fenced dispatch、provider reconciliation、保護されたcontact vault、abuse control、qualified provider adapterを提供しなければならない。"
+          },
+          "status": "unimplemented",
+          "capability": "production-relay-delivery",
+          "optional_capability": true,
+          "tests": [],
+          "evidence": ["docs/agent-to-human-relay-v1.md"]
+        }
+      ]
+    },
+    {
+      "id": "asb.human-coordination.http/v1",
+      "maturity": "developer-preview",
+      "capability_based": false,
+      "depends_on": ["asb.human-coordination.core/v1"],
+      "requirements": [
+        {
+          "id": "ASB-HC-HTTP-001",
+          "normative": {
+            "en": "The Human Coordination HTTP profile MUST expose POST /v1/human-operations/challenge with 201 success and POST /v1/human-operations/execute with 200 success; other routes and methods MUST return structured errors.",
+            "ja": "Human Coordination HTTP profileはPOST /v1/human-operations/challengeを201 success、POST /v1/human-operations/executeを200 successとして提供し、それ以外のrouteとmethodにはstructured errorを返さなければならない。"
+          },
+          "status": "implemented",
+          "capability": "human-ingress-http",
+          "optional_capability": true,
+          "tests": [
+            {"format": "go-test", "package": "./pkg/taskcoord/asbbinding", "name": "TestIngressSuccessResponseContract"},
+            {"format": "go-test", "package": "./pkg/taskcoord/asbbinding", "name": "TestIngressRouteMethodAndMediaTypeContract"}
+          ],
+          "evidence": ["pkg/taskcoord/asbbinding/ingress.go", "pkg/taskcoord/asbbinding/ingress_http.go"]
+        },
+        {
+          "id": "ASB-HC-HTTP-002",
+          "normative": {
+            "en": "The ingress MUST terminate TLS 1.3 with a verified client certificate and MUST derive Actor and session bindings from the accepted connection rather than caller-controlled HTTP metadata.",
+            "ja": "ingressはverified client certificateを使うTLS 1.3を終端し、Actorとsession bindingをcaller-controlled HTTP metadataではなくaccepted connectionから導出しなければならない。"
+          },
+          "status": "implemented",
+          "capability": "human-ingress-http",
+          "optional_capability": true,
+          "tests": [
+            {"format": "go-test", "package": "./pkg/taskcoord/asbbinding", "name": "TestIngressRejectsPlainHTTPAndUnverifiedClient"},
+            {"format": "go-test", "package": "./pkg/taskcoord/asbbinding", "name": "TestServerTLSConfigRequiresCertificateAndClientCA"}
+          ],
+          "evidence": ["pkg/taskcoord/asbbinding/ingress.go", "pkg/taskcoord/asbbinding/tls_server.go"]
+        },
+        {
+          "id": "ASB-HC-HTTP-003",
+          "normative": {
+            "en": "A challenge MUST be bound to one verified TLS connection, request digest, nonce, expiry, and one execute attempt, MUST NOT replace another live challenge on identifier collision, and MUST NOT be accepted on another connection.",
+            "ja": "challengeは一つのverified TLS connection、request digest、nonce、expiry、execute attempt一回に束縛し、identifier衝突時に別のlive challengeを置換してはならず、別connectionで受理してはならない。"
+          },
+          "status": "implemented",
+          "capability": "human-ingress-http",
+          "optional_capability": true,
+          "tests": [
+            {"format": "go-test", "package": "./pkg/taskcoord/asbbinding", "name": "TestIngressRejectsChallengeOnAnotherTLSConnection"},
+            {"format": "go-test", "package": "./pkg/taskcoord/asbbinding", "name": "TestIngressReleasesConnectionCountersOnConsumeAndExpiry"},
+            {"format": "go-test", "package": "./pkg/taskcoord/asbbinding", "name": "TestIngressRejectsChallengeIDCollisionWithoutClobberingState"},
+            {"format": "go-test", "package": "./pkg/taskcoord/asbbinding", "name": "TestIngressRegeneratesCollidingChallengeIDsAndFailsClosed"}
+          ],
+          "evidence": ["pkg/taskcoord/asbbinding/ingress.go", "pkg/taskcoord/asbbinding/profile.go"]
+        },
+        {
+          "id": "ASB-HC-HTTP-004",
+          "normative": {
+            "en": "Each route MUST require application/json and its route-specific bounded strict schema and MUST reject duplicate, unknown, trailing, or opposite-envelope input.",
+            "ja": "各routeはapplication/jsonとroute固有のbounded strict schemaを要求し、duplicate、unknown、trailingまたはopposite-envelope inputを拒否しなければならない。"
+          },
+          "status": "implemented",
+          "capability": "human-ingress-http",
+          "optional_capability": true,
+          "tests": [
+            {"format": "go-test", "package": "./pkg/taskcoord/asbbinding", "name": "TestIngressRejectsEndpointMismatchedEnvelopes"},
+            {"format": "go-test", "package": "./schemas", "name": "TestHumanIngressRouteValidatorsRejectOppositeEnvelope"}
+          ],
+          "evidence": ["schemas/asb-taskcoord-human-ingress-v1.schema.json", "schemas/human_ingress_validator.go"]
+        },
+        {
+          "id": "ASB-HC-HTTP-005",
+          "normative": {
+            "en": "Every HTTP response MUST carry a server-generated X-Request-ID, and an error body MUST repeat that identifier without trusting or echoing an inbound request identifier.",
+            "ja": "すべてのHTTP responseはserver-generated X-Request-IDを持たなければならず、error bodyはinbound request identifierを信頼またはechoせず同じidentifierを含めなければならない。"
+          },
+          "status": "implemented",
+          "capability": "human-ingress-http",
+          "optional_capability": true,
+          "tests": [
+            {"format": "go-test", "package": "./pkg/taskcoord/asbbinding", "name": "TestIngressErrorResponseKeepsLegacyErrorAndRejectsInboundRequestID"},
+            {"format": "go-test", "package": "./pkg/taskcoord/asbbinding", "name": "TestIngressSuccessResponseContract"}
+          ],
+          "evidence": ["pkg/taskcoord/asbbinding/ingress_http.go", "schemas/asb-taskcoord-human-ingress-response-v1.schema.json"]
+        },
+        {
+          "id": "ASB-HC-HTTP-006",
+          "normative": {
+            "en": "HTTP errors MUST use the fixed public status, code, message, and retryability matrix and MUST NOT reveal raw random-source, verifier, replay-store, or persistence errors.",
+            "ja": "HTTP errorは固定されたpublic status、code、message、retryability matrixを使い、raw random-source、verifier、replay-store、persistence errorを露出してはならない。"
+          },
+          "status": "implemented",
+          "capability": "human-ingress-http",
+          "optional_capability": true,
+          "tests": [
+            {"format": "go-test", "package": "./pkg/taskcoord/asbbinding", "name": "TestIngressStableFailureMatrix"},
+            {"format": "go-test", "package": "./pkg/taskcoord/asbbinding", "name": "TestIngressRedactsRandomAndCommitErrors"}
+          ],
+          "evidence": ["pkg/taskcoord/asbbinding/ingress_http.go", "schemas/asb-taskcoord-human-ingress-response-v1.schema.json"]
+        },
+        {
+          "id": "ASB-HC-HTTP-007",
+          "normative": {
+            "en": "RATE_LIMITED MUST carry Retry-After: 1 and may be retried, while OPERATION_OUTCOME_UNKNOWN MUST NOT be retried automatically because the mutation may have committed.",
+            "ja": "RATE_LIMITEDはRetry-After: 1を持ちretryしてよいが、mutationがcommit済みの可能性があるためOPERATION_OUTCOME_UNKNOWNを自動retryしてはならない。"
+          },
+          "status": "implemented",
+          "capability": "human-ingress-http",
+          "optional_capability": true,
+          "tests": [
+            {"format": "go-test", "package": "./pkg/taskcoord/asbbinding", "name": "TestIngressRateLimitContract"},
+            {"format": "go-test", "package": "./pkg/taskcoord/asbbinding", "name": "TestIngressErrorCodeClassifier"}
+          ],
+          "evidence": ["pkg/taskcoord/asbbinding/ingress_http.go", "docs/asb-taskcoord-human-ingress-demo.md"]
+        },
+        {
+          "id": "ASB-HC-HTTP-008",
+          "normative": {
+            "en": "The request digest MUST bind every caller-controlled field that can affect authorization, durable state, attribution, or response, and proof verification MUST precede trusted state lookup where oracle resistance requires it.",
+            "ja": "request digestはauthorization、durable state、attribution、responseへ影響できる全caller-controlled fieldを束縛し、oracle resistanceが必要な箇所ではproof verificationをtrusted state lookupより前に行わなければならない。"
+          },
+          "status": "implemented",
+          "capability": "human-ingress-http",
+          "optional_capability": true,
+          "tests": [
+            {"format": "go-test", "package": "./pkg/taskcoord/asbbinding", "name": "TestCanonicalDigestBindsEveryInteractionField"},
+            {"format": "go-test", "package": "./pkg/taskcoord/asbbinding", "name": "TestIngressVerifiesProofBeforeAcceptedUntilAndParticipantLookup"}
+          ],
+          "evidence": ["pkg/taskcoord/asbbinding/canonical.go", "pkg/taskcoord/asbbinding/profile.go", "pkg/taskcoord/asbbinding/ingress.go"]
+        },
+        {
+          "id": "ASB-HC-HTTP-009",
+          "normative": {
+            "en": "This HTTP profile MUST NOT expose relay Worker or Task-Action internal APIs; relay and Action HTTP endpoints are outside this profile and unknown paths MUST return NOT_FOUND.",
+            "ja": "このHTTP profileからrelay WorkerまたはTask-Action内部APIを公開してはならない。relayとActionのHTTP endpointはprofile外であり、unknown pathにはNOT_FOUNDを返さなければならない。"
+          },
+          "status": "implemented",
+          "capability": "human-ingress-http",
+          "optional_capability": true,
+          "tests": [
+            {"format": "go-test", "package": "./pkg/taskcoord/asbbinding", "name": "TestIngressRouteMethodAndMediaTypeContract"},
+            {"format": "go-test", "package": "./pkg/taskcoord/asbbinding", "name": "TestIngressNotFoundConflictAndChallengeErrors"}
+          ],
+          "evidence": ["pkg/taskcoord/asbbinding/ingress.go", "docs/asb-taskcoord-human-ingress-demo.md"]
+        }
+      ]
+    },
+    {
+      "id": "asb.human-coordination.production/v1",
+      "maturity": "unavailable",
+      "capability_based": true,
+      "depends_on": ["asb.human-coordination.core/v1"],
+      "requirements": [
+        {
+          "id": "ASB-HC-PROD-001",
+          "normative": {
+            "en": "A production conformance claim MUST name each selected Human Coordination capability and its qualification evidence; core conformance MUST NOT imply Task-Action or relay capability.",
+            "ja": "production conformance claimは選択した各Human Coordination capabilityとqualification evidenceを明示しなければならない。core conformanceからTask-Actionまたはrelay capabilityを暗黙に主張してはならない。"
+          },
+          "status": "reference-only",
+          "capability": "conformance-declaration",
+          "optional_capability": false,
+          "tests": [
+            {"format": "go-test", "package": "./schemas", "name": "TestHumanCoordinationConformanceManifestV1"}
+          ],
+          "evidence": ["testdata/human-coordination-conformance-v1.json", "docs/human-coordination-conformance-v1.md", "docs/human-coordination-production-v1.md"]
+        },
+        {
+          "id": "ASB-HC-PROD-002",
+          "normative": {
+            "en": "A selected TaskCoord persistence capability MUST atomically commit Assignment, delegation, Interaction, and transactional outbox state with revision and event conflict checks.",
+            "ja": "選択したTaskCoord persistence capabilityはrevisionとevent conflictを検査し、Assignment、delegation、Interaction、transactional outbox stateをatomicにcommitしなければならない。"
+          },
+          "status": "reference-only",
+          "capability": "taskcoord-redis-store",
+          "optional_capability": true,
+          "tests": [
+            {"format": "go-test", "package": "./pkg/production", "name": "TestRedisTaskCoordAssignmentAndOutboxOverTLS"},
+            {"format": "go-test", "package": "./pkg/production", "name": "TestRedisTaskCoordDelegationAndInteractionOverTLS"}
+          ],
+          "evidence": ["pkg/production/redis_taskcoord.go", "pkg/production/redis_taskcoord_scripts.go"]
+        },
+        {
+          "id": "ASB-HC-PROD-003",
+          "normative": {
+            "en": "A selected Human ingress capability MUST terminate verified TLS, enforce shared replay protection, and commit through a durable TaskCoord Store; the repository ingress is a reference composition.",
+            "ja": "選択したHuman ingress capabilityはverified TLSを終端し、shared replay protectionを強制し、durable TaskCoord Storeを通じてcommitしなければならない。repository ingressはreference compositionである。"
+          },
+          "status": "reference-only",
+          "capability": "human-ingress",
+          "optional_capability": true,
+          "tests": [
+            {"format": "go-test", "package": "./pkg/taskcoord/asbbinding", "name": "TestHumanTaskCoordIngressDemo"},
+            {"format": "go-test", "package": "./pkg/taskcoord/asbbinding", "name": "TestIngressVerifiesASBBeforeDelegationDecisionLookup"}
+          ],
+          "evidence": ["pkg/taskcoord/asbbinding/ingress.go", "pkg/taskcoord/asbbinding/tls_server.go"]
+        },
+        {
+          "id": "ASB-HC-PROD-004",
+          "normative": {
+            "en": "A selected Task-Action capability MUST implement the integrated Store transaction contract with durable recovery and event re-application; the in-process adapter is reference-only.",
+            "ja": "選択したTask-Action capabilityはdurable recoveryとevent再適用を含むintegrated Store transaction contractを実装しなければならない。in-process adapterはreference-onlyである。"
+          },
+          "status": "reference-only",
+          "capability": "task-action-store",
+          "optional_capability": true,
+          "tests": [
+            {"format": "go-test", "package": "./pkg/taskcoord/actionbinding", "name": "TestMemoryStoreReappliesExecutionEventBeforeCommit"},
+            {"format": "go-test", "package": "./pkg/taskcoord/actionbinding", "name": "TestMemoryStoreRejectsExecutionThroughOrdinaryCommit"}
+          ],
+          "evidence": ["pkg/taskcoord/actionbinding/store.go", "pkg/taskcoord/actionbinding/memory_store.go"]
+        },
+        {
+          "id": "ASB-HC-PROD-005",
+          "normative": {
+            "en": "A selected relay capability MUST provide durable grant-scoped dispatch serialization and provider idempotency; the in-process Worker and gateway sink are reference-only.",
+            "ja": "選択したrelay capabilityはdurableなgrant-scoped dispatch serializationとprovider idempotencyを提供しなければならない。in-process Workerとgateway sinkはreference-onlyである。"
+          },
+          "status": "reference-only",
+          "capability": "relay-dispatch",
+          "optional_capability": true,
+          "tests": [
+            {"format": "go-test", "package": "./pkg/humanrelay", "name": "TestConcurrentDispatchWorkersCallProviderExactlyOnce"},
+            {"format": "go-test", "package": "./pkg/humanrelay", "name": "TestServiceQueuesAndDispatchesWithoutHumanOrContactLeak"}
+          ],
+          "evidence": ["pkg/humanrelay/memory_store.go", "pkg/humanrelay/local_gateway.go"]
+        },
+        {
+          "id": "ASB-HC-PROD-006",
+          "normative": {
+            "en": "A TaskCoord Redis or Valkey capability MUST be qualified against the selected live service for persistence, replication, failover, backup, recovery, and unknown-write reconciliation before it is claimed for production.",
+            "ja": "TaskCoord RedisまたはValkey capabilityはproduction claim前に、選択したlive service上でpersistence、replication、failover、backup、recovery、unknown-write reconciliationをqualificationしなければならない。"
+          },
+          "status": "unqualified",
+          "capability": "taskcoord-redis-store",
+          "optional_capability": true,
+          "tests": [
+            {"format": "go-test", "package": "./pkg/production", "name": "TestRedisTaskCoordUnknownWAITOutcomeRecoversWithoutDuplicateOutbox"}
+          ],
+          "evidence": ["pkg/production/redis_taskcoord.go", "docs/task-participant-v1.md"]
+        },
+        {
+          "id": "ASB-HC-PROD-007",
+          "normative": {
+            "en": "Each selected deployment capability MUST have live operational qualification for its ingress, replay, outbox, recovery, and external provider boundaries before a production claim is made.",
+            "ja": "選択した各deployment capabilityはproduction claim前に、そのingress、replay、outbox、recovery、external provider boundaryについてlive operational qualificationを完了しなければならない。"
+          },
+          "status": "unqualified",
+          "capability": "deployment-qualification",
+          "optional_capability": false,
+          "tests": [],
+          "evidence": ["docs/asb-taskcoord-human-ingress-demo.md", "docs/agent-to-human-relay-v1.md", "docs/task-action-lifecycle-v1.md"]
+        },
+        {
+          "id": "ASB-HC-PROD-008",
+          "normative": {
+            "en": "A deployment selecting Task-Action, relay delivery, or cross-proof Human-ingress reconciliation MUST supply the corresponding production Store, restart-durable dispatch and provider recovery, or durable outcome journal; these adapters are not implemented in this repository.",
+            "ja": "Task-Action、relay delivery、cross-proof Human-ingress reconciliationを選択するdeploymentは、それぞれproduction Store、restart-durable dispatchとprovider recovery、durable outcome journalを提供しなければならない。これらのadapterはrepositoryに未実装である。"
+          },
+          "status": "unimplemented",
+          "capability": "missing-production-adapters",
+          "optional_capability": true,
+          "tests": [],
+          "evidence": ["docs/task-action-lifecycle-v1.md", "docs/agent-to-human-relay-v1.md", "docs/asb-taskcoord-human-ingress-demo.md"]
+        }
+      ]
+    }
+  ]
+}

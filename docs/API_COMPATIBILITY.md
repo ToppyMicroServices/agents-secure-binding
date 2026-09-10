@@ -36,6 +36,11 @@ The following remain experimental or outside the supported product API:
 
 - draft-06-inspired v2 entrypoints and types;
 - `pkg/agtp`, gateway-route, cache, and diversion-policy adapters;
+- Human Coordination packages and profiles, including `pkg/taskcoord`,
+  `pkg/actionlifecycle`, `pkg/humanrelay`, and their binding packages;
+- `cmd/asb-human`, its CLI flags, local HTTP/JSON format, SQLite schema and
+  browser gateway; these belong to the local approval preview, not a stable
+  Human Coordination wire profile;
 - the Azure Attestation bridge, pending live hardware qualification and a
   later explicit API-support decision;
 - the inherited Manager, Agent, CVM, HAL, proxy, and CLI runtime surfaces;

@@ -2,12 +2,18 @@
 
 Status: Experimental / Repository-local
 
-本書は、Split Agentのapplication substrateでHumanが行うTaskCoord requestを、
+本profileを含む安定したproduct profile ID、英日共通要件、実装・qualification statusは
+[Human Coordination conformance registry](human-coordination-conformance-v1.md)で管理する。
+
+本書は、Split Agentのapplication substrateでHuman Participantへ帰属させるTaskCoord requestを、
 既存のAgent Secure Binding (ASB) acceptanceへ最小限の追加情報で結合する
 application profileを定義する。本書はHumanをAgentとして扱わず、新しい暗号方式、
 Human専用token、transport protocol、またはHuman identity proofing方式を定義しない。
 
 本書の`MUST`、`MUST NOT`、`SHOULD`、`MAY`は規範要件を表す。
+
+identifierのoctet単位、whitespace、case、Unicodeの共通規則は
+[`human-coordination-field-semantics-v1.md`](human-coordination-field-semantics-v1.md)で定義する。
 
 ## 1. Profile identifiers
 
@@ -17,6 +23,15 @@ Human専用token、transport protocol、またはHuman identity proofing方式�
 | Request digest domain | `ASB-TASKCOORD-HUMAN-REQUEST-v1` |
 | Request context domain | `ASB-TASKCOORD-HUMAN-CONTEXT-v1` |
 | Authorization detail prefix | `urn:asb:taskcoord-human-request:v1:sha256:` |
+
+### 1.1 Realm binding
+
+`ASB-HC-CORE-010`のrealmはwire document内のcaller-controlled fieldではなく、
+verifier-local contextである。同じrealmはexact audience、Participant resolverとStore
+namespace、replay namespace、Human reachability grant namespace、outbox namespaceを
+一貫して選択しなければならない。identifierはrealm内でのみ一意であり、別realmの同じ
+文字列をglobal identityとして扱ってはならない。v1 documentをrealm間で移送する場合は、
+暗黙のglobal IDを仮定せず、新しいprofile versionで明示的なrealm bindingを定義する。
 
 ## 2. Goal
 
@@ -36,6 +51,35 @@ AND freshness, revocation, and one-shot replay checks succeed
 gateway、device、またはworkloadは実際にrequestを送信するASB `Actor`である。
 両者を同じidentity categoryとして解釈してはならず、identifierの一致も要求しない。
 deploymentは運用上の混同を避けるため、role-separated namespaceを使用することが望ましい。
+
+### 2.1 Human assurance vocabulary
+
+Humanへの帰属は、証拠を作ったprincipalとその証拠が束縛する内容で区別する。
+次のidentifierはprotocol、conformance manifest、audit表示で共通に使う。
+
+| Assurance level | Evidence meaning | v1 status |
+| --- | --- | --- |
+| `gateway-asserted-for-human` | operation authorityがgateway Actorにexact requestの代理送信を許可し、ASBがgatewayのholder-of-key/session proofを検証してHuman Participantへ帰属させる。 | 現profileで実装済み |
+| `authenticated-human-evidence` | trusted Human authentication authorityが生成した別のHuman認証artifactをoperationへ束縛する。artifact自体がexact request confirmationを含むとは限らない。 | 未実装 |
+| `human-held-key-exact-request` | enrolmentされたHuman-held keyがdomain-separated exact requestとverifier contextへ署名する。 | 未実装 |
+
+この三つは互換のmarketing labelではなく、検証可能な証拠の違いである。
+`asb.taskcoord-human-request/v1`が供給するのは
+`gateway-asserted-for-human`だけである。Identity GrantとSession Binding
+Statementの署名鍵はgateway Actorまたはoperation authorityの鍵であり、Human-held
+keyではない。`participant_id`をHumanの署名者として表示したり、
+`proof_id`をHuman signature IDと呼んだりしてはならない。
+
+将来のprofileが別の保証を使う場合は、artifactのissuer、key enrolment、
+exact requestとrealm/audience/freshnessの束縛、revocation、audit表示をversioned
+extensionとして定義する。caller-controlledな`assurance_level`を現在のwire
+documentへ追加してはならない。assurance levelはaccepted profileと検証済み
+evidenceからverifierが決定する。
+
+accepted Human ingressは、この固定pairを`TransitionRecord`、
+`DelegationRecord`、`InteractionEvent`へ監査provenanceとして保存する。
+trusted-internalまたはlegacy recordではfieldを省略できるが、省略値から
+Human assuranceを推測してはならない。Human ingressのresponseでは省略を許さない。
 
 ## 3. Minimality rule
 
@@ -245,31 +289,37 @@ verifier clockから生成する。
 
 ## 8. Verification algorithm
 
-verifier adapterは一つの閉じたcall boundaryで次を行わなければならない。Step 1から
-10の副作用を伴わない検査は、同じ受理条件を維持する限り並べ替えてよい。
+verifier adapterは一つの閉じたcall boundaryで次を行わなければならない。外部ingressは
+Step 2から9の認証を完了するまでAssignmentを参照せず、対象の存在、revision、statusを
+応答差として公開してはならない。
 
 1. strict decode済みtyped requestからSection 5のdigestとcontextを再計算する。
-2. trusted application snapshotとParticipant resolverを使い、request対象、revision、
-   registry recordを解決する。
-3. recordのschema、ID、`kind = HUMAN`、operation-specific status policyを確認する。
-4. accepted TLS/session stateから導出したexpected bindingの
+2. accepted TLS/session stateから導出したexpected bindingの
    `request_context_sha256`がSection 5.3と一致することを確認する。
-5. trusted operation-authority key、issuer、audience、revocation、time policyにより
+3. trusted operation-authority key、issuer、audience、revocation、time policyにより
    Identity Grantを検証する。
-6. `authorization_details`がSection 6の一要素exact setであることを確認する。
-7. grantが許可したActor keyでSession Binding Statementを検証する。
-8. grant hash、accepted endpoint、TLS exporter、request context、nonce、expiry、
+4. `authorization_details`がSection 6の一要素exact setであることを確認する。
+5. grantが許可したActor keyでSession Binding Statementを検証する。
+6. grant hash、accepted endpoint、TLS exporter、request context、nonce、expiry、
    optional attestation binderをlocal expected stateと比較する。
-9. configured ASB identity policyを評価する。
-10. verified grantとstatementから`actor_id`、`authorization_id`、`proof_id`、nonce、
+7. configured ASB identity policyを評価する。
+8. verified grantとstatementから`actor_id`、`authorization_id`、`proof_id`、nonce、
     有効期間を導出する。
-11. 同じtyped requestとtrusted snapshotからTaskCoord operation/eventをmemory上で構築し、
+9. Participant resolverからrequestのParticipantを解決し、schema、ID、
+   `kind = HUMAN`、`status = ACTIVE`を確認する。Step 2から9のfailureは、外部ingressで
+   同じauthorization failureとして返す。
+10. この認証済みacceptanceをexact request digestへ再結合したまま、trusted application
+    snapshotをloadし、request対象、revision、operation-specific status policyを確認する。
+11. delegationの場合は、Step 2から10の検証後にdeployment-controlled
+    `DelegationDecisionVerifier`を呼び、trusted policy stateから`VerifiedDelegation`を
+    取得する。client-supplied policy projectionを使用してはならない。
+12. 同じtyped requestとtrusted snapshotからTaskCoord operation/eventをmemory上で構築し、
     既存state machineによるsemantic validationを完了する。
-12. distributed deploymentではshared replay storeへone-shot keyをatomic insertする。
-13. 検証済みtransition/eventを返す。durable Store commitはdeployment adapterが別途行う。
+13. distributed deploymentではshared replay storeへone-shot keyをatomic insertする。
+14. 検証済みtransition/eventを返す。durable Store commitはdeployment adapterが別途行う。
 
 raw requestから`AuthenticatedOperation`または`AuthenticatedInteraction`を自己申告で
-構築し、Step 1から12を迂回してはならない。
+構築し、Step 1から13を迂回してはならない。
 
 ## 9. Projection rules
 
@@ -297,11 +347,18 @@ projectionは未検証token、HTTP header、request JSON内の同名fieldから�
 - state machineがrequestを拒否した場合は検証済みresultを返さず、replay insertも行わない。
 - productionでreplay storeがmissingまたはunavailableの場合はfail closedとする。
 - 同じTLS connection上の異なるrequestは異なるrequest contextとfresh proofを使用する。
-- application retryは同じevent IDとrequest内容、新しいASB proofを使用する。Storeの
-  idempotencyが以前の結果を返す。
+- Store-level idempotencyは同じproof、時刻、snapshotを含む同一durable recordの再commitに
+  限られる。新しいASB proofでは`proof_id`、nonce、verifier時刻が変わるため、同じevent ID
+  でも以前の結果を自動的には返さない。
+- execute応答を失った場合、結果はunknownとしてtrusted Store stateとevent historyを読み、
+  最初のcommit有無をreconcileする。fresh proofによるblind retryは、最初のcommitが成功して
+  いればrevision conflictまたはevent conflictになり得る。このconflictを「最初のoperationが
+  失敗した」と解釈してはならない。
+- このdemo ingressには外部向けstatus/read endpointとstable business-request outcome journalが
+  ない。cross-proof end-to-end idempotencyを必要とするdeploymentは、request digestに束縛した
+  operation reservationとresponseをTaskCoord mutationとatomicに永続化しなければならない。
 - replay consumeとTaskCoord Store commitは現実装では同一transactionではない。
-  commit失敗時はfresh authorization/proofによるretryを要求する。このprofileは
-  exactly-onceを主張しない。
+  commit error後も結果をunknownとしてreconcileする。このprofileはexactly-onceを主張しない。
 
 ## 11. Participant status
 
@@ -325,7 +382,11 @@ SHA-256 digestは暗号化ではない。低entropy requestの内容秘匿をdig
 
 このprofileは次を証明または実装しない。
 
-- 実在Humanの本人確認、liveness、法的同意、UI操作の事実;
+- gateway assertionとは別のauthenticated-Human evidence;
+- Human-held keyのpossessionまたはexact requestへのHuman signature;
+- Humanの同時的な存在やliveness;
+- exact requestをHumanに表示し、HumanがUIで確認した事実;
+- 実在Humanの本人確認または法的に有効な同意;
 - Humanの判断、回答、能力、正しさ;
 - operation authorityまたはgateway compromiseへの耐性;
 - Human discovery、contact vault、Email/SNS/TEL delivery;
@@ -354,6 +415,8 @@ Identity Grantへ束縛するversioned extensionが必要である。二つのau
   context、nonceの拒否;
 - missing、future、expired、revoked grant/proofの拒否;
 - inactive/non-Human Participantの拒否;
+- proof未検証時はAssignmentをlookupせず、missing、stale、wrong-taskを同じ外部errorへ
+  collapseすること;
 - replayの逐次および並行拒否;
 - replay store unavailable時のfail-closed;
 - verified grant/statement `jti`のprojectionへの正しい伝播;
@@ -384,16 +447,43 @@ endpoint keyやTLS exporterを導出するTLS 1.3/mTLS受付serviceを含む。�
 外部requestが指定したheaderやJSON値を`ExpectedBinding`として使用してはならない。
 
 低レベル`Profile`はcallerから渡されたcurrent Assignmentをtrusted Store snapshotとして扱い、
-transitionをStoreへcommitしない。`Ingress`はrequest IDからsnapshotを自身でloadし、profile
-callとrevision CAS commitを一つのapplication boundaryに置く。
+transitionをStoreへcommitしない。`Ingress`は4種類の
+`gateway-asserted-for-human` requestを受け、request
+IDからsnapshotを自身でloadし、profile callとStore commitを一つのapplication boundaryに
+置く。Offerはrevision 1のAssignmentを作成し、通常transitionはrevision CASを行い、
+delegationはparent transition、child offer、provenance edgeをatomic commitする。
+
+`ASSIGNMENT_DELEGATION`はdeploymentが`DelegationDecisionVerifier`を設定した場合だけ有効に
+なる。IngressはASB grant/session proofを検証してからverifierを呼び、返されたdecisionと
+parent、child、Participant、authority digestの一致をstate machineで検査する。wire schemaは
+`verified_delegation`、`policy_ref`等のclient-supplied policy projectionを受理しない。
+低レベル`Profile.Delegate`も同じverifierを必須とし、caller-supplied
+`VerifiedDelegation`を受理しない。verifierへ渡すAssignmentとrequestはdeep-copyし、callbackが
+pointer fieldを書き換えてもASB-bound requestやtrusted snapshotを変更できないようにする。
+
+Ingressのpending challengeはTTLに加えて、TLS connection単位、verified client public key単位、
+Ingress instance全体の有限quotaで制限する。全体quotaは異なるconnection keyを作ることで回避
+できず、consumeとexpiryは同じmutex下で全counterを解放する。
 
 ## 16. Wire format and JSON Schema boundary
 
 canonical binding profile自体はJSON表現へ依存しない。repositoryのHTTP受付serviceは独立した
 `schemas/asb-taskcoord-human-ingress-v1.schema.json`でchallenge/execute envelopeを検証する。
+公開済みschema IDはrequest-only unionのまま維持し、endpoint実装はその
+`challengeEnvelope`または`executeEnvelope`部分schemaを選んで検証する。これにより、
+challenge形状をexecute routeへ送るcross-route substitutionをchallenge lookupより前に拒否する。
 認証済みprojectionやASB evidenceは既存Task Participant durable-document unionへ追加しない。
 JSON Schemaによるshape検査は署名、issuer、audience、live TLS binding、registry state、
 current revision、replayを証明しない。
+
+challenge success、4種類のexecute success、公開error bodyは
+`schemas/asb-taskcoord-human-ingress-response-v1.schema.json`で定義する。success status/bodyは
+challengeの`201`とexecuteの`200`を維持する。全応答はserver生成の`X-Request-ID`を持ち、
+error bodyは既存string `error`に`code`、`retryable`、`request_id`を追加する。公開errorの
+正確なstatus/code表、`Retry-After: 1`、raw内部errorのredaction、結果不明executeを
+自動retryしない境界は
+[`asb-taskcoord-human-ingress-demo.md`](asb-taskcoord-human-ingress-demo.md)で定義する。
+relay専用HTTP ingressとAction HTTP ingressはこのprofileの実装範囲外である。
 
 JSON等を受けるtransport adapterは、1 MiBの上限、unknown member、duplicate member、invalid
 UTF-8を拒否してから本profileのtyped requestを構築しなければならない。将来wire formatを

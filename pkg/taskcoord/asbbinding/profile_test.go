@@ -22,6 +22,17 @@ const (
 	testActorID  = "service:human-gateway"
 )
 
+type panicDelegationVerifier struct{}
+
+func (*panicDelegationVerifier) VerifyDelegation(
+	context.Context,
+	taskcoord.Assignment,
+	DelegationRequest,
+	time.Time,
+) (taskcoord.VerifiedDelegation, error) {
+	panic("typed-nil delegation verifier was invoked")
+}
+
 func TestProfileAppliesExactHumanAssignmentRequest(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -338,7 +349,15 @@ func TestProfileOffersDelegatesAndAuthorsInteraction(t *testing.T) {
 		PolicyRef:             "urn:policy:delegation:1", EvidenceRef: "urn:evidence:delegation:1",
 		VerifiedAt: now.Add(-time.Minute),
 	}
-	delegated, err := profile.Delegate(ctx, parent, delegationRequest, verified,
+	verifier := DelegationDecisionVerifierFunc(func(
+		context.Context,
+		taskcoord.Assignment,
+		DelegationRequest,
+		time.Time,
+	) (taskcoord.VerifiedDelegation, error) {
+		return verified, nil
+	})
+	delegated, err := profile.Delegate(ctx, parent, delegationRequest, verifier,
 		testEvidence(t, now, delegationDigest, delegationDigest, "authorization:delegate:1", "proof:delegate:1", "nonce:delegate:1", nil))
 	if err != nil {
 		t.Fatalf("Delegate() error = %v", err)
@@ -368,6 +387,188 @@ func TestProfileOffersDelegatesAndAuthorsInteraction(t *testing.T) {
 	}
 }
 
+func TestProfileDelegateRequiresVerifierWithoutConsumingReplay(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	now := time.Date(2026, 8, 13, 10, 0, 0, 0, time.UTC)
+	profile, parent, request, digest := delegationProfileFixture(t, now)
+	replay := identitypolicy.NewMemoryReplayCacheWithClock(func() time.Time { return now })
+	evidence := testEvidence(
+		t, now, digest, digest,
+		"authorization:delegate:required-verifier",
+		"proof:delegate:required-verifier",
+		"nonce:delegate:required-verifier",
+		replay,
+	)
+
+	var typedNil DelegationDecisionVerifierFunc
+	var typedNilPointer *panicDelegationVerifier
+	for _, test := range []struct {
+		name     string
+		verifier DelegationDecisionVerifier
+	}{
+		{name: "nil interface"},
+		{name: "typed nil function", verifier: typedNil},
+		{name: "typed nil pointer", verifier: typedNilPointer},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := profile.Delegate(ctx, parent, request, test.verifier, evidence)
+			if !errors.Is(err, ErrMissingDelegationVerifier) {
+				t.Fatalf("Delegate() error = %v, want %v", err, ErrMissingDelegationVerifier)
+			}
+		})
+	}
+
+	calls := 0
+	verifier := DelegationDecisionVerifierFunc(func(
+		_ context.Context,
+		current taskcoord.Assignment,
+		bound DelegationRequest,
+		at time.Time,
+	) (taskcoord.VerifiedDelegation, error) {
+		calls++
+		return verifiedDelegationFor(current, bound, at), nil
+	})
+	if _, err := profile.Delegate(ctx, parent, request, verifier, evidence); err != nil {
+		t.Fatalf("Delegate() retry with verifier error = %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("verifier calls = %d, want 1", calls)
+	}
+	if _, err := profile.Delegate(ctx, parent, request, verifier, evidence); !errors.Is(err, identitypolicy.ErrReplayDetected) {
+		t.Fatalf("Delegate() replay error = %v, want %v", err, identitypolicy.ErrReplayDetected)
+	}
+}
+
+func TestProfileDelegateAuthenticatesBeforeVerifier(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	now := time.Date(2026, 8, 13, 10, 0, 0, 0, time.UTC)
+	profile, parent, request, digest := delegationProfileFixture(t, now)
+	evidence := testEvidence(
+		t, now, digest, digest,
+		"authorization:delegate:proof-first",
+		"proof:delegate:proof-first",
+		"nonce:delegate:proof-first",
+		nil,
+	)
+	corrupt := evidence
+	corrupt.SessionBindingJWT = "not-a-jwt"
+	calls := 0
+	verifier := DelegationDecisionVerifierFunc(func(
+		_ context.Context,
+		current taskcoord.Assignment,
+		bound DelegationRequest,
+		at time.Time,
+	) (taskcoord.VerifiedDelegation, error) {
+		calls++
+		return verifiedDelegationFor(current, bound, at), nil
+	})
+
+	if _, err := profile.Delegate(ctx, parent, request, verifier, corrupt); err == nil {
+		t.Fatal("Delegate() accepted corrupt ASB proof")
+	}
+	if calls != 0 {
+		t.Fatalf("verifier calls before ASB acceptance = %d, want 0", calls)
+	}
+	if _, err := profile.Delegate(ctx, parent, request, verifier, evidence); err != nil {
+		t.Fatalf("Delegate() legitimate control error = %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("verifier calls after legitimate proof = %d, want 1", calls)
+	}
+}
+
+func TestProfileDelegateRejectsMismatchedDecisionWithoutConsumingReplay(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	now := time.Date(2026, 8, 13, 10, 0, 0, 0, time.UTC)
+	profile, parent, request, digest := delegationProfileFixture(t, now)
+	evidence := testEvidence(
+		t, now, digest, digest,
+		"authorization:delegate:mismatch",
+		"proof:delegate:mismatch",
+		"nonce:delegate:mismatch",
+		nil,
+	)
+	mismatched := DelegationDecisionVerifierFunc(func(
+		_ context.Context,
+		current taskcoord.Assignment,
+		bound DelegationRequest,
+		at time.Time,
+	) (taskcoord.VerifiedDelegation, error) {
+		decision := verifiedDelegationFor(current, bound, at)
+		decision.ToParticipantID = "agent:other"
+		return decision, nil
+	})
+	if _, err := profile.Delegate(ctx, parent, request, mismatched, evidence); !errors.Is(err, taskcoord.ErrInvalidDelegation) {
+		t.Fatalf("Delegate() mismatch error = %v, want %v", err, taskcoord.ErrInvalidDelegation)
+	}
+
+	valid := DelegationDecisionVerifierFunc(func(
+		_ context.Context,
+		current taskcoord.Assignment,
+		bound DelegationRequest,
+		at time.Time,
+	) (taskcoord.VerifiedDelegation, error) {
+		return verifiedDelegationFor(current, bound, at), nil
+	})
+	if _, err := profile.Delegate(ctx, parent, request, valid, evidence); err != nil {
+		t.Fatalf("Delegate() retry after rejected decision error = %v", err)
+	}
+}
+
+func TestProfileDelegateIsolatesVerifierInputPointers(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	now := time.Date(2026, 8, 13, 10, 0, 0, 0, time.UTC)
+	profile, parent, request, digest := delegationProfileFixture(t, now)
+	parentDueAt := now.Add(2 * time.Hour)
+	parent.DueAt = &parentDueAt
+	originalAcceptedAt := *parent.AcceptedAt
+	originalParentDueAt := *parent.DueAt
+	originalChildDueAt := *request.DueAt
+	evidence := testEvidence(
+		t, now, digest, digest,
+		"authorization:delegate:pointer-isolation",
+		"proof:delegate:pointer-isolation",
+		"nonce:delegate:pointer-isolation",
+		nil,
+	)
+	verifier := DelegationDecisionVerifierFunc(func(
+		_ context.Context,
+		current taskcoord.Assignment,
+		bound DelegationRequest,
+		at time.Time,
+	) (taskcoord.VerifiedDelegation, error) {
+		if current.AcceptedAt == parent.AcceptedAt || current.DueAt == parent.DueAt || bound.DueAt == request.DueAt {
+			t.Fatal("delegation verifier received shared pointer fields")
+		}
+		decision := verifiedDelegationFor(current, bound, at)
+		*current.AcceptedAt = time.Time{}
+		*current.DueAt = now.Add(-2 * time.Hour)
+		*bound.DueAt = now.Add(-time.Hour)
+		return decision, nil
+	})
+
+	transition, err := profile.Delegate(ctx, parent, request, verifier, evidence)
+	if err != nil {
+		t.Fatalf("Delegate() error = %v", err)
+	}
+	if transition.Parent.AcceptedAt == nil || !transition.Parent.AcceptedAt.Equal(originalAcceptedAt) {
+		t.Fatalf("parent accepted_at = %v, want %v", transition.Parent.AcceptedAt, originalAcceptedAt)
+	}
+	if transition.Parent.DueAt == nil || !transition.Parent.DueAt.Equal(originalParentDueAt) {
+		t.Fatalf("parent due_at = %v, want %v", transition.Parent.DueAt, originalParentDueAt)
+	}
+	if transition.Child.DueAt == nil || !transition.Child.DueAt.Equal(originalChildDueAt) {
+		t.Fatalf("child due_at = %v, want %v", transition.Child.DueAt, originalChildDueAt)
+	}
+	if !parent.AcceptedAt.Equal(originalAcceptedAt) || !parent.DueAt.Equal(originalParentDueAt) || !request.DueAt.Equal(originalChildDueAt) {
+		t.Fatal("delegation verifier mutated caller-owned input")
+	}
+}
+
 func TestProfileRequiresReplayAndOwnsExactAuthorizationDetailPolicy(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -391,6 +592,18 @@ func TestProfileRequiresReplayAndOwnsExactAuthorizationDetailPolicy(t *testing.T
 	missingReplay.Options.ReplayCache = nil
 	if _, err := profile.Apply(ctx, current, request, missingReplay); !errors.Is(err, clients.ErrMissingReplayCache) {
 		t.Fatalf("missing replay error = %v", err)
+	}
+	var typedNilReplay *identitypolicy.MemoryReplayCache
+	missingReplay.Options.ReplayCache = typedNilReplay
+	if _, err := profile.Apply(ctx, current, request, missingReplay); !errors.Is(err, clients.ErrMissingReplayCache) {
+		t.Fatalf("typed-nil replay error = %v", err)
+	}
+	var typedNilParticipants *taskcoord.MemoryStore
+	typedNilProfile := Profile{Participants: typedNilParticipants, Now: func() time.Time { return now }}
+	if _, err := typedNilProfile.Apply(ctx, current, request, testEvidence(
+		t, now, digest, digest, "authorization:typed-nil", "proof:typed-nil", "nonce:typed-nil", nil,
+	)); !errors.Is(err, ErrMissingParticipantResolver) {
+		t.Fatalf("typed-nil Participant resolver error = %v", err)
 	}
 
 	ambiguous := testEvidence(t, now, digest, digest, "authorization:2", "proof:2", "nonce:2", nil)
@@ -418,6 +631,40 @@ func TestProfileExposesOnlyDigestInApplicationBinding(t *testing.T) {
 			t.Fatalf("application binding leaked %q", forbidden)
 		}
 	}
+}
+
+func delegationProfileFixture(
+	t *testing.T,
+	now time.Time,
+) (Profile, taskcoord.Assignment, DelegationRequest, Digest) {
+	t.Helper()
+	ctx := context.Background()
+	human := testParticipant("human:alice", taskcoord.ParticipantHuman, true, now.Add(-time.Hour))
+	agent := testParticipant("agent:reviewer", taskcoord.ParticipantAgent, false, now.Add(-time.Hour))
+	store := taskcoord.NewMemoryStore()
+	registerParticipants(t, ctx, store, human, agent)
+	parent := acceptedHumanAssignment(t, human, now.Add(-10*time.Minute))
+	dueAt := now.Add(time.Hour)
+	request := DelegationRequest{
+		ParticipantID:       human.ParticipantID,
+		EventID:             "event:delegate:profile-boundary",
+		ParentTaskID:        parent.TaskID,
+		ParentAssignmentID:  parent.AssignmentID,
+		ExpectedRevision:    parent.Revision,
+		DecisionID:          "decision:profile-boundary",
+		ChildEventID:        "event:delegate:profile-boundary:child",
+		ChildTaskID:         "task:delegate:profile-boundary:child",
+		ChildAssignmentID:   "assignment:delegate:profile-boundary:child",
+		TargetParticipantID: agent.ParticipantID,
+		Role:                taskcoord.RoleReviewer,
+		AuthorityDigest:     repeatedDigest('e'),
+		DueAt:               &dueAt,
+	}
+	digest, err := DelegationDigest(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return Profile{Participants: store, Now: func() time.Time { return now }}, parent, request, digest
 }
 
 func testEvidence(

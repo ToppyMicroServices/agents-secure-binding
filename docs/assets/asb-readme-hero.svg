@@ -1,0 +1,71 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 360" role="img" aria-labelledby="title description">
+  <title id="title">Agents Secure Binding</title>
+  <desc id="description">Agent A sends a grant, proof, and exact request through the ASB verification boundary to an intended Agent or Human gateway.</desc>
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#021a30"/>
+      <stop offset="0.58" stop-color="#02213b"/>
+      <stop offset="1" stop-color="#073956"/>
+    </linearGradient>
+    <linearGradient id="shield" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#62d2ff"/>
+      <stop offset="1" stop-color="#1999c8"/>
+    </linearGradient>
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="10"/>
+    </filter>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#62d2ff"/>
+    </marker>
+  </defs>
+
+  <rect width="1200" height="360" rx="28" fill="url(#background)"/>
+  <circle cx="102" cy="58" r="3" fill="#62d2ff" opacity="0.34"/>
+  <circle cx="1120" cy="74" r="4" fill="#62d2ff" opacity="0.24"/>
+  <circle cx="1066" cy="308" r="3" fill="#7de3a1" opacity="0.28"/>
+  <path d="M 24 318 C 210 284, 318 346, 506 316 S 856 284, 1178 326" fill="none" stroke="#62d2ff" stroke-width="1" opacity="0.12"/>
+
+  <g font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" text-anchor="middle">
+    <text x="600" y="58" fill="#f4fbff" font-size="30" font-weight="700" letter-spacing="3">AGENTS SECURE BINDING</text>
+    <text x="600" y="91" fill="#a9c6d8" font-size="15" letter-spacing="0.7">VERIFIED IDENTITY · EXACT SESSION · INTENDED ACTION</text>
+  </g>
+
+  <g font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif">
+    <rect x="70" y="133" width="270" height="142" rx="18" fill="#062b47" stroke="#24536d"/>
+    <circle cx="112" cy="174" r="21" fill="#0a3b5c" stroke="#62d2ff" stroke-width="2"/>
+    <circle cx="112" cy="168" r="6" fill="#62d2ff"/>
+    <path d="M 98 188 C 101 178, 123 178, 126 188" fill="none" stroke="#62d2ff" stroke-width="3" stroke-linecap="round"/>
+    <text x="148" y="168" fill="#f4fbff" font-size="18" font-weight="700">AGENT A</text>
+    <text x="148" y="190" fill="#90b3c8" font-size="13">independent runtime</text>
+    <rect x="95" y="222" width="220" height="32" rx="16" fill="#041d33"/>
+    <text x="205" y="243" fill="#b9d8e8" font-size="12" text-anchor="middle" letter-spacing="0.4">GRANT + PROOF + REQUEST</text>
+
+    <rect x="860" y="133" width="270" height="142" rx="18" fill="#062b47" stroke="#24536d"/>
+    <circle cx="902" cy="174" r="21" fill="#0a3b5c" stroke="#7de3a1" stroke-width="2"/>
+    <path d="M 892 174 L 899 181 L 913 165" fill="none" stroke="#7de3a1" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="938" y="168" fill="#f4fbff" font-size="18" font-weight="700">INTENDED PEER</text>
+    <text x="938" y="190" fill="#90b3c8" font-size="13">Agent or Human gateway</text>
+    <rect x="885" y="222" width="220" height="32" rx="16" fill="#092e3e"/>
+    <text x="995" y="243" fill="#a9f0c0" font-size="12" text-anchor="middle" letter-spacing="0.4">ACCEPTED IDENTITY</text>
+
+    <path d="M 340 203 H 493" fill="none" stroke="#62d2ff" stroke-width="2.5" marker-end="url(#arrow)"/>
+    <path d="M 705 203 H 853" fill="none" stroke="#62d2ff" stroke-width="2.5" marker-end="url(#arrow)"/>
+    <circle cx="600" cy="198" r="79" fill="#1999c8" opacity="0.14" filter="url(#glow)"/>
+    <path d="M 600 120 L 680 151 V 207 C 680 249, 648 276, 600 292 C 552 276, 520 249, 520 207 V 151 Z" fill="url(#shield)"/>
+    <path d="M 600 137 L 663 161 V 205 C 663 236, 640 258, 600 273 C 560 258, 537 236, 537 205 V 161 Z" fill="#02213b"/>
+    <text x="600" y="193" fill="#f4fbff" font-size="28" font-weight="800" text-anchor="middle" letter-spacing="2">ASB</text>
+    <text x="600" y="218" fill="#62d2ff" font-size="12" font-weight="700" text-anchor="middle" letter-spacing="2">VERIFY</text>
+    <path d="M 579 236 L 594 250 L 623 221" fill="none" stroke="#7de3a1" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+
+  <g font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="11" font-weight="700" text-anchor="middle" letter-spacing="1">
+    <rect x="330" y="309" width="118" height="28" rx="14" fill="#082d49" stroke="#24536d"/>
+    <text x="389" y="327" fill="#9fc7db">SESSION</text>
+    <rect x="462" y="309" width="118" height="28" rx="14" fill="#082d49" stroke="#24536d"/>
+    <text x="521" y="327" fill="#9fc7db">AUTHORITY</text>
+    <rect x="594" y="309" width="118" height="28" rx="14" fill="#082d49" stroke="#24536d"/>
+    <text x="653" y="327" fill="#9fc7db">CONTEXT</text>
+    <rect x="726" y="309" width="118" height="28" rx="14" fill="#082d49" stroke="#24536d"/>
+    <text x="785" y="327" fill="#9fc7db">REPLAY</text>
+  </g>
+</svg>

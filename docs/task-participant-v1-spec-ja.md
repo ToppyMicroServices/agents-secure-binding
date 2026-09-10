@@ -6,6 +6,11 @@ Status: Experimental / Repository-local
 Task Participant v1 の仕様を日本語で集約したものである。IETF標準、外部task
 protocolとの相互運用仕様、または本番運用の適合宣言ではない。
 
+安定したproduct profile IDと英日共通のconformance mappingは
+[Human Coordination conformance registry](human-coordination-conformance-v1.md)で管理する。
+reference実装の一連の流れは
+[Human Coordination debug-simple E2E](../examples/human-coordination-e2e/README.md)で実行できる。
+
 本書では、`MUST`を実装上必須、`MUST NOT`を禁止、`SHOULD`を合理的な理由が
 ない限り推奨される要件として用いる。
 
@@ -97,6 +102,11 @@ OFFER -> OFFERED -> ACCEPT  -> ACCEPTED -> FULFILL -> FULFILLED
 - `WAITING`、`PAUSED`、`ORPHANED`、timeout、実行成否をAssignment stateとして
   追加してはならない。これらはTaskまたはAction lifecycleの責務である。
 
+`ASB-HC-CORE-004`では、`OWNER`、`ASSIGNEE`、`REVIEWER`は責任を表すlabelであり、
+それ自体がpermissionを付与しない。assignee operationは引き続き割当先Participantを
+要求し、offerまたはrevokeのauthorityは認証済みoperationとverifier-local policyから
+決まる。role名から追加権限を推論してはならない。
+
 Humanの応答待ちでもAssignmentは通常`ACCEPTED`のままである。応答期限超過は、
 Assignment失敗、Action失敗、executor orphaningを自動的には意味しない。
 
@@ -131,6 +141,10 @@ append-onlyな`InteractionEvent`として記録する。
 `RESPONSE`と`CORRECTION`は`INTERIM`または`FINAL`を宣言する。`FINAL`はその
 回答versionについてのauthor assertionにすぎず、Interaction、Assignment、Taskを
 自動的にcloseまたはfulfillしない。後続訂正や別Participantの回答を禁止しない。
+
+`ASB-HC-CORE-007`では、terminal AssignmentもInteraction履歴をcloseしない。監査または
+reconciliationに必要な認証済みQUESTION、RESPONSE、CORRECTION、WITHDRAWALは追記できる。
+ただしInteraction appendがterminal Assignment snapshotまたはrevisionを変更してはならない。
 
 contentはinline保存せず、`content_ref`と64文字のlowercase hex
 `content_digest`で参照・固定する。訂正や撤回は既存eventを上書きしてはならない。
@@ -228,13 +242,28 @@ requester向けgrantを発行できる。
 - requester mismatch、scope mismatch、missing、expired、revokedは同じ`ErrNotFound`
   として扱い、存在確認によるprobe情報を減らす。
 
+matching consentとreachability grantが認めるのは、scopeで限定された連絡経路と
+contact metadataの利用である。送信するmessageの内容そのものをHumanが承認したことは
+意味しない。relayのASB proofはAgentが認可したrequest全体を束縛するが、Humanによる
+内容承認の証明ではない。内容単位のHuman承認を要求するpolicyには、relayの
+`RequestDigest`へ束縛した、Human自身が生成する別の認証済みstatementが必要になる。
+このstatementは未実装である。
+
 ### 8.5 Revocation
 
 - Humanは`HumanMatchConsentRevocation`でmatching consentを撤回できる。
-- consent revocationはそのconsentから発行済みのgrantも直ちに無効化する。
+- consent revocationはそのconsentから発行済みのgrantを以後の利用に対して無効化する。
 - Humanまたは正しいAgent requesterは`HumanReachabilityRevocation`でgrantを撤回できる。
 - revocationはimmutable eventとして保存し、対象recordを削除または上書きしない。
 - exact retryはidempotentとし、同じevent IDで内容が異なる場合はconflictとする。
+
+external dispatchとの競合は、requestに含まれるrevocation時刻ではなくdurable commitの
+順序で決める。revocationが先にcommitされた場合、`QUEUED` intentを`CANCELED`へ遷移
+させ、provider callbackを呼ばない。dispatchが先にguardを取得した場合は、callbackの
+前に`DISPATCHING`を永続化し、revocationは同じgrant-scoped guardで待機する。provider
+errorまたは結果不明の場合は`DISPATCHING`に留め、callbackを無条件に再試行しない。
+production実装は、fencing token付きdistributed lockまたはgatewayが一度だけ消費する
+permitによって、この順序をprocess間でも保持しなければならない。
 
 ## 9. Privacyと連絡先管理
 
@@ -249,9 +278,12 @@ relay referenceは次を満たさなければならない。
 - queryなし;
 - fragmentなし。
 
-これは構造上のguardrailであり、完全なDLPではない。production relayはHTTPS path、
-message body、log、trace、metric、diagnosticへの生の連絡先混入を別途防止し、access
-control、rate limit、abuse monitoring、retention、deletion、auditを実装すべきである。
+これは構造上のguardrailであり、完全なDLPではない。`content_ref`と`content_digest`は
+brokerのdurable intentに保存されgatewayへ渡るため、brokerからすでに見える。HTTPS
+pathや低entropy contentのdigestから機微情報を推測できる可能性もある。production
+relayはmessage body、log、trace、metric、diagnosticへの生の連絡先混入を別途防止し、
+access control、rate limit、abuse monitoring、retention、deletion、auditを実装すべきで
+ある。
 
 ## 10. 認証済みprojection
 
@@ -329,6 +361,14 @@ Human operationをASBへ最小束縛するapplication profileは
 で定義する。TLS 1.3/mTLSを直接終端する受付serviceと実行可能なdemoは
 [`asb-taskcoord-human-ingress-demo.md`](asb-taskcoord-human-ingress-demo.md)を参照する。
 
+AgentからHuman gatewayへの連絡要求はHuman operationと分離し、
+[`agent-to-human-relay-v1.md`](agent-to-human-relay-v1.md)のrelay profileで扱う。
+このrelayは有効な`HumanReachabilityGrant`を一つのintentへ消費し、AgentへHuman ID、
+直接連絡先、relay sessionを返さない。`CANCELED`はprovider callbackより先にrevocation
+が成立したこと、`DISPATCHING`は外部作用が開始された可能性があることを示す。
+`PROVIDER_ACKNOWLEDGED`はgatewayが配送要求を受領したことだけを示し、Humanの既読、
+承認、拒否、Assignment遷移を意味しない。
+
 ## 12. 永続document
 
 JSON Schemaが扱うdurable documentは次の10種類である。
@@ -367,8 +407,28 @@ strict decoderは次を要求する。
 - `AgentDirectory`、`HumanReachabilityDirectory`、Assignment `Store`を別境界とする。
 - production通知を行う場合、outbox entryをstate変更と同じDB transactionへ含める。
 
+Storeのexact idempotencyはproof、時刻、snapshotを含む同一durable recordを対象とする。
+fresh ASB proofではaudit fieldが変わるため、lost execute responseへ以前の結果を自動返却しない。
+結果不明時はtrusted stateとevent historyからreconcileする。cross-proof retryを必要とする
+deploymentはrequest digest、operation reservation、responseをstate mutationとatomicに保存する。
+
 `MemoryStore`、`MemoryAgentDirectory`、`MemoryReachabilityDirectory`は並行安全な
 in-process stubであり、restart durability、replication、failoverを保証しない。
+`NewMemoryReachabilityDirectory`はlocal wall clockを使用する。
+`NewMemoryReachabilityDirectoryWithClock`はdeterministicなexpiry test用のadditiveな
+reference pathであり、clock未指定を拒否する。このclockはverifier-controlledでなければ
+ならず、peer requestから選択してはならない。profileへcaller-supplied time fieldを追加する
+APIではない。
+
+`production.RedisTaskCoordStore`はRedis/Valkey向けadapter候補であり、LuaによるCAS、
+event deduplication、delegation atomicity、Interaction append、transactional outboxを
+実装する。outboxはbounded leaseを用いるat-least-once配送であり、consumerはevent IDで
+deduplicateしなければならない。stateful TLS protocol test doubleでは検査済みだが、
+実Redis/Valkey、persistence、replication、failover、backup、recoveryは未qualificationである。
+replica acknowledgementを設定した場合、idempotent mutation retryは同一hash slotの
+replication barrierを書き、そのconnection上で`WAIT`に成功してから応答する。これは
+結果不明writeのrecovery gapを狭めるが、非同期replicationをlinearizableまたはzero-lossに
+するものではない。
 
 ## 14. JSON Schema validation
 
@@ -380,7 +440,8 @@ SchemaはJSON Schema Draft 2020-12を使用する。CIは次を検査する。
 - HumanのAgent discovery化、公開Human identity、直接連絡先relay、grantへの生Email
   追加、不正date-timeのnegative fixture。
 
-Schema検証はingressで再利用できるが、現在はCI/test gateとしてのみ実装されている。
+Schema検証はbounded TLS ingressのchallenge／execute envelopeとCI fixtureで実行される。
+ただし、Schema検証は署名、TLS exporter、registry、state、replay検証を代替しない。
 
 ## 15. 実装済み範囲
 
@@ -392,22 +453,52 @@ Schema検証はingressで再利用できるが、現在はCI/test gateとして�
 - relay-only reachability grantとrevocation;
 - strict JSON decoder;
 - Draft 2020-12 Schema validatorを含むCI test;
-- concurrency-safe in-memory stub。
+- concurrency-safe in-memory stub;
+- `gateway-asserted-for-human` offer、transition、delegation、Interaction appendを
+  exact requestとTLS sessionへ束縛するTLS 1.3/mTLS ingress;
+- challenge／execute route別request検証と、既存のchallenge `201`、execute `200`、
+  公開error bodyを対象にしたresponse Schema;
+- atomic state/outbox commitとbounded leaseを持つRedis/Valkey TaskCoord adapter候補;
+- 有効なreachability grantを一つのopaque relay intentへ変換するAgent-to-Human
+  profileとMac/CI用in-process gateway sink;
+- immutable bindingとstate-preserving projectionによる別packageのAction
+  lifecycleとの[統合](task-action-lifecycle-v1-spec-ja.md)。
 
-## 16. 未実装・out of scope
+ここの`gateway-asserted-for-human`は、operation authorityとlocal policyの下で、
+認証済みgateway ActorがHuman Participantに帰属するexact requestを送信する
+保証である。Human-held signature、別のauthenticated-Human evidence、Human
+liveness、Human向けUIでの確認、法的同意は証明しない。保証語彙は
+[`asb-taskcoord-human-request-binding-v1.md`](asb-taskcoord-human-request-binding-v1.md#21-human-assurance-vocabulary)
+で定義する。
+accepted Human ingressでは、そのverifier-derived pairをtransition、delegation、
+interactionの監査recordへ保存する。legacyまたはtrusted-internal recordでは省略可能
+だが、省略からHuman assuranceを推測してはならない。
 
-- database adapterと永続transaction backend;
-- outbox publisher;
-- HTTP、A2A、AGTP等のtransport binding;
+## 16. 未実装・未qualification・out of scope
+
+- 実Redis/Valkeyでのacceptance、persistence、replication、failover、backup、recovery;
+- outbox publisherとdownstream delivery worker;
+- Human ingressのstatus/read endpointとcross-proof outcome journal;
+- Participant discovery／Human matching用の一般A2A／AGTP transport;
 - network Agent directoryまたはHuman matching protocol;
 - Split Agentのplanner、policy plane、application binding profile;
-- verifier adapterによる実token/signature/policy検証;
-- nonce replay store;
+- consent、approval、authority revocation用の暗号検証adapter;
+- production用shared nonce replay adapter;
 - 暗号化contact vault;
-- Email/SNS/TEL relayとdelivery;
+- Email/SNS/TEL providerと実配送;
+- relay専用TLS challenge／execute endpointとrestart-durable relay Store;
+- production Action binding Storeとnetwork Action ingress;
 - rate limit、abuse monitoring、retention/deletion運用;
-- Participant status変更のaudit log;
-- 別packageのAction lifecycleとの統合。
+- Participant status変更のaudit log。
+
+実装済みHTTP surfaceは`POST /v1/human-operations/challenge`と
+`POST /v1/human-operations/execute`に限る。全応答はserver生成`X-Request-ID`を持つ。
+error bodyはstring `error`を維持し、`code`、`retryable`、`request_id`を追加するため、
+従来のstring-error decoderと互換である。raw内部errorは返さない。`429`は
+`Retry-After: 1`を持つ。execute結果不明時は自動retryせず、trusted stateからreconcileする。
+正確なstatus/code表は
+[`asb-taskcoord-human-ingress-demo.md`](asb-taskcoord-human-ingress-demo.md)で定義する。
+relay用およびAction用のHTTP endpointは未実装である。
 
 ## 17. 最小適合チェックリスト
 

@@ -29,3 +29,10 @@ revocations, leases, an audit outbox, and a persistent logical-time floor.
 The TLA+ result therefore supports review of a possible application-level
 contract only. It must not be cited as evidence that current Go packages have
 durable crash-recovery or revocation semantics.
+
+## Human Coordination models
+
+`HUMAN_COORDINATION_MAP.md` provides the detailed mapping for the Human ingress
+ProVerif model and the two Human Coordination TLA+ target models. It also
+records their requirement identifiers, compromise assumptions, and current
+implementation gaps. None of those mappings is a refinement proof.

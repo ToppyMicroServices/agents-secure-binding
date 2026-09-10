@@ -1,0 +1,679 @@
+(* Copyright (c) 2026 ToppyMicroServices OÜ
+   SPDX-License-Identifier: Apache-2.0
+
+   Symbolic Human Coordination ingress model for ProVerif 2.05.
+
+   This model proves a gateway assertion for an accountable Human
+   Participant.  It deliberately contains no Human signing key and therefore
+   makes no Human-held-key, Human-presence, liveness, UI, or legal-consent
+   claim.
+
+   Trust boundary:
+   - The operation authority and configured gateways keep their signing keys
+     secret.
+   - The public network is controlled by a Dolev-Yao attacker.
+   - Realm and audience are verifier-local expected values.
+   - Participant, operation kind, and canonical request digest form the exact
+     application semantic tuple expected by the verifier.
+   - Exporter, nonce, and request context are fresh for each modeled verifier
+     session and are supplied by the trusted transport/verifier boundary.
+   - The injective correspondence covers cryptographic proof reuse across
+     fresh verifier sessions.  Durable same-session replay consumption, crash,
+     and retry behavior are modeled separately in TLA+.
+*)
+
+type skey.
+type pkey.
+
+set preciseActions = true.
+
+fun pk(skey): pkey.
+fun sign(bitstring, skey): bitstring.
+reduc forall message: bitstring, key: skey;
+  checksign(sign(message, key), pk(key)) = message.
+
+fun digest(bitstring): bitstring.
+fun semantics(bitstring, bitstring, bitstring): bitstring [data].
+fun grant_payload(
+  bitstring,
+  bitstring,
+  bitstring,
+  bitstring,
+  pkey,
+  bitstring
+): bitstring [data].
+fun proof_payload(
+  bitstring,
+  bitstring,
+  bitstring,
+  bitstring,
+  bitstring,
+  pkey,
+  bitstring,
+  bitstring,
+  bitstring,
+  bitstring
+): bitstring [data].
+fun replay_key(
+  bitstring,
+  bitstring,
+  bitstring,
+  bitstring,
+  bitstring,
+  bitstring
+): bitstring.
+
+free net: channel.
+
+free human_profile: bitstring.
+free relay_profile: bitstring.
+free realm_a: bitstring.
+free realm_b: bitstring.
+free audience_a: bitstring.
+free audience_b: bitstring.
+free human_alice: bitstring.
+free human_bob: bitstring.
+free operation_accept: bitstring.
+free operation_delegate: bitstring.
+
+free authority_key: skey [private].
+free gateway_a_key: skey [private].
+free gateway_b_key: skey [private].
+
+event operation_authority_granted(
+  bitstring,
+  bitstring,
+  bitstring,
+  bitstring,
+  pkey,
+  bitstring,
+  bitstring
+).
+event gateway_asserted_for_human(
+  bitstring,
+  bitstring,
+  bitstring,
+  bitstring,
+  pkey,
+  bitstring,
+  bitstring,
+  bitstring,
+  bitstring,
+  bitstring,
+  bitstring,
+  bitstring
+).
+event relay_actor_asserted(
+  bitstring,
+  bitstring,
+  bitstring,
+  bitstring,
+  pkey,
+  bitstring,
+  bitstring,
+  bitstring,
+  bitstring,
+  bitstring,
+  bitstring,
+  bitstring
+).
+event human_ingress_accepted(
+  bitstring,
+  bitstring,
+  bitstring,
+  bitstring,
+  bitstring,
+  bitstring,
+  bitstring,
+  pkey,
+  bitstring,
+  bitstring,
+  bitstring,
+  bitstring,
+  bitstring,
+  bitstring,
+  bitstring,
+  bitstring,
+  bitstring
+).
+
+query attacker(authority_key).
+query attacker(gateway_a_key).
+query attacker(gateway_b_key).
+
+(* Acceptance must use the Human profile and the verifier-local realm,
+   audience, and semantic tuple.  This is the explicit cross-profile,
+   cross-realm, cross-audience, Participant, operation-kind, and request-digest
+   isolation property. *)
+query material_profile: bitstring,
+      local_realm: bitstring,
+      material_realm: bitstring,
+      local_audience: bitstring,
+      material_audience: bitstring,
+      local_semantics: bitstring,
+      material_semantics: bitstring,
+      gateway_public: pkey,
+      grant_id: bitstring,
+      grant_digest: bitstring,
+      exporter: bitstring,
+      nonce: bitstring,
+      context: bitstring,
+      proof_id: bitstring,
+      proof_digest: bitstring,
+      unused_one: bitstring,
+      unused_two: bitstring;
+  event(human_ingress_accepted(
+    material_profile,
+    local_realm,
+    material_realm,
+    local_audience,
+    material_audience,
+    local_semantics,
+    material_semantics,
+    gateway_public,
+    grant_id,
+    grant_digest,
+    exporter,
+    nonce,
+    context,
+    proof_id,
+    proof_digest,
+    unused_one,
+    unused_two
+  )) ==>
+  material_profile = human_profile &&
+  local_realm = material_realm &&
+  local_audience = material_audience &&
+  local_semantics = material_semantics.
+
+(* Exact acceptance correspondence.  The accepted material must come from an
+   authority grant and from the gateway holder proof over the same values. *)
+query material_profile: bitstring,
+      local_realm: bitstring,
+      material_realm: bitstring,
+      local_audience: bitstring,
+      material_audience: bitstring,
+      local_semantics: bitstring,
+      material_semantics: bitstring,
+      gateway_public: pkey,
+      grant_id: bitstring,
+      grant_digest: bitstring,
+      exporter: bitstring,
+      nonce: bitstring,
+      context: bitstring,
+      proof_id: bitstring,
+      proof_digest: bitstring,
+      replay: bitstring,
+      acceptance_id: bitstring;
+  event(human_ingress_accepted(
+    material_profile,
+    local_realm,
+    material_realm,
+    local_audience,
+    material_audience,
+    local_semantics,
+    material_semantics,
+    gateway_public,
+    grant_id,
+    grant_digest,
+    exporter,
+    nonce,
+    context,
+    proof_id,
+    proof_digest,
+    replay,
+    acceptance_id
+  )) ==>
+  event(operation_authority_granted(
+    human_profile,
+    local_realm,
+    local_audience,
+    local_semantics,
+    gateway_public,
+    grant_id,
+    grant_digest
+  )) &&
+  event(gateway_asserted_for_human(
+    human_profile,
+    local_realm,
+    local_audience,
+    local_semantics,
+    gateway_public,
+    grant_id,
+    grant_digest,
+    exporter,
+    nonce,
+    context,
+    proof_id,
+    proof_digest
+  )).
+
+(* Sessions are replicated with fresh exporter, nonce, and context values.
+   Therefore one gateway proof cannot be accepted in two verifier sessions. *)
+query material_profile: bitstring,
+      local_realm: bitstring,
+      material_realm: bitstring,
+      local_audience: bitstring,
+      material_audience: bitstring,
+      local_semantics: bitstring,
+      material_semantics: bitstring,
+      gateway_public: pkey,
+      grant_id: bitstring,
+      grant_digest: bitstring,
+      exporter: bitstring,
+      nonce: bitstring,
+      context: bitstring,
+      proof_id: bitstring,
+      proof_digest: bitstring,
+      replay: bitstring,
+      acceptance_id: bitstring;
+  inj-event(human_ingress_accepted(
+    material_profile,
+    local_realm,
+    material_realm,
+    local_audience,
+    material_audience,
+    local_semantics,
+    material_semantics,
+    gateway_public,
+    grant_id,
+    grant_digest,
+    exporter,
+    nonce,
+    context,
+    proof_id,
+    proof_digest,
+    replay,
+    acceptance_id
+  )) ==>
+  inj-event(gateway_asserted_for_human(
+    human_profile,
+    local_realm,
+    local_audience,
+    local_semantics,
+    gateway_public,
+    grant_id,
+    grant_digest,
+    exporter,
+    nonce,
+    context,
+    proof_id,
+    proof_digest
+  )).
+
+let issue_human_material(
+  gateway_secret: skey,
+  realm: bitstring,
+  audience: bitstring,
+  semantic_values: bitstring,
+  exporter: bitstring,
+  nonce: bitstring,
+  context: bitstring
+) =
+  new grant_id: bitstring;
+  new proof_id: bitstring;
+  let gateway_public = pk(gateway_secret) in
+  let grant = sign(
+    grant_payload(
+      human_profile,
+      realm,
+      audience,
+      semantic_values,
+      gateway_public,
+      grant_id
+    ),
+    authority_key
+  ) in
+  let grant_digest_value = digest(grant) in
+  event operation_authority_granted(
+    human_profile,
+    realm,
+    audience,
+    semantic_values,
+    gateway_public,
+    grant_id,
+    grant_digest_value
+  );
+  let holder_statement = sign(
+    proof_payload(
+      human_profile,
+      grant_digest_value,
+      realm,
+      audience,
+      semantic_values,
+      gateway_public,
+      exporter,
+      nonce,
+      context,
+      proof_id
+    ),
+    gateway_secret
+  ) in
+  let proof_digest_value = digest(holder_statement) in
+  event gateway_asserted_for_human(
+    human_profile,
+    realm,
+    audience,
+    semantic_values,
+    gateway_public,
+    grant_id,
+    grant_digest_value,
+    exporter,
+    nonce,
+    context,
+    proof_id,
+    proof_digest_value
+  );
+  out(net, (grant, holder_statement)).
+
+let issue_relay_material(
+  gateway_secret: skey,
+  realm: bitstring,
+  audience: bitstring,
+  semantic_values: bitstring,
+  exporter: bitstring,
+  nonce: bitstring,
+  context: bitstring
+) =
+  new grant_id: bitstring;
+  new proof_id: bitstring;
+  let gateway_public = pk(gateway_secret) in
+  let grant = sign(
+    grant_payload(
+      relay_profile,
+      realm,
+      audience,
+      semantic_values,
+      gateway_public,
+      grant_id
+    ),
+    authority_key
+  ) in
+  let grant_digest_value = digest(grant) in
+  event operation_authority_granted(
+    relay_profile,
+    realm,
+    audience,
+    semantic_values,
+    gateway_public,
+    grant_id,
+    grant_digest_value
+  );
+  let holder_statement = sign(
+    proof_payload(
+      relay_profile,
+      grant_digest_value,
+      realm,
+      audience,
+      semantic_values,
+      gateway_public,
+      exporter,
+      nonce,
+      context,
+      proof_id
+    ),
+    gateway_secret
+  ) in
+  let proof_digest_value = digest(holder_statement) in
+  event relay_actor_asserted(
+    relay_profile,
+    realm,
+    audience,
+    semantic_values,
+    gateway_public,
+    grant_id,
+    grant_digest_value,
+    exporter,
+    nonce,
+    context,
+    proof_id,
+    proof_digest_value
+  );
+  out(net, (grant, holder_statement)).
+
+let human_verifier(
+  local_realm: bitstring,
+  local_audience: bitstring,
+  local_semantics: bitstring,
+  expected_exporter: bitstring,
+  expected_nonce: bitstring,
+  expected_context: bitstring
+) =
+  in(net, (received_grant: bitstring, received_proof: bitstring));
+  let signed_grant_payload =
+    checksign(received_grant, pk(authority_key)) in
+  let grant_payload(
+    material_profile: bitstring,
+    material_realm: bitstring,
+    material_audience: bitstring,
+    material_semantics: bitstring,
+    gateway_public: pkey,
+    grant_id: bitstring
+  ) = signed_grant_payload in
+  if material_profile = human_profile then
+    if material_realm = local_realm then
+      if material_audience = local_audience then
+        if material_semantics = local_semantics then
+          let grant_digest_value = digest(received_grant) in
+          let signed_proof_payload =
+            checksign(received_proof, gateway_public) in
+          let proof_payload(
+            proof_profile: bitstring,
+            proof_grant_digest: bitstring,
+            proof_realm: bitstring,
+            proof_audience: bitstring,
+            proof_semantics: bitstring,
+            proof_gateway: pkey,
+            proof_exporter: bitstring,
+            proof_nonce: bitstring,
+            proof_context: bitstring,
+            proof_id: bitstring
+          ) = signed_proof_payload in
+          if proof_profile = human_profile then
+            if proof_grant_digest = grant_digest_value then
+              if proof_realm = local_realm then
+                if proof_audience = local_audience then
+                  if proof_semantics = local_semantics then
+                    if proof_gateway = gateway_public then
+                      if proof_exporter = expected_exporter then
+                        if proof_nonce = expected_nonce then
+                          if proof_context = expected_context then
+                            let proof_digest_value = digest(received_proof) in
+                            let replay = replay_key(
+                              grant_digest_value,
+                              local_audience,
+                              expected_exporter,
+                              expected_nonce,
+                              expected_context,
+                              proof_id
+                            ) in
+                            new acceptance_id: bitstring;
+                            event human_ingress_accepted(
+                              material_profile,
+                              local_realm,
+                              material_realm,
+                              local_audience,
+                              material_audience,
+                              local_semantics,
+                              material_semantics,
+                              gateway_public,
+                              grant_id,
+                              grant_digest_value,
+                              expected_exporter,
+                              expected_nonce,
+                              expected_context,
+                              proof_id,
+                              proof_digest_value,
+                              replay,
+                              acceptance_id
+                            ).
+
+let human_material_against_verifier(
+  gateway_secret: skey,
+  material_realm: bitstring,
+  material_audience: bitstring,
+  material_semantics: bitstring,
+  local_realm: bitstring,
+  local_audience: bitstring,
+  local_semantics: bitstring
+) =
+  new exporter: bitstring;
+  new nonce: bitstring;
+  new context: bitstring;
+  (
+    issue_human_material(
+      gateway_secret,
+      material_realm,
+      material_audience,
+      material_semantics,
+      exporter,
+      nonce,
+      context
+    )
+  |
+    human_verifier(
+      local_realm,
+      local_audience,
+      local_semantics,
+      exporter,
+      nonce,
+      context
+    )
+  ).
+
+let relay_cross_profile_session(
+  gateway_secret: skey,
+  realm: bitstring,
+  audience: bitstring,
+  semantic_values: bitstring
+) =
+  new exporter: bitstring;
+  new nonce: bitstring;
+  new context: bitstring;
+  (
+    issue_relay_material(
+      gateway_secret,
+      realm,
+      audience,
+      semantic_values,
+      exporter,
+      nonce,
+      context
+    )
+  |
+    human_verifier(
+      realm,
+      audience,
+      semantic_values,
+      exporter,
+      nonce,
+      context
+    )
+  ).
+
+process
+  out(net, pk(authority_key));
+  out(net, pk(gateway_a_key));
+  out(net, pk(gateway_b_key));
+  new request_digest_a: bitstring;
+  new request_digest_b: bitstring;
+  let expected = semantics(
+    human_alice,
+    operation_accept,
+    request_digest_a
+  ) in
+  let wrong_participant = semantics(
+    human_bob,
+    operation_accept,
+    request_digest_a
+  ) in
+  let wrong_operation = semantics(
+    human_alice,
+    operation_delegate,
+    request_digest_a
+  ) in
+  let wrong_digest = semantics(
+    human_alice,
+    operation_accept,
+    request_digest_b
+  ) in
+  (
+    (!human_material_against_verifier(
+      gateway_a_key,
+      realm_a,
+      audience_a,
+      expected,
+      realm_a,
+      audience_a,
+      expected
+    ))
+  |
+    (* A valid realm-B assertion is presented on a realm-A verifier session
+       with the same fresh transport values. *)
+    (!human_material_against_verifier(
+      gateway_a_key,
+      realm_b,
+      audience_a,
+      expected,
+      realm_a,
+      audience_a,
+      expected
+    ))
+  |
+    (!human_material_against_verifier(
+      gateway_a_key,
+      realm_a,
+      audience_b,
+      expected,
+      realm_a,
+      audience_a,
+      expected
+    ))
+  |
+    (!human_material_against_verifier(
+      gateway_a_key,
+      realm_a,
+      audience_a,
+      wrong_participant,
+      realm_a,
+      audience_a,
+      expected
+    ))
+  |
+    (!human_material_against_verifier(
+      gateway_a_key,
+      realm_a,
+      audience_a,
+      wrong_operation,
+      realm_a,
+      audience_a,
+      expected
+    ))
+  |
+    (!human_material_against_verifier(
+      gateway_a_key,
+      realm_a,
+      audience_a,
+      wrong_digest,
+      realm_a,
+      audience_a,
+      expected
+    ))
+  |
+    (!human_material_against_verifier(
+      gateway_b_key,
+      realm_a,
+      audience_a,
+      expected,
+      realm_a,
+      audience_a,
+      expected
+    ))
+  |
+    (!relay_cross_profile_session(
+      gateway_a_key,
+      realm_a,
+      audience_a,
+      expected
+    ))
+  )

@@ -7,14 +7,18 @@ import "context"
 
 // Store is the Task Participant durability boundary.
 //
-// CommitAssignment must atomically compare the current revision, persist the
-// complete next Assignment, and append/deduplicate Record.EventID before it
-// acknowledges success.
+// CommitAssignment must atomically compare the complete current Assignment,
+// validate the consecutive transition, persist the complete next Assignment,
+// and append/deduplicate Record.EventID before it acknowledges success.
+// Deduplication is exact over the durable record; a fresh verifier proof is a
+// distinct audit record and needs application-level outcome reconciliation
+// after an unknown commit result.
 //
-// CommitDelegation must atomically persist the parent transition, child offer,
-// and delegation record. A production adapter is expected to implement this
-// with one database transaction and publish notifications through an outbox
-// written in that same transaction.
+// CommitDelegation must atomically compare the complete current parent and
+// persist the parent transition, child offer, and delegation record. A
+// production adapter is expected to implement this with one database
+// transaction and publish notifications through an outbox written in that
+// same transaction.
 //
 // AppendInteractionEvent must append or exactly deduplicate an immutable event
 // without changing the related Assignment revision or lifecycle state.

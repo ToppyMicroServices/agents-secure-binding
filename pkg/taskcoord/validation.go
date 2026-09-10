@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -32,10 +33,23 @@ var (
 )
 
 const (
-	maxIDLength        = 256
-	maxDetailLength    = 1024
-	maxReferenceLength = 2048
+	maxIDBytes        = 256
+	maxDetailBytes    = 1024
+	maxReferenceBytes = 2048
 )
+
+func isNilDependency(value any) bool {
+	if value == nil {
+		return true
+	}
+	reflected := reflect.ValueOf(value)
+	switch reflected.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+		return reflected.IsNil()
+	default:
+		return false
+	}
+}
 
 // Validate checks a Task Participant record.
 func (p Participant) Validate() error {
@@ -193,6 +207,11 @@ func (r TransitionRecord) Validate() error {
 			return err
 		}
 	}
+	if r.Assurance != nil {
+		if err := r.Assurance.Validate(); err != nil {
+			return fmt.Errorf("invalid assurance provenance: %w", err)
+		}
+	}
 	return nil
 }
 
@@ -267,6 +286,11 @@ func (d DelegationRecord) Validate() error {
 	if d.At.IsZero() {
 		return invalidDelegation("delegation timestamp is required")
 	}
+	if d.Assurance != nil {
+		if err := d.Assurance.Validate(); err != nil {
+			return invalidDelegationError(fmt.Errorf("invalid assurance provenance: %w", err))
+		}
+	}
 	return nil
 }
 
@@ -312,6 +336,11 @@ func (e InteractionEvent) Validate() error {
 	if e.EvidenceRef != "" {
 		if err := validateReference("evidence_ref", e.EvidenceRef); err != nil {
 			return invalidInteractionError(err)
+		}
+	}
+	if e.Assurance != nil {
+		if err := e.Assurance.Validate(); err != nil {
+			return invalidInteractionError(fmt.Errorf("invalid assurance provenance: %w", err))
 		}
 	}
 
@@ -413,7 +442,7 @@ func validateID(field, value string) error {
 	if value == "" {
 		return fmt.Errorf("%s is required", field)
 	}
-	if !utf8.ValidString(value) || len(value) > maxIDLength {
+	if !utf8.ValidString(value) || len(value) > maxIDBytes {
 		return fmt.Errorf("%s is not a bounded UTF-8 identifier", field)
 	}
 	if strings.TrimSpace(value) != value {
@@ -441,7 +470,7 @@ func validateReference(field, value string) error {
 	if value == "" {
 		return fmt.Errorf("%s is required", field)
 	}
-	if !utf8.ValidString(value) || len(value) > maxReferenceLength {
+	if !utf8.ValidString(value) || len(value) > maxReferenceBytes {
 		return fmt.Errorf("%s is not a bounded UTF-8 reference", field)
 	}
 	for _, r := range value {
@@ -453,7 +482,7 @@ func validateReference(field, value string) error {
 }
 
 func validateDetail(value string) error {
-	if !utf8.ValidString(value) || len(value) > maxDetailLength {
+	if !utf8.ValidString(value) || len(value) > maxDetailBytes {
 		return fmt.Errorf("detail is not bounded UTF-8")
 	}
 	for _, r := range value {
