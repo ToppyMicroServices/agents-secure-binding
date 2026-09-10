@@ -1,0 +1,28 @@
+{
+  "schema": "asb.least-privilege.benchmark-provenance/v1",
+  "source_worktree_head": "a7947047cc6a6133dd57fb55f000e2709bdd9427",
+  "source_worktree_dirty": true,
+  "report": "examples/leastprivilege/benchmarks/2026-09-10-local.json",
+  "report_sha256": "575090b6d2cc73355973e766094e9719f8bc00d3517c7987a70a88d94f1ff2ad",
+  "binary_sha256": "cdcf69e2ba95517b7855af49ccc5037d9b42eb52055fa31b8a5d41b6bd384766",
+  "source_sha256": {
+    "go.mod": "1eaeb227e260886863be8644b678c40a3c3d9480ada49dc37eaeaed15e979a5e",
+    "go.sum": "222c9f1efa027a78395a92b466c4dce1cf605ff26bf68492b006d2fc862e6d0f",
+    "cmd/asb-leastprivilege-bench/main.go": "22041c2117d46b9750693e8093752cf8a5130b201baa49d69868fdde9c001f59",
+    "pkg/leastprivilege/authorization.go": "218481ee7baca17df0f808b3f398e0eaf85bad35b060d22d272a1175b704d2cf",
+    "pkg/leastprivilege/model.go": "f96d27b088122c24c095aec4339ef0b8b54575b7a0b8f15b8cd53adb0f86c27f",
+    "pkg/leastprivilege/solver.go": "c6c7883f3da866e00c13ebd35544056df7beb0ccaa893d9fbcd6def0580f23f2",
+    "pkg/leastprivilege/use_store.go": "5995b91a45bc817753c2d8a1dd2bfc8093967ccd695e53e3359d9fcd6cb65e6b",
+    "pkg/leastprivilege/verifier.go": "ed8a6d9cf35c5ce4eba805518b7c19a909bdc9c4ed335ef7687c7e3baf33594f",
+    "pkg/leastprivilege/certificate/certificate.go": "a3a357735b066ed8ceb1f71eef4dc7c98e33b96b1a23ac3aaa4116470cfa1ace"
+  },
+  "build_command": "GOFLAGS=-p=2 GOWORK=off GOCACHE=/private/tmp/asb-leastprivilege-go-cache go build -o /private/tmp/asb-leastprivilege-bench ./cmd/asb-leastprivilege-bench",
+  "run_command": "GOMAXPROCS=1 /private/tmp/asb-leastprivilege-bench --sizes 4,8,12,16,20 --repetitions 3 --timeout 10s --probe-timeout 1ns --environment-note [recorded verbatim in report]",
+  "provenance_note": "Report base_revision and working_tree_modified are Go build-info VCS metadata. In this worktree run, build-info reported the original checkout revision 117b3ec3842366d8f7fb1106f9e7eecddf548807, which differs from independently observed source_worktree_head. source_sha256 identifies the actual non-test source files present at build and measurement. The binary was built before measurement; test-only edits are not included in the source digest map.",
+  "checks": {
+    "normal_measurements": 240,
+    "normal_successes": 240,
+    "deadline_probes": 80,
+    "deadline_exceeded": 80
+  }
+}
