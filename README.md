@@ -114,6 +114,7 @@ that local policy.
 | Agent → Human relay | **Experimental, current branch / next prerelease candidate** | One active reachability grant queues one opaque relay intent; local gateway only, no real delivery provider |
 | Task–Action lifecycle | **Experimental, current branch / next prerelease candidate** | Separate responsibility and execution state machines; reference store only for the Action binding |
 | Local Human approval app | **Experimental, current branch** | Browser inbox, real software-only ASB/mTLS, and SQLite-backed local setting changes; one trusted host and user |
+| Least-privilege execution | **Experimental, current branch** | Finite optimization, ASB-bound prior mandates, durable single-host admission, and a limited S3 executor; live AWS qualification pending |
 
 `v2.0.0-rc.2` does not include the current-branch Human Coordination
 surfaces; they are candidates for a later prerelease. No production-readiness
@@ -386,6 +387,7 @@ may need a less restricted environment.
 | Question | Start here |
 | --- | --- |
 | How can I try an Agent request and approve it myself? | [Local approval guide](docs/local-human-approval.md) · [Local validation record](docs/local-human-approval-validation.md) |
+| Can a delegated action run automatically with verified minimum permissions? | [Finite model and demo](docs/least-privilege-v1.md) · [Authenticated execution](docs/least-privilege-execution.md) · [Portable proofs](docs/least-privilege-certificates.md) |
 | What behavior is authoritative in this repository? | [SSOT](docs/SSOT.md) |
 | What attacks and trust boundaries are in scope? | [Threat model](docs/threat-model.md) |
 | Which v1 APIs and deployment choices are supported? | [API compatibility](docs/API_COMPATIBILITY.md) · [Production profile](docs/production-deployment-profile.md) |
