@@ -51,8 +51,8 @@ full package suites run under the race detector in the integration gate.
 
 ## gRPC dependency decision
 
-Both `GOWORK=off` module graphs select `google.golang.org/grpc v1.83.1`, and
-`go mod verify` passes in root and Cocos. The current upstream
+For the PR #52 integration, both `GOWORK=off` module graphs selected
+`google.golang.org/grpc v1.83.1`, and `go mod verify` passed in root and Cocos. The
 [GHSA-vp52-pcj8-j9qc advisory](https://github.com/grpc/grpc-go/security/advisories/GHSA-vp52-pcj8-j9qc)
 lists versions through 1.83.0 as affected and 1.83.1 as patched. The vulnerable
 boundary is the HTTP/2 receive queue: many tiny DATA frames can inflate per-frame
@@ -64,6 +64,24 @@ module's `Test/RecvBufferCompaction` tests passed, including small-fragment,
 large-buffer and explicitly-disabled controls. Existing gRPC client/server
 tests check normal API behavior. An exhaustion attack against a deployment was
 not performed. No further dependency edit was necessary on this branch.
+
+### Follow-up on 11 September 2026
+
+Both module graphs now select `google.golang.org/grpc v1.83.2` for
+[GHSA-2v4p-qf9q-27wj](https://github.com/grpc/grpc-go/security/advisories/GHSA-2v4p-qf9q-27wj).
+This advisory covers an xDS routing panic when a request lacks both
+`:authority` and `Host`. No repository source calls `xds.NewGRPCServer`;
+the affected dependency version was confirmed, while an exploitable deployment
+path was not demonstrated.
+
+The [upstream patch release](https://github.com/grpc/grpc-go/releases/tag/v1.83.2)
+rejects that request in the HTTP/2 transport and guards the xDS interceptor.
+Its missing-header transport and xDS regression tests passed locally with the
+race detector, alongside Host normalization, authority precedence, and receive
+buffer compaction controls. The same xDS test reproduced the panic in an
+isolated 1.83.1 source copy. The update includes the release's required
+`x/net` version and dependencies selected by Go. The integration checks below
+remain the historical PR #52 results; they are not reassigned to this update.
 
 ## Integration checks
 
