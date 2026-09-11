@@ -1,6 +1,7 @@
 # Bounded least-privilege authorization
 
-Status: experimental local implementation; not a released cloud IAM integration.
+Status: experimental finite model with an authenticated execution service and a
+bounded AWS adapter. Cloud deployment qualification is separate from local tests.
 
 ASB can select the lowest-cost effective permission set for an explicit finite
 problem, independently recheck a proposed optimum, and issue a signed, short-lived
@@ -74,9 +75,10 @@ accepted; the objective does not minimize the number of grant bundles.
 This establishes a global minimum over the declared candidate space and cost
 function. It does not establish that the task specification is correct, that a
 workflow completes, or that undeclared cloud policies and privilege-escalation
-paths cannot exist. The solver and checker share a model evaluator; the candidate
-is rechecked by enumeration, not accompanied by an externally checkable formal
-proof certificate. Tests also compare results with a separate map-based oracle.
+paths cannot exist. The solver and exhaustive verifier share a model evaluator.
+Tests also compare results with a separate map-based oracle. An optional
+[portable certificate](least-privilege-certificates.md) can be checked with a
+separate boolean-array evaluator; it does not alter the authorization boundary.
 
 ## Authorization and execution
 
@@ -120,12 +122,15 @@ rejects requests when capacity is exhausted, and prevents a backward wall-clock
 jump from reviving a record already pruned after expiry. Concurrent timestamps
 may arrive out of order while their records are still live.
 
-The supplied store loses history on restart. Consumption and an external effect
-are not an atomic transaction: a crash can consume authority without completing
-the operation. Durable storage, effect reconciliation, and a restricted executor
-that actually enforces the selected permissions are deployment responsibilities.
-No cloud credentials are created or restricted here, and IAM provider semantics
-are not parsed or simulated.
+`MemoryUseStore` loses history on restart. The additive
+[durable journal](least-privilege-durability.md) coordinates independent processes
+on one host and preserves uncertain effects across restart. It does not make an
+external effect atomic with a local write. The
+[authenticated execution service](least-privilege-execution.md) derives actor and
+task from verified ASB proofs, holds the current policy guard through dispatch,
+and permits only registered adapters. The
+[AWS profile](least-privilege-aws.md) implements a declared exact-object S3 subset;
+it does not reinterpret arbitrary IAM policies as this finite model.
 
 ## TaskCoord integration
 
@@ -146,18 +151,22 @@ The tested path preserves the accepted parent and creates an offered child.
 The lower-level `Verify` returns `taskcoord.VerifiedDelegation`. That projection
 does not carry task or actor IDs, so callers using it directly must preserve the
 exact verified bindings. Prefer the `Delegate` wrapper. Neither API manufactures
-Human approval evidence or changes the Human ingress path. A commit failure after
-consumption still needs reconciliation; the adapter does not provide a durable
-transaction spanning both stores.
+Human approval evidence or changes the Human ingress path. For durable admission,
+use `DelegateAndCommit` and `ReconcileDelegation` as described in
+[commit recovery](least-privilege-durability.md#taskcoord-commit-recovery). This
+journal protocol preserves uncertain outcomes across the two stores; it does not
+claim a shared transaction.
 
 Relevant checks:
 
 ```sh
 GOWORK=off go test -race -count=1 \
-  ./pkg/leastprivilege ./pkg/taskcoord \
-  ./pkg/taskcoord/leastprivilegebinding ./cmd/asb-leastprivilege
-GOWORK=off go vet ./pkg/leastprivilege \
-  ./pkg/taskcoord/leastprivilegebinding ./cmd/asb-leastprivilege
+  ./pkg/leastprivilege/... ./pkg/taskcoord \
+  ./pkg/taskcoord/leastprivilegebinding ./cmd/asb-leastprivilege \
+  ./cmd/asb-leastprivilege-proof ./cmd/asb-leastprivilege-bench
+GOWORK=off go vet ./pkg/leastprivilege/... \
+  ./pkg/taskcoord/leastprivilegebinding ./cmd/asb-leastprivilege \
+  ./cmd/asb-leastprivilege-proof ./cmd/asb-leastprivilege-bench
 ```
 
 The dedicated workflow runs these checks on Linux and macOS when pushed. Local

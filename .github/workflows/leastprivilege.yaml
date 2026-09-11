@@ -9,6 +9,11 @@ on:
       - "pkg/leastprivilege/**"
       - "pkg/taskcoord/**"
       - "cmd/asb-leastprivilege/**"
+      - "cmd/asb-leastprivilege-proof/**"
+      - "cmd/asb-leastprivilege-bench/**"
+      - "internal/strictjson/**"
+      - "pkg/clients/**"
+      - "pkg/atls/identitypolicy/**"
       - "examples/leastprivilege/**"
       - "go.mod"
       - "go.sum"
@@ -18,6 +23,11 @@ on:
       - "pkg/leastprivilege/**"
       - "pkg/taskcoord/**"
       - "cmd/asb-leastprivilege/**"
+      - "cmd/asb-leastprivilege-proof/**"
+      - "cmd/asb-leastprivilege-bench/**"
+      - "internal/strictjson/**"
+      - "pkg/clients/**"
+      - "pkg/atls/identitypolicy/**"
       - "examples/leastprivilege/**"
       - "go.mod"
       - "go.sum"
@@ -40,9 +50,14 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.26.x"
-      - name: Test optimizer, authorization and TaskCoord integration
-        run: go test -race -count=1 ./pkg/leastprivilege ./pkg/taskcoord ./pkg/taskcoord/leastprivilegebinding ./cmd/asb-leastprivilege
+      - name: Test optimizer, authenticated execution, recovery and proofs
+        run: go test -race -count=1 ./pkg/leastprivilege/... ./pkg/taskcoord ./pkg/taskcoord/leastprivilegebinding ./cmd/asb-leastprivilege ./cmd/asb-leastprivilege-proof ./cmd/asb-leastprivilege-bench
       - name: Vet new packages
-        run: go vet ./pkg/leastprivilege ./pkg/taskcoord/leastprivilegebinding ./cmd/asb-leastprivilege
+        run: go vet ./pkg/leastprivilege/... ./pkg/taskcoord/leastprivilegebinding ./cmd/asb-leastprivilege ./cmd/asb-leastprivilege-proof ./cmd/asb-leastprivilege-bench
       - name: Run local authorization demo
         run: go run ./cmd/asb-leastprivilege demo
+      - name: Generate and independently check an optimality certificate
+        run: |
+          go run ./cmd/asb-leastprivilege solve --problem examples/leastprivilege/problem.json > "$RUNNER_TEMP/solution.json"
+          go run ./cmd/asb-leastprivilege-proof generate --problem examples/leastprivilege/problem.json --solution "$RUNNER_TEMP/solution.json" > "$RUNNER_TEMP/proof.json"
+          go run ./cmd/asb-leastprivilege-proof check --problem examples/leastprivilege/problem.json --solution "$RUNNER_TEMP/solution.json" --proof "$RUNNER_TEMP/proof.json"
