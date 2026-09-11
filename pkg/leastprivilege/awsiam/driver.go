@@ -107,7 +107,7 @@ func (e *Executor) assume(ctx context.Context, id string, policy []byte) (creden
 		return credentials{}, ErrProvider
 	}
 	info, statErr := f.Stat()
-	if statErr != nil || !info.Mode().IsRegular() {
+	if statErr != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0o077 != 0 {
 		f.Close()
 		return credentials{}, ErrProvider
 	}

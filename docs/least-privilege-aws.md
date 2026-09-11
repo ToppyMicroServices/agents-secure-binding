@@ -108,7 +108,10 @@ executors := map[string]asbbinding.Executor{
 
 The constructor accepts no network endpoint, proxy, HTTP client, or peer-provided
 credential override. CLI and credential-file paths are local trusted
-configuration; the credential file is read only when `Execute` runs. Only the
+configuration; the credential file is read only when `Execute` runs. The opened
+file must be regular with no group/other permission bits, such as mode `0600`
+or `0400`. This checks POSIX mode bits; operators still control the trusted
+path, ACLs and host access. Only the
 explicit named static-credential profile is copied into a private temporary
 directory. Unknown credential fields, `credential_process`, role chaining,
 SSO and metadata discovery are refused. Unrelated profiles stay out of the

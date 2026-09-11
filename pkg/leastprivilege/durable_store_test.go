@@ -149,6 +149,67 @@ func TestDurablePrepareBindsOperationAndSurvivesKeyRotation(t *testing.T) {
 	}
 }
 
+func TestDurableExpiredExecutionIdentitiesRemainReserved(t *testing.T) {
+	for _, reuse := range []struct {
+		name, operationID, mandateID string
+		want                         error
+	}{
+		{name: "operation", operationID: "operation:one", mandateID: "mandate:two", want: ErrExecutionConflict},
+		{name: "mandate", operationID: "operation:two", mandateID: "mandate:one", want: ErrReplay},
+	} {
+		t.Run(reuse.name, func(t *testing.T) {
+			s, f := createDurableFixtureStore(t, 4)
+			ctx := context.Background()
+			calls := 0
+			effect := func(context.Context, string, Request) (EffectResult, error) {
+				calls++
+				return EffectResult{State: ExecutionSucceeded, EvidenceDigest: f.mandate.ActionDigest}, nil
+			}
+			original, err := s.Run(ctx, "operation:one", f.cap, f.key, f.mandate, f.request, f.now, effect)
+			if err != nil {
+				t.Fatal(err)
+			}
+			future := f.mandate.ExpiresAt.Add(time.Minute)
+			// Commit retention cleanup, then reopen so this exercises persisted
+			// identity protection rather than an in-memory remembered record.
+			if err := s.Use(ctx, "fresh-session", future.Add(time.Hour), future); err != nil {
+				t.Fatal(err)
+			}
+			s, err = OpenDurableStore(s.directory)
+			if err != nil {
+				t.Fatal(err)
+			}
+			request := f.request
+			request.Action.Resource = "object:two"
+			mandate := f.mandate
+			mandate.ID = reuse.mandateID
+			mandate.NotBefore, mandate.ExpiresAt = future.Add(-time.Second), future.Add(time.Hour)
+			mandate.ActionDigest, err = DigestAction(request.Action)
+			if err != nil {
+				t.Fatal(err)
+			}
+			config := f.config
+			config.Mandate, config.Clock = mandate, func() time.Time { return future }
+			authorizer, err := NewAuthorizer(config)
+			if err != nil {
+				t.Fatal(err)
+			}
+			capability, err := authorizer.Authorize(ctx, request, f.solution)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = s.Run(ctx, reuse.operationID, capability, f.key, mandate, request, future, effect)
+			if !errors.Is(err, reuse.want) || calls != 1 {
+				t.Fatalf("expired identity authorized another effect: calls=%d error=%v, want %v", calls, err, reuse.want)
+			}
+			retained, err := s.Lookup(ctx, original.OperationID, original.RequestDigest)
+			if err != nil || retained != original {
+				t.Fatalf("terminal evidence lost: %+v %v", retained, err)
+			}
+		})
+	}
+}
+
 func TestDurableRunSerializesConcurrentEffects(t *testing.T) {
 	s, f := createDurableFixtureStore(t, 2)
 	var calls atomic.Int32
@@ -288,9 +349,46 @@ func TestDurableCancelAcceptedNeverCancelsRunningEffect(t *testing.T) {
 			t.Fatalf("canceled operation started: %v %v", started, err)
 		}
 		future := f.mandate.ExpiresAt.Add(time.Minute)
-		if err := s.Use(ctx, "new", future.Add(time.Hour), future); err != nil {
-			t.Fatalf("canceled expired admission did not release capacity: %v", err)
+		if err := s.Use(ctx, "new", future.Add(time.Hour), future); !errors.Is(err, ErrCapacity) {
+			t.Fatalf("canceled execution identity evicted to free capacity: %v", err)
 		}
+		retained, err := s.Lookup(ctx, r.OperationID, r.RequestDigest)
+		if err != nil || retained != r {
+			t.Fatalf("canceled execution evidence lost: %+v %v", retained, err)
+		}
+	}
+}
+
+func TestDurableCreatePreservesExistingAndPartialInitialization(t *testing.T) {
+	s, f := createDurableFixtureStore(t, 1)
+	ctx := context.Background()
+	if err := s.Use(ctx, "reserved", f.mandate.ExpiresAt, f.now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := CreateDurableStore(s.directory, 1); !errors.Is(err, ErrStoreUnavailable) {
+		t.Fatalf("existing store was recreated: %v", err)
+	}
+	reopened, err := OpenDurableStore(s.directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := reopened.Use(ctx, "reserved", f.mandate.ExpiresAt, f.now); !errors.Is(err, ErrReplay) {
+		t.Fatalf("recreation attempt erased consumption: %v", err)
+	}
+	// A path left before state publication must also require investigation;
+	// missing state is not evidence that retrying initialization is safe.
+	partial := filepath.Join(t.TempDir(), "partial")
+	if err := os.Mkdir(partial, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := OpenDurableStore(partial); !errors.Is(err, ErrStoreUnavailable) {
+		t.Fatalf("incomplete state opened: %v", err)
+	}
+	if _, err := CreateDurableStore(partial, 1); !errors.Is(err, ErrStoreUnavailable) {
+		t.Fatalf("incomplete state reset: %v", err)
+	}
+	if info, err := os.Stat(partial); err != nil || !info.IsDir() {
+		t.Fatalf("failed initialization removed existing path: %v", err)
 	}
 }
 

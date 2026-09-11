@@ -81,6 +81,8 @@ var _ UseStore = (*DurableStore)(nil)
 
 // CreateDurableStore provisions a new directory. An existing directory is an
 // error: use OpenDurableStore to recover, never reset missing/corrupt history.
+// An initialization error can leave a published state with an unknown commit
+// outcome, so this function never removes the directory on failure.
 func CreateDurableStore(directory string, capacity int) (*DurableStore, error) {
 	if capacity <= 0 || capacity > 10_000 {
 		return nil, ErrCapacity
@@ -267,7 +269,8 @@ func (s *DurableStore) Start(ctx context.Context, operationID, requestDigest str
 // CancelAccepted abandons an operation that has provably never been dispatched.
 // It competes atomically with Start and cannot cancel RUNNING/UNKNOWN effects.
 // The enclosing service must authorize this administrative action; it can use
-// it to release an expired ACCEPTED reservation without guessing effect state.
+// it to record a no-effect outcome without guessing effect state. Cancellation
+// retains the operation and mandate identities and does not free their capacity.
 func (s *DurableStore) CancelAccepted(ctx context.Context, operationID, requestDigest string) (ExecutionRecord, error) {
 	var result ExecutionRecord
 	err := s.transaction(ctx, func(state *durableState) (bool, error) {
@@ -360,12 +363,10 @@ func pruneDurable(s *durableState, now, expiry time.Time) error {
 			continue
 		}
 		if use.OperationID != "" {
-			r := s.Executions[use.OperationID]
-			// Preserve unfinished work for reconciliation, regardless of TTL.
-			if !r.Terminal() {
-				continue
-			}
-			delete(s.Executions, use.OperationID)
+			// Expiry ends execution authority, not operation/mandate identity.
+			// Retain terminal records too, or a fresh grant could reuse an old
+			// operation ID for another request after pruning and restart.
+			continue
 		}
 		if use.ExpiresAt.After(s.PrunedUntil) {
 			s.PrunedUntil = use.ExpiresAt

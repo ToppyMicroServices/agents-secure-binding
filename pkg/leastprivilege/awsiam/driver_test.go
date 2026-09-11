@@ -115,6 +115,38 @@ func TestExecutorCredentialIsolationAndExactGet(t *testing.T) {
 	}
 }
 
+func TestExecutorCredentialFilePermissions(t *testing.T) {
+	for _, mode := range []os.FileMode{0o400, 0o600, 0o640, 0o604, 0o620, 0o602} {
+		t.Run(fmt.Sprintf("%04o", mode), func(t *testing.T) {
+			e, s, r, cli := fakeExecutor(t)
+			// Permissions are checked at execution, including changes after construction.
+			if err := os.Chmod(e.config.CredentialsFile, mode); err != nil {
+				t.Fatal(err)
+			}
+			calls := 0
+			e.client.Transport = roundTripFunc(func(*http.Request) (*http.Response, error) {
+				calls++
+				return goodResponse(), nil
+			})
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			result, err := e.Execute(ctx, "operation", r, s)
+			if mode == 0o400 || mode == 0o600 {
+				if err != nil || result.State != lp.ExecutionSucceeded || calls != 1 {
+					t.Fatalf("private credentials rejected: %+v %v", result, err)
+				}
+				return
+			}
+			if !errors.Is(err, ErrProvider) || calls != 0 {
+				t.Fatalf("shared credentials used: calls=%d err=%v", calls, err)
+			}
+			if _, err := os.Stat(cli + ".args"); !errors.Is(err, os.ErrNotExist) {
+				t.Fatal("CLI invoked with shared credentials")
+			}
+		})
+	}
+}
+
 func TestExecutorRejectsSubstitutionBeforeCredentialAcquisition(t *testing.T) {
 	for name, change := range map[string]func(*lp.Request, *lp.Solution){"resource": func(r *lp.Request, _ *lp.Solution) { r.Action.Resource = extraARN }, "operation": func(r *lp.Request, _ *lp.Solution) { r.Action.Operation = "s3:PutObject" }, "profile": func(r *lp.Request, _ *lp.Solution) {
 		r.Action.Arguments = []byte(strings.ReplaceAll(string(r.Action.Arguments), "sha256:", "stale:"))

@@ -15,6 +15,14 @@ its ancestors, and its fixed `lock` file from replacement while workers run.
 Each snapshot also carries a checksum to detect accidental corruption. It is
 not an authentication mechanism and cannot detect an older valid snapshot.
 
+A failed creation can leave a directory, including valid state published before
+an acknowledgment or synchronization error. Another process may already have
+opened it. Retry recovery through `OpenDurableStore`; creation never deletes or
+resets that path automatically. If opening fails, keep admission disabled and
+investigate. An operator may remove the path only after quiescing its users and
+establishing that it has never admitted an operation; otherwise use the recovery
+procedure below.
+
 Each transaction reloads current state under the lock, writes a private temporary
 file, syncs it, atomically renames it, and syncs the directory before acknowledging
 success. Process termination releases the OS lock. This relies on the local
@@ -23,6 +31,8 @@ tests exercise process crashes; they do not qualify storage hardware under power
 loss. The maximum is 10,000 entries and 64 MiB of serialized state. Each mutation
 rewrites the snapshot, so larger workloads need a separately qualified database
 adapter. The store never evicts unexpired consumption records to make room.
+Operation records and their linked mandate IDs remain stored indefinitely and
+count toward the configured capacity, including after completion or cancellation.
 
 ## Admission and execution
 
@@ -31,7 +41,9 @@ request. In one transaction it consumes the mandate ID and reserves the operatio
 ID. The request digest binds the operation ID, mandate digest, actor, task and
 exact action digest. Capability reissuance and signing-key rotation do not create
 a second admission. Reusing the operation ID with a different binding is a
-conflict. All IDs must remain unique, including after retention ends.
+conflict. Execution records and their linked mandate IDs remain reserved for
+the lifetime of this store, including after authorization expiry. Keep globally
+unique identifiers when introducing a new store namespace as well.
 
 `Run` is the normal execution entry point. The enclosing service authenticates
 the caller and holds its policy guard through final validation and invocation.
@@ -65,18 +77,25 @@ be overwritten by a different outcome or evidence digest. Request arguments and
 external responses are not stored, so recovery also requires the application's
 protected record of the exact original request.
 
-Expired terminal operations and ordinary consumption records may be pruned when
-a subsequent admission commits. A persisted pruning watermark rejects clock
-rollback that could revive previously deleted records. `ACCEPTED`, `RUNNING`
-and `UNKNOWN` operations are retained past expiry for reconciliation and count
-toward capacity. Capacity exhaustion and storage errors deny new admission.
-Clocks and input mandates come from trusted service configuration.
+Only expired ordinary consumption records, such as ASB proof nonces not linked
+to an execution, may be pruned when a subsequent admission commits. A persisted
+pruning watermark rejects clock rollback that could revive those deleted
+records. Every execution and its linked mandate record remain, in every state.
+Capacity exhaustion and storage errors deny new admission. Clocks and input
+mandates come from trusted service configuration.
 
 An authorized administrator may call `CancelAccepted` to abandon a reservation
 that has never dispatched. It competes atomically with `Start`, records a local
 no-effect decision, and rejects `RUNNING` or `UNKNOWN` operations. This lets an
-expired pending reservation reach retention cleanup without guessing whether an
-external effect occurred.
+expired pending reservation receive a terminal outcome without guessing whether
+an external effect occurred. Its identity and evidence still occupy capacity.
+
+When this bounded store fills, quiesce all workers before retiring its namespace.
+Resolve uncertain effects through authoritative readback, retain the old store
+as history, and revoke or replace its mandates in current trusted policy before
+provisioning a new directory with globally new mandate and operation IDs.
+Changing the directory alone does not authorize reuse of old identifiers. There
+is no automatic history reset or eviction of completed operations to make room.
 
 ## TaskCoord commit recovery
 
@@ -107,6 +126,9 @@ policy authority, provision a new store directory, and issue globally new
 mandate/operation IDs before enabling workers. A signing-key rotation alone does
 not replace this recovery procedure. Restoring backups is an operator-controlled
 procedure; this implementation does not perform unattended rollback recovery.
+The same procedure applies to an older store that already pruned terminal
+execution records: those forgotten identities cannot be reconstructed by an
+update to the retention rule.
 
 ## Verification scope
 
