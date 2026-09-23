@@ -183,14 +183,25 @@ jobs:
             ./cmd/redis-failover-redteam
 
       - name: Run Human coordination security tests
+        run: make human-coordination-gate
+
+      - name: Run production qualification harness tests
+        env:
+          ASB_REQUIRE_GPG_TEST: "1"
         run: |
-          GOWORK=off GOTOOLCHAIN=go1.26.6+auto go test -race -count=1 \
-            ./pkg/actionlifecycle \
-            ./pkg/humanrelay/... \
-            ./pkg/taskcoord/... \
-            ./pkg/production \
-            ./schemas \
-            ./examples/human-coordination-e2e
+          gpg --version
+          python3 -m unittest scripts/test_asb_qualification.py
+
+      - name: Compile Windows process-containment paths
+        env:
+          GOOS: windows
+          GOARCH: amd64
+          CGO_ENABLED: "0"
+        run: |
+          go test -c -o /tmp/algorithm.test.exe ./agent/algorithm
+          go test -c -o /tmp/python.test.exe ./agent/algorithm/python
+          go test -c -o /tmp/humanapp.test.exe ./internal/humanapp
+          go test -c -o /tmp/asb-human.test.exe ./cmd/asb-human
 
       - name: Run three-node discovery soak gate
         env:

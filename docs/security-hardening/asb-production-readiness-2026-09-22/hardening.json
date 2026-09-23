@@ -1,0 +1,927 @@
+{
+  "documentType": "codex-security.hardening-analysis",
+  "schemaVersion": "1.0",
+  "analysisId": "hardening_20260922_asb_production_readiness",
+  "sourceEvidence": {
+    "kind": "document_collection",
+    "label": "ASB production-readiness source and validation collection",
+    "collectionSha256": "2678cb9bda353dc32e8a0dd932e296022cb4b0af970c3daea7109bbde42b811c",
+    "artifactCount": 11,
+    "sourceDrift": "present",
+    "targetRevision": "41e37c018c34744fcca45a6f9581c77e03366224"
+  },
+  "assessment": {
+    "outcome": "opportunities_identified",
+    "summary": "Four structural opportunities cover service/process containment, credential renewal, long-term audit retention, and evidence-bound environment qualification; none is represented as implemented."
+  },
+  "constraints": {
+    "profile": "balanced",
+    "changeHorizons": [
+      "incremental",
+      "medium_term",
+      "foundational"
+    ],
+    "nonNegotiables": [
+      "Preserve fail-closed authorization behavior.",
+      "Preserve approval history, receipts, and operation identifiers across maintenance.",
+      "Do not claim real-environment qualification without a passing target evidence bundle."
+    ],
+    "assumptions": [
+      "The current local approval profile remains single-host.",
+      "No measured latency, memory, recovery-time, or operator-budget target was supplied.",
+      "Untrusted computation is in scope for the operated runner profile."
+    ]
+  },
+  "opportunities": [
+    {
+      "opportunityId": "runtime-containment",
+      "title": "Contain services and descendant processes",
+      "summary": "Define explicit OS identities, socket ownership, and fail-closed descendant teardown.",
+      "diagnosis": "Service identity and descendant lifetime are owned by defaults rather than by one enforced runtime boundary.",
+      "evidence": [
+        {
+          "claimType": "observed",
+          "sourceKind": "source",
+          "evidenceId": "ASB-HARD-001",
+          "path": "init/systemd/computation-runner.service",
+          "claim": "The agent and runner units do not declare service users or groups."
+        },
+        {
+          "claimType": "observed",
+          "sourceKind": "source",
+          "evidenceId": "ASB-HARD-002",
+          "path": "cmd/computation-runner/main.go",
+          "claim": "The runner socket is created with mode 0600."
+        },
+        {
+          "claimType": "observed",
+          "sourceKind": "source",
+          "evidenceId": "ASB-HARD-003",
+          "path": "agent/algorithm/process_windows.go",
+          "claim": "Windows stop kills only the direct process."
+        },
+        {
+          "claimType": "inferred",
+          "sourceKind": "source",
+          "path": "agent/algorithm/process_windows.go",
+          "claim": "A complete untrusted-runner profile needs pre-execution ownership of every descendant."
+        }
+      ],
+      "desiredInvariants": [
+        "Services do not run as root in the ordinary profile.",
+        "Only the agent can access the runner endpoint.",
+        "Every Windows computation is contained before untrusted code executes."
+      ],
+      "proposalPath": "proposals/runtime-containment.md",
+      "options": [
+        {
+          "optionId": "shared-service-user-poststart-job",
+          "title": "Shared service identity with post-start Job assignment",
+          "kind": "incremental",
+          "summary": "Run both Linux services as one static user and assign Windows children to a Job immediately after start.",
+          "diagramPaths": {
+            "before": "diagrams/runtime-containment-before.mmd",
+            "after": "diagrams/runtime-containment-shared-user-after.mmd"
+          },
+          "evidenceCoverage": [
+            {
+              "evidenceId": "ASB-HARD-001",
+              "effect": "addresses",
+              "tacticalFixRequired": true,
+              "rationale": "A static non-root user replaces the implicit identity."
+            },
+            {
+              "evidenceId": "ASB-HARD-002",
+              "effect": "addresses",
+              "tacticalFixRequired": false,
+              "rationale": "The existing 0600 socket remains usable by the shared account."
+            },
+            {
+              "evidenceId": "ASB-HARD-003",
+              "effect": "mitigates",
+              "tacticalFixRequired": true,
+              "rationale": "A Job contains descendants after assignment, with a pre-assignment race."
+            }
+          ],
+          "tradeoffs": [
+            {
+              "dimension": "security",
+              "direction": "improves",
+              "confidence": "medium",
+              "basis": "source-derived",
+              "assessment": "Removes routine root authority and contains most descendants; the services share an account and Windows has a launch race.",
+              "validationPlan": "Test local account isolation and an adversarial child-spawn race."
+            },
+            {
+              "dimension": "performance",
+              "direction": "neutral",
+              "confidence": "low",
+              "basis": "hypothetical",
+              "assessment": "No steady-state hop is added; Job setup affects launch only.",
+              "validationPlan": "Compare p50 and p95 launch time on supported Windows hosts."
+            },
+            {
+              "dimension": "memory",
+              "direction": "neutral",
+              "confidence": "medium",
+              "basis": "source-derived",
+              "assessment": "One Job handle is retained per active process.",
+              "validationPlan": "Measure handle count and working set under maximum concurrency."
+            },
+            {
+              "dimension": "reliability",
+              "direction": "improves",
+              "confidence": "medium",
+              "basis": "source-derived",
+              "assessment": "Descendants terminate together after Job assignment.",
+              "validationPlan": "Run cancellation and crash tests with child and grandchild processes."
+            },
+            {
+              "dimension": "operability",
+              "direction": "regresses",
+              "confidence": "medium",
+              "basis": "source-derived",
+              "assessment": "Packages must create an account and own runtime/log directories.",
+              "validationPlan": "Exercise install, upgrade, restart, and rollback."
+            },
+            {
+              "dimension": "migration",
+              "direction": "improves",
+              "confidence": "medium",
+              "basis": "source-derived",
+              "assessment": "One account preserves current socket semantics.",
+              "validationPlan": "Test ownership migration from current installations."
+            }
+          ],
+          "residualRisks": [
+            "Agent and runner share account-level authority.",
+            "A child may execute before Job assignment."
+          ],
+          "implementationReadiness": {
+            "affectedComponents": [
+              "init/systemd",
+              "cmd/computation-runner",
+              "agent/algorithm"
+            ],
+            "workPackages": [
+              "Add account and directory ownership.",
+              "Add post-start Job lifecycle."
+            ],
+            "acceptanceCriteria": [
+              "Services run without root and authorized socket calls succeed.",
+              "All descendants created after assignment exit on cancellation."
+            ],
+            "migrationNotes": [],
+            "rollback": "Restore old unit files and process helper, then restore file ownership."
+          }
+        },
+        {
+          "optionId": "split-service-users-suspended-job",
+          "title": "Split service identities with fail-closed Job launch",
+          "kind": "isolation",
+          "summary": "Use distinct Linux users with a systemd-owned socket and create Windows children suspended until assigned to a Job.",
+          "diagramPaths": {
+            "before": "diagrams/runtime-containment-before.mmd",
+            "after": "diagrams/runtime-containment-split-identities-after.mmd"
+          },
+          "evidenceCoverage": [
+            {
+              "evidenceId": "ASB-HARD-001",
+              "effect": "addresses",
+              "tacticalFixRequired": true,
+              "rationale": "Separate static identities bound service authority."
+            },
+            {
+              "evidenceId": "ASB-HARD-002",
+              "effect": "addresses",
+              "tacticalFixRequired": true,
+              "rationale": "Socket activation provides explicit group ownership and inherited listener semantics."
+            },
+            {
+              "evidenceId": "ASB-HARD-003",
+              "effect": "addresses",
+              "tacticalFixRequired": true,
+              "rationale": "Suspended launch prevents untrusted code from running before Job assignment."
+            }
+          ],
+          "tradeoffs": [
+            {
+              "dimension": "security",
+              "direction": "improves",
+              "confidence": "high",
+              "basis": "source-derived",
+              "assessment": "Separates service authority and closes the Windows pre-assignment window.",
+              "validationPlan": "Verify socket denial and process-tree teardown on real targets."
+            },
+            {
+              "dimension": "performance",
+              "direction": "regresses",
+              "confidence": "low",
+              "basis": "hypothetical",
+              "assessment": "Socket activation and suspended launch add setup work.",
+              "validationPlan": "Measure p95 launch latency and socket request latency."
+            },
+            {
+              "dimension": "memory",
+              "direction": "neutral",
+              "confidence": "medium",
+              "basis": "source-derived",
+              "assessment": "Adds bounded socket-manager state and one Job handle per run.",
+              "validationPlan": "Measure handles and working set at concurrency limit."
+            },
+            {
+              "dimension": "reliability",
+              "direction": "improves",
+              "confidence": "medium",
+              "basis": "source-derived",
+              "assessment": "Containment setup fails closed, though new packaging and launcher paths can fail.",
+              "validationPlan": "Fault-inject socket activation and every Windows launch stage."
+            },
+            {
+              "dimension": "operability",
+              "direction": "regresses",
+              "confidence": "high",
+              "basis": "source-derived",
+              "assessment": "Two users, group policy, socket unit, and Windows diagnostics add operational work.",
+              "validationPlan": "Run clean install, upgrade, and incident exercises."
+            },
+            {
+              "dimension": "migration",
+              "direction": "regresses",
+              "confidence": "high",
+              "basis": "source-derived",
+              "assessment": "Ownership and listener semantics require a staged migration.",
+              "validationPlan": "Prove upgrade and rollback with preserved configs and logs."
+            }
+          ],
+          "residualRisks": [
+            "Selected runner capabilities may still be excessive.",
+            "Nested Windows Job and legacy OS behavior require target qualification."
+          ],
+          "implementationReadiness": {
+            "affectedComponents": [
+              "init/systemd",
+              "cmd/computation-runner",
+              "agent/algorithm"
+            ],
+            "workPackages": [
+              "Add accounts and shared group.",
+              "Add socket activation.",
+              "Add suspended Windows Job launcher."
+            ],
+            "acceptanceCriteria": [
+              "Agent alone can call the runner socket.",
+              "No untrusted instruction runs before Job assignment.",
+              "Cancellation removes the full process tree."
+            ],
+            "migrationNotes": [],
+            "rollback": "Disable socket activation, restore prior units and ownership, and revert the launcher."
+          }
+        }
+      ],
+      "recommendedOptionId": "split-service-users-suspended-job",
+      "recommendation": "Use the split-identity, suspended-launch design for untrusted computation; retain the shared-user design only as a named interim profile."
+    },
+    {
+      "opportunityId": "renewable-local-trust",
+      "title": "Renew local trust without losing history",
+      "summary": "Separate credential and bootstrap-token lifetime from durable approval state.",
+      "diagnosis": "One initialization boundary currently couples expiring secrets to long-lived state.",
+      "evidence": [
+        {
+          "claimType": "observed",
+          "sourceKind": "source",
+          "evidenceId": "ASB-HARD-004",
+          "path": "internal/humanapp/credentials.go",
+          "claim": "The local trust set expires after one year, the CA key is not persisted, and the UI token is a persistent file."
+        },
+        {
+          "claimType": "inferred",
+          "sourceKind": "source",
+          "path": "docs/local-human-approval.md",
+          "claim": "Safe renewal requires generation replacement that leaves the SQLite state and receipts in place."
+        }
+      ],
+      "desiredInvariants": [
+        "Rotation does not modify durable application history.",
+        "Only a complete validated credential generation becomes active.",
+        "Bootstrap-token exposure can be remediated independently."
+      ],
+      "proposalPath": "proposals/renewable-local-trust.md",
+      "options": [
+        {
+          "optionId": "offline-atomic-generation-rotation",
+          "title": "Offline atomic generation rotation",
+          "kind": "incremental",
+          "summary": "Rotate complete credential generations and the bootstrap token during a maintenance window without moving state.",
+          "diagramPaths": {
+            "before": "diagrams/renewable-local-trust-before.mmd",
+            "after": "diagrams/renewable-local-trust-offline-rotation-after.mmd"
+          },
+          "evidenceCoverage": [
+            {
+              "evidenceId": "ASB-HARD-004",
+              "effect": "addresses",
+              "tacticalFixRequired": true,
+              "rationale": "Atomic generation replacement renews certificates and independently invalidates the bootstrap token."
+            }
+          ],
+          "tradeoffs": [
+            {
+              "dimension": "security",
+              "direction": "improves",
+              "confidence": "high",
+              "basis": "source-derived",
+              "assessment": "Removes expiry-driven state abandonment and limits token exposure after rotation.",
+              "validationPlan": "Fault-inject every write and verify old-or-new complete loading."
+            },
+            {
+              "dimension": "performance",
+              "direction": "neutral",
+              "confidence": "medium",
+              "basis": "source-derived",
+              "assessment": "No steady-state request-path work is added.",
+              "validationPlan": "Measure maintenance duration for representative directories."
+            },
+            {
+              "dimension": "memory",
+              "direction": "neutral",
+              "confidence": "high",
+              "basis": "source-derived",
+              "assessment": "One bounded rollback generation is retained on disk.",
+              "validationPlan": "Measure disk use and enforce the configured generation count."
+            },
+            {
+              "dimension": "reliability",
+              "direction": "improves",
+              "confidence": "medium",
+              "basis": "source-derived",
+              "assessment": "Atomic activation supports rollback but requires planned downtime.",
+              "validationPlan": "Test interrupted rotation and failed restart recovery."
+            },
+            {
+              "dimension": "operability",
+              "direction": "regresses",
+              "confidence": "medium",
+              "basis": "source-derived",
+              "assessment": "Operators gain stop, rotate, restart, verify, and cleanup steps.",
+              "validationPlan": "Run the documented procedure on every supported OS."
+            },
+            {
+              "dimension": "migration",
+              "direction": "improves",
+              "confidence": "medium",
+              "basis": "source-derived",
+              "assessment": "A versioned layout can preserve v1 state while changing credential files.",
+              "validationPlan": "Test v1 read, first rotation, rollback, and backup restore."
+            }
+          ],
+          "residualRisks": [
+            "A compromised host may already have copied active secrets.",
+            "Cross-platform locking and ACL behavior require qualification."
+          ],
+          "implementationReadiness": {
+            "affectedComponents": [
+              "internal/humanapp",
+              "cmd/asb-human",
+              "docs/local-human-approval.md"
+            ],
+            "workPackages": [
+              "Define versioned layout.",
+              "Implement maintenance commands and atomic swap.",
+              "Add fault-injection tests."
+            ],
+            "acceptanceCriteria": [
+              "State and receipt bytes remain unchanged across rotation.",
+              "Old token is rejected after the documented restart boundary."
+            ],
+            "migrationNotes": [],
+            "rollback": "Switch to the previous validated generation without rolling back state."
+          }
+        },
+        {
+          "optionId": "online-overlapping-trust-generations",
+          "title": "Online overlapping trust generations",
+          "kind": "structural",
+          "summary": "Coordinate current and next trust generations across independently restarted participants.",
+          "diagramPaths": {
+            "before": "diagrams/renewable-local-trust-before.mmd",
+            "after": "diagrams/renewable-local-trust-online-overlap-after.mmd"
+          },
+          "evidenceCoverage": [
+            {
+              "evidenceId": "ASB-HARD-004",
+              "effect": "addresses",
+              "tacticalFixRequired": true,
+              "rationale": "Overlapping generations support renewal and token retirement without coordinated downtime."
+            }
+          ],
+          "tradeoffs": [
+            {
+              "dimension": "security",
+              "direction": "improves",
+              "confidence": "medium",
+              "basis": "source-derived",
+              "assessment": "Enables rotation but temporarily trusts more keys and adds controller authority.",
+              "validationPlan": "Test compromise and retirement behavior for old generations."
+            },
+            {
+              "dimension": "performance",
+              "direction": "regresses",
+              "confidence": "low",
+              "basis": "hypothetical",
+              "assessment": "Dual verification adds work during overlap.",
+              "validationPlan": "Benchmark handshake and session validation during overlap."
+            },
+            {
+              "dimension": "memory",
+              "direction": "regresses",
+              "confidence": "medium",
+              "basis": "source-derived",
+              "assessment": "Two live trust bundles and acknowledgement state are retained.",
+              "validationPlan": "Measure memory and disk with maximum overlap."
+            },
+            {
+              "dimension": "reliability",
+              "direction": "unknown",
+              "confidence": "low",
+              "basis": "hypothetical",
+              "assessment": "Avoids planned outage but introduces partial-rollout states.",
+              "validationPlan": "Fault-inject each acknowledgement and timeout path."
+            },
+            {
+              "dimension": "operability",
+              "direction": "regresses",
+              "confidence": "high",
+              "basis": "source-derived",
+              "assessment": "Scheduling, monitoring, retirement, and incident response become necessary.",
+              "validationPlan": "Run a full rotation and rollback exercise."
+            },
+            {
+              "dimension": "migration",
+              "direction": "regresses",
+              "confidence": "high",
+              "basis": "source-derived",
+              "assessment": "Wire/session generation semantics and controller state must migrate together.",
+              "validationPlan": "Exercise mixed-version participants."
+            }
+          ],
+          "residualRisks": [
+            "Old credentials remain valid during overlap.",
+            "Controller compromise can influence trust retirement."
+          ],
+          "implementationReadiness": {
+            "affectedComponents": [
+              "internal/humanapp",
+              "cmd/asb-human",
+              "local trust participants"
+            ],
+            "workPackages": [
+              "Define generation protocol.",
+              "Add acknowledgements and retirement.",
+              "Migrate sessions."
+            ],
+            "acceptanceCriteria": [
+              "All required participants move generations without lost state.",
+              "Old credentials fail after retirement."
+            ],
+            "migrationNotes": [],
+            "rollback": "Reactivate the old generation before the overlap deadline."
+          }
+        }
+      ],
+      "recommendedOptionId": "offline-atomic-generation-rotation",
+      "recommendation": "Use offline atomic rotation for the current single-host profile; adopt overlap only for a documented zero-downtime or multi-host requirement."
+    },
+    {
+      "opportunityId": "durable-audit-retention",
+      "title": "Retain audit history beyond online limits",
+      "summary": "Separate full long-term evidence from the bounded online recovery working set.",
+      "diagnosis": "Full online rows currently serve both retry recovery and long-term audit retention, making safe uptime finite.",
+      "evidence": [
+        {
+          "claimType": "observed",
+          "sourceKind": "source",
+          "evidenceId": "ASB-HARD-005",
+          "path": "internal/humanapp/store.go",
+          "claim": "The store rejects new work at fixed operation, mutation, and replay caps and does not compact terminal history."
+        },
+        {
+          "claimType": "inferred",
+          "sourceKind": "source",
+          "path": "internal/humanapp/store.go",
+          "claim": "Deleting full rows safely requires a retained identifier and result policy that prevents duplicate execution."
+        }
+      ],
+      "desiredInvariants": [
+        "Pending and uncertain work is never compacted.",
+        "Only verified durable archives authorize deletion of full online rows.",
+        "Retired identifiers cannot execute again."
+      ],
+      "proposalPath": "proposals/durable-audit-retention.md",
+      "options": [
+        {
+          "optionId": "verified-export-only",
+          "title": "Verified export without reclamation",
+          "kind": "incremental",
+          "summary": "Create restore-checked archive bundles and capacity status while leaving online rows untouched.",
+          "diagramPaths": {
+            "before": "diagrams/durable-audit-retention-before.mmd",
+            "after": "diagrams/durable-audit-retention-export-after.mmd"
+          },
+          "evidenceCoverage": [
+            {
+              "evidenceId": "ASB-HARD-005",
+              "effect": "mitigates",
+              "tacticalFixRequired": true,
+              "rationale": "Verified exports preserve evidence but do not reclaim bounded online capacity."
+            }
+          ],
+          "tradeoffs": [
+            {
+              "dimension": "security",
+              "direction": "improves",
+              "confidence": "high",
+              "basis": "source-derived",
+              "assessment": "Adds integrity and restore evidence without changing retry semantics.",
+              "validationPlan": "Restore every produced bundle and compare semantic counts and digests."
+            },
+            {
+              "dimension": "performance",
+              "direction": "regresses",
+              "confidence": "medium",
+              "basis": "source-derived",
+              "assessment": "Export and restore add periodic I/O outside the request path.",
+              "validationPlan": "Measure export duration and request latency under load."
+            },
+            {
+              "dimension": "memory",
+              "direction": "regresses",
+              "confidence": "medium",
+              "basis": "source-derived",
+              "assessment": "A temporary restored database and buffers are required.",
+              "validationPlan": "Measure peak RSS during maximum-size export verification."
+            },
+            {
+              "dimension": "reliability",
+              "direction": "neutral",
+              "confidence": "high",
+              "basis": "source-derived",
+              "assessment": "Online failure behavior remains unchanged and finite capacity remains.",
+              "validationPlan": "Fill to the cap after repeated exports."
+            },
+            {
+              "dimension": "operability",
+              "direction": "regresses",
+              "confidence": "medium",
+              "basis": "source-derived",
+              "assessment": "Operators must monitor capacity and protect archives.",
+              "validationPlan": "Exercise backup alerts and restore drills."
+            },
+            {
+              "dimension": "migration",
+              "direction": "improves",
+              "confidence": "high",
+              "basis": "source-derived",
+              "assessment": "The change is additive and does not alter stored rows.",
+              "validationPlan": "Verify old binaries still open the database."
+            }
+          ],
+          "residualRisks": [
+            "Admission still stops at the existing caps.",
+            "Archive durability depends on operator custody."
+          ],
+          "implementationReadiness": {
+            "affectedComponents": [
+              "internal/humanapp",
+              "cmd/asb-human"
+            ],
+            "workPackages": [
+              "Add capacity status.",
+              "Add canonical export, manifest, hashes, and verifier."
+            ],
+            "acceptanceCriteria": [
+              "A restored export matches source semantic counts and digests.",
+              "Export failure never changes online rows."
+            ],
+            "migrationNotes": [],
+            "rollback": "Disable export scheduling; no data rollback is required."
+          }
+        },
+        {
+          "optionId": "verified-compaction-with-tombstones",
+          "title": "Verified compaction with identifier tombstones",
+          "kind": "structural",
+          "summary": "Archive eligible terminal rows and replace them transactionally with exact identifiers and minimal retained outcomes.",
+          "diagramPaths": {
+            "before": "diagrams/durable-audit-retention-before.mmd",
+            "after": "diagrams/durable-audit-retention-compaction-after.mmd"
+          },
+          "evidenceCoverage": [
+            {
+              "evidenceId": "ASB-HARD-005",
+              "effect": "addresses",
+              "tacticalFixRequired": true,
+              "rationale": "Verified compaction reclaims payload capacity while tombstones preserve non-reuse and retry semantics."
+            }
+          ],
+          "tradeoffs": [
+            {
+              "dimension": "security",
+              "direction": "improves",
+              "confidence": "medium",
+              "basis": "source-derived",
+              "assessment": "Preserves identifier non-reuse if tombstones are exact; archive custody becomes security-critical.",
+              "validationPlan": "Replay archived IDs and corrupt archives under fault injection."
+            },
+            {
+              "dimension": "performance",
+              "direction": "unknown",
+              "confidence": "low",
+              "basis": "hypothetical",
+              "assessment": "A smaller DB may help requests while compaction adds I/O and archive lookup.",
+              "validationPlan": "Benchmark p95 request latency before, during, and after compaction."
+            },
+            {
+              "dimension": "memory",
+              "direction": "regresses",
+              "confidence": "medium",
+              "basis": "source-derived",
+              "assessment": "Adds an archive catalog, tombstone index, and verification workspace.",
+              "validationPlan": "Measure index growth and peak RSS."
+            },
+            {
+              "dimension": "reliability",
+              "direction": "unknown",
+              "confidence": "low",
+              "basis": "hypothetical",
+              "assessment": "Removes fixed payload lifetime but adds archive and compaction failure modes.",
+              "validationPlan": "Crash at every protocol stage and prove old-or-new completeness."
+            },
+            {
+              "dimension": "operability",
+              "direction": "regresses",
+              "confidence": "high",
+              "basis": "source-derived",
+              "assessment": "Retention, compaction, restore, and archive incidents need runbooks.",
+              "validationPlan": "Run quarterly restore and lost-archive exercises."
+            },
+            {
+              "dimension": "migration",
+              "direction": "regresses",
+              "confidence": "high",
+              "basis": "source-derived",
+              "assessment": "Schema, retry semantics, and rehydration change.",
+              "validationPlan": "Migrate a cap-sized copy and roll it back from archive."
+            }
+          ],
+          "residualRisks": [
+            "Exact tombstones still grow.",
+            "Archive loss prevents full historical retrieval.",
+            "Retention policy is deployment-specific."
+          ],
+          "implementationReadiness": {
+            "affectedComponents": [
+              "internal/humanapp",
+              "cmd/asb-human",
+              "archive tooling"
+            ],
+            "workPackages": [
+              "Add archive catalog and tombstones.",
+              "Add transactional compaction.",
+              "Add restore and old-retry tests."
+            ],
+            "acceptanceCriteria": [
+              "Pending and uncertain records never compact.",
+              "Archived identifiers never execute again.",
+              "Crash leaves a complete online or archived record."
+            ],
+            "migrationNotes": [],
+            "rollback": "Disable new compaction and rehydrate previously compacted batches from verified archives."
+          }
+        }
+      ],
+      "recommendedOptionId": "verified-compaction-with-tombstones",
+      "recommendation": "Build verified export first, then enable tombstone compaction only after restore and retry semantics are proven on the selected archive destination."
+    },
+    {
+      "opportunityId": "qualification-evidence-gate",
+      "title": "Make qualification an evidence-producing gate",
+      "summary": "Bind every deployment claim to immutable inputs, a real target, mandatory exercises, and a verifiable bundle.",
+      "diagnosis": "Current checks are carefully scoped but lack one machine-readable profile result that fails on unavailable mandatory evidence.",
+      "evidence": [
+        {
+          "claimType": "observed",
+          "sourceKind": "document",
+          "evidenceId": "ASB-HARD-006",
+          "path": "docs/local-human-approval-validation.md",
+          "claim": "The validation record labels the result Developer Preview and lists unqualified properties."
+        },
+        {
+          "claimType": "inferred",
+          "sourceKind": "document",
+          "path": "docs/asb-completion-plan.md",
+          "claim": "Real-environment claims require a profile-specific target and evidence boundary."
+        }
+      ],
+      "desiredInvariants": [
+        "Every claim is bound to immutable inputs and target facts.",
+        "Unavailable mandatory checks fail the profile result.",
+        "Evidence bundles exclude secrets and can be independently verified."
+      ],
+      "proposalPath": "proposals/qualification-evidence-gate.md",
+      "options": [
+        {
+          "optionId": "repository-qualification-bundle",
+          "title": "Repository qualification bundle",
+          "kind": "incremental",
+          "summary": "Run profile-specific mandatory checks on real targets and emit hashed, redacted, machine-readable evidence.",
+          "diagramPaths": {
+            "before": "diagrams/qualification-evidence-gate-before.mmd",
+            "after": "diagrams/qualification-evidence-gate-bundle-after.mmd"
+          },
+          "evidenceCoverage": [
+            {
+              "evidenceId": "ASB-HARD-006",
+              "effect": "addresses",
+              "tacticalFixRequired": true,
+              "rationale": "A profile fails when real mandatory checks are missing and binds results to target facts."
+            }
+          ],
+          "tradeoffs": [
+            {
+              "dimension": "security",
+              "direction": "improves",
+              "confidence": "high",
+              "basis": "source-derived",
+              "assessment": "Prevents local or cross-build evidence from being promoted beyond its target.",
+              "validationPlan": "Verify failure on missing mandatory checks and tampered artifacts."
+            },
+            {
+              "dimension": "performance",
+              "direction": "regresses",
+              "confidence": "medium",
+              "basis": "source-derived",
+              "assessment": "Qualification adds target runtime outside production requests.",
+              "validationPlan": "Measure each profile duration against CI budgets."
+            },
+            {
+              "dimension": "memory",
+              "direction": "regresses",
+              "confidence": "medium",
+              "basis": "source-derived",
+              "assessment": "Logs and bundles consume bounded artifact storage.",
+              "validationPlan": "Measure bundle size and enforce redacted retention limits."
+            },
+            {
+              "dimension": "reliability",
+              "direction": "improves",
+              "confidence": "medium",
+              "basis": "source-derived",
+              "assessment": "Repeatable manifests make drift and missing evidence visible.",
+              "validationPlan": "Replay verification on a separate host."
+            },
+            {
+              "dimension": "operability",
+              "direction": "regresses",
+              "confidence": "medium",
+              "basis": "source-derived",
+              "assessment": "Profiles, runners, redaction, retention, and signing need ownership.",
+              "validationPlan": "Run release and incident exercises."
+            },
+            {
+              "dimension": "migration",
+              "direction": "improves",
+              "confidence": "medium",
+              "basis": "source-derived",
+              "assessment": "Existing tests can be wrapped incrementally.",
+              "validationPlan": "Compare wrapped results with current workflows."
+            }
+          ],
+          "residualRisks": [
+            "Test omissions can still produce a narrow but incomplete profile.",
+            "The operator remains trusted to control the target."
+          ],
+          "implementationReadiness": {
+            "affectedComponents": [
+              "qualification schemas",
+              "scripts",
+              "workflows",
+              "validation docs"
+            ],
+            "workPackages": [
+              "Define manifests and report schema.",
+              "Implement harness and verifier.",
+              "Wrap selected target checks."
+            ],
+            "acceptanceCriteria": [
+              "Missing mandatory checks fail.",
+              "Independent verification reproduces all hashes.",
+              "Secret-pattern checks pass."
+            ],
+            "migrationNotes": [],
+            "rollback": "Withdraw the profile claim and continue existing tests while fixing the harness."
+          }
+        },
+        {
+          "optionId": "independent-lab-qualification",
+          "title": "Independent lab qualification track",
+          "kind": "foundational",
+          "summary": "Run the same immutable candidate and profile under independent custody and review.",
+          "diagramPaths": {
+            "before": "diagrams/qualification-evidence-gate-before.mmd",
+            "after": "diagrams/qualification-evidence-gate-lab-after.mmd"
+          },
+          "evidenceCoverage": [
+            {
+              "evidenceId": "ASB-HARD-006",
+              "effect": "addresses",
+              "tacticalFixRequired": false,
+              "rationale": "Independent custody strengthens claims that explicitly require external validation."
+            }
+          ],
+          "tradeoffs": [
+            {
+              "dimension": "security",
+              "direction": "improves",
+              "confidence": "medium",
+              "basis": "analogous",
+              "assessment": "Separates project implementation from qualification custody.",
+              "validationPlan": "Audit chain of custody and reproduce a sample result."
+            },
+            {
+              "dimension": "performance",
+              "direction": "regresses",
+              "confidence": "medium",
+              "basis": "hypothetical",
+              "assessment": "Transfer, scheduling, and review add release latency.",
+              "validationPlan": "Measure lead time over several qualification cycles."
+            },
+            {
+              "dimension": "memory",
+              "direction": "regresses",
+              "confidence": "low",
+              "basis": "source-derived",
+              "assessment": "The lab retains duplicate evidence and review records.",
+              "validationPlan": "Measure storage per cycle."
+            },
+            {
+              "dimension": "reliability",
+              "direction": "regresses",
+              "confidence": "low",
+              "basis": "hypothetical",
+              "assessment": "External scheduling can block time-sensitive releases.",
+              "validationPlan": "Define and test expiry and exception handling."
+            },
+            {
+              "dimension": "operability",
+              "direction": "regresses",
+              "confidence": "high",
+              "basis": "source-derived",
+              "assessment": "Contracts, policy governance, reviewers, and renewal are required.",
+              "validationPlan": "Run a complete mock certification cycle."
+            },
+            {
+              "dimension": "migration",
+              "direction": "regresses",
+              "confidence": "high",
+              "basis": "source-derived",
+              "assessment": "A stable immutable candidate and acceptance policy are prerequisites.",
+              "validationPlan": "Freeze and qualify a disposable release candidate."
+            }
+          ],
+          "residualRisks": [
+            "Independent review is only as complete as the published profile.",
+            "Cost and availability may limit frequency."
+          ],
+          "implementationReadiness": {
+            "affectedComponents": [
+              "release process",
+              "qualification policy",
+              "external lab or independent team"
+            ],
+            "workPackages": [
+              "Publish acceptance policy.",
+              "Establish custody and review.",
+              "Define expiry and requalification."
+            ],
+            "acceptanceCriteria": [
+              "A reviewer can reproduce the bundle and scope the claim.",
+              "Drift triggers expiry or requalification."
+            ],
+            "migrationNotes": [],
+            "rollback": "Expire or withdraw the external claim without changing the artifact."
+          }
+        }
+      ],
+      "recommendedOptionId": "repository-qualification-bundle",
+      "recommendation": "Adopt repository qualification bundles now and reserve independent lab qualification for claims that explicitly require it."
+    }
+  ],
+  "openQuestions": [
+    "Select package account names and supported Linux distributions.",
+    "Select archive destination, encryption, retention, and custody policy.",
+    "Select supported Windows versions and real qualification targets.",
+    "Name the authority that signs and reviews qualification bundles."
+  ]
+}

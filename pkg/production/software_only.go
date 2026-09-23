@@ -99,7 +99,7 @@ func (p SoftwareOnlyProfile) Verify(ctx context.Context, req SoftwareOnlyVerifyR
 		return AcceptedIdentity{}, ErrUnexpectedAttestationBinding
 	}
 
-	replayExpiry := earliestTime(verified.statement.Binding.ExpiresAt, verified.grant.ExpiresAt)
+	replayExpiry := identityReplayExpiry(verified, p.GrantAuthority.ClockSkew, p.BindingAuthority.ClockSkew)
 	replayKey := strings.Join([]string{
 		"asb.production.software-only.v1",
 		verified.grant.GrantHash,

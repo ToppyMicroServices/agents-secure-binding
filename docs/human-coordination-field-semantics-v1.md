@@ -121,6 +121,8 @@ their own rules and are not repeated here.
 | `taskcoord/asbbinding.ChallengeResponse` | `ChallengeID` | Fixed 64-character lowercase hex |
 | `taskcoord/asbbinding.DelegationRequest` | `ParticipantID`, `EventID`, `ParentTaskID`, `ParentAssignmentID`, `DecisionID`, `ChildEventID`, `ChildTaskID`, `ChildAssignmentID`, `TargetParticipantID` | General |
 | `taskcoord/asbbinding.ExecuteRequest` | `ChallengeID` | Fixed 64-character lowercase hex |
+| `taskcoord/asbbinding.HumanOutcome` | `OperationID`, `ParticipantID`, `ActorID` | General; trusted retained outcome scope |
+| `taskcoord/asbbinding.RecoveryRequest` | `ParticipantID`, `OperationID` | General; `OperationID` is the original request `EventID` |
 | `taskcoord/asbbinding.IngressErrorResponse` | `RequestID` | Fixed `asbreq-` plus 32-character lowercase hex |
 | `taskcoord/asbbinding.InteractionRequest` | `ParticipantID`, `EventID`, `InteractionID`, `TaskID`, `AssignmentID`, `InReplyTo`, `Supersedes` | General |
 | `taskcoord/asbbinding.OfferRequest` | `ParticipantID`, `EventID`, `TaskID`, `AssignmentID`, `TargetParticipantID` | General |

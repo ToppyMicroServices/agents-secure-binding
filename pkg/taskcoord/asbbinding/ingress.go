@@ -31,11 +31,13 @@ import (
 const (
 	IngressChallengePath = "/v1/human-operations/challenge"
 	IngressExecutePath   = "/v1/human-operations/execute"
+	IngressRecoverPath   = "/v1/human-operations/recover"
 
 	OperationAssignmentOffer      = "ASSIGNMENT_OFFER"
 	OperationAssignmentTransition = "ASSIGNMENT_TRANSITION"
 	OperationAssignmentDelegation = "ASSIGNMENT_DELEGATION"
 	OperationInteractionAppend    = "INTERACTION_APPEND"
+	OperationRecover              = "OPERATION_RECOVER"
 
 	challengeBytes         = 32
 	challengeAttempts      = 3
@@ -148,6 +150,7 @@ type operationEnvelope struct {
 	transition  *TransitionRequest
 	delegation  *DelegationRequest
 	interaction *InteractionRequest
+	recovery    *RecoveryRequest
 }
 
 // Handler returns a no-store HTTP API. The enclosing http.Server must use a
@@ -156,7 +159,7 @@ func (s *Ingress) Handler() (http.Handler, error) {
 	if isNilDependency(s.Store) {
 		return nil, ErrMissingStore
 	}
-	if isNilDependency(s.Policy.ReplayCache) {
+	if _, durable := s.Store.(HumanTransactionStore); !durable && isNilDependency(s.Policy.ReplayCache) {
 		return nil, ErrMissingReplayCache
 	}
 	if strings.TrimSpace(s.Policy.Grant.ExpectedIssuer) == "" ||
@@ -197,7 +200,7 @@ func (s *Ingress) Handler() (http.Handler, error) {
 				return
 			}
 			s.handleChallenge(w, r)
-		case IngressExecutePath:
+		case IngressExecutePath, IngressRecoverPath:
 			if r.Method != http.MethodPost {
 				w.Header().Set("Allow", http.MethodPost)
 				s.writeIngressError(w, IngressCodeMethodNotAllowed)
@@ -229,6 +232,12 @@ func (s *Ingress) handleChallenge(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		s.writeIngressError(w, IngressCodeInvalidRequest)
 		return
+	}
+	if operation.kind == RequestKindOperationRecover {
+		if _, ok := s.Store.(HumanTransactionStore); !ok {
+			s.writeIngressError(w, IngressCodeOperationRejected)
+			return
+		}
 	}
 	if operation.kind == RequestKindAssignmentDelegation && isNilDelegationVerifier(s.Policy.DelegationVerifier) {
 		s.writeIngressError(w, IngressCodeOperationRejected)
@@ -283,7 +292,11 @@ func (s *Ingress) handleExecute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var input ExecuteRequest
-	if err := decodeIngressEnvelope(r.Body, &input, schemas.ValidateHumanIngressExecuteJSON); err != nil {
+	validator := schemas.ValidateHumanIngressExecuteJSON
+	if r.URL.Path == IngressRecoverPath {
+		validator = schemas.ValidateHumanIngressRecoverJSON
+	}
+	if err := decodeIngressEnvelope(r.Body, &input, validator); err != nil {
 		s.writeIngressError(w, IngressCodeInvalidRequest)
 		return
 	}
@@ -292,8 +305,11 @@ func (s *Ingress) handleExecute(w http.ResponseWriter, r *http.Request) {
 		s.writeIngressError(w, IngressCodeInvalidRequest)
 		return
 	}
-	now := s.currentTime()
-	challenge, err := s.takeChallenge(input.ChallengeID, connectionKey(state), operation.kind, operation.digest, now)
+	if (operation.kind == RequestKindOperationRecover) != (r.URL.Path == IngressRecoverPath) {
+		s.writeIngressError(w, IngressCodeInvalidRequest)
+		return
+	}
+	challenge, err := s.takeChallenge(input.ChallengeID, connectionKey(state), operation.kind, operation.digest, s.currentTime())
 	if err != nil {
 		s.writeIngressError(w, IngressCodeChallengeRejected)
 		return
@@ -307,184 +323,215 @@ func (s *Ingress) handleExecute(w http.ResponseWriter, r *http.Request) {
 			ReplayCache: s.Policy.ReplayCache,
 		},
 	}
-	profile := Profile{Participants: s.Store, Now: func() time.Time { return now }}
-	accepted, err := profile.accept(r.Context(), operation.participantID(), operation.digest, evidence, now)
+	ctx := r.Context()
+	var response []byte
+	if durable, ok := s.Store.(HumanTransactionStore); ok {
+		err = durable.RunHumanTransaction(ctx, func(tx HumanTransaction) error {
+			var executeErr error
+			response, executeErr = s.executeDurable(ctx, tx, operation, evidence)
+			return executeErr
+		})
+	} else if operation.kind == RequestKindOperationRecover {
+		err = errOperationAuthorization
+	} else {
+		var result ExecuteResponse
+		result, err = s.executeVerified(ctx, s.Store, operation, evidence)
+		if err == nil {
+			response, err = json.Marshal(result)
+		}
+	}
 	if err != nil {
-		// Do not expose verifier or registry details, and do not inspect any
-		// Assignment until the exact request proof has been accepted.
-		s.writeIngressError(w, IngressCodeOperationRejected)
+		s.writeIngressError(w, ingressCodeForError(err))
 		return
 	}
+	// These are exactly the bytes retained by the transaction, not a new
+	// response reconstructed from subsequently changed Assignment state.
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(append(response, '\n'))
+}
+
+func (s *Ingress) acceptOperation(ctx context.Context, store taskcoord.Store, operation operationEnvelope, evidence Evidence) (Profile, acceptance, time.Time, error) {
+	// Read the clock and current Participant inside the transaction, after any
+	// lock wait. An expired proof cannot acquire validity by waiting for a lock.
+	now := s.currentTime()
+	profile := Profile{Participants: store, Now: func() time.Time { return now }}
+	accepted, err := profile.accept(ctx, operation.participantID(), operation.digest, evidence, now)
+	if err != nil {
+		return profile, acceptance{}, now, errOperationAuthorization
+	}
 	if s.Policy.AcceptedUntil != nil {
-		policyExpiry, err := s.Policy.AcceptedUntil(r.Context(), operation.kind, operation.digest)
+		policyExpiry, err := s.Policy.AcceptedUntil(ctx, operation.kind, operation.digest)
 		if err != nil {
-			s.writeIngressError(w, IngressCodeOperationRejected)
-			return
+			return profile, acceptance{}, now, errOperationAuthorization
 		}
 		if !policyExpiry.IsZero() && policyExpiry.Before(accepted.expiresAt) {
 			accepted.expiresAt = policyExpiry
 		}
 		if !now.Before(accepted.expiresAt) {
-			s.writeIngressError(w, IngressCodeOperationRejected)
-			return
+			return profile, acceptance{}, now, errOperationAuthorization
 		}
 	}
+	return profile, accepted, now, nil
+}
+
+func (s *Ingress) executeVerified(ctx context.Context, store taskcoord.Store, operation operationEnvelope, evidence Evidence) (ExecuteResponse, error) {
+	profile, accepted, now, err := s.acceptOperation(ctx, store, operation, evidence)
+	if err != nil {
+		return ExecuteResponse{}, err
+	}
+	return s.applyOperation(ctx, store, profile, operation, accepted, now)
+}
+
+func (s *Ingress) executeDurable(ctx context.Context, tx HumanTransaction, operation operationEnvelope, evidence Evidence) ([]byte, error) {
+	evidence.Options.ReplayCache = tx
+	profile, accepted, now, err := s.acceptOperation(ctx, tx, operation, evidence)
+	if err != nil {
+		return nil, err
+	}
+	if operation.recovery != nil {
+		request := *operation.recovery
+		outcome, err := tx.LookupHumanOutcome(ctx, request.OperationID)
+		if err != nil {
+			return nil, err
+		}
+		if outcome.ParticipantID != accepted.human.ParticipantID || outcome.ActorID != accepted.actorID || outcome.RequestDigest != request.RequestDigest {
+			return nil, errOperationAuthorization
+		}
+		if err := outcome.Validate(); err != nil {
+			return nil, err
+		}
+		if err := accepted.commitReplay(); err != nil {
+			return nil, err
+		}
+		if !s.currentTime().Before(accepted.expiresAt) {
+			return nil, errOperationAuthorization
+		}
+		return append([]byte(nil), outcome.Response...), nil
+	}
+	if _, err := tx.LookupHumanOutcome(ctx, operation.eventID()); err == nil {
+		// Re-execution, even with a fresh proof, must use the explicit recovery
+		// mode. It must not create new provenance or reapply an earlier event.
+		return nil, ErrHumanOutcomeConflict
+	} else if !errors.Is(err, ErrHumanOutcomeNotFound) {
+		return nil, err
+	}
+	result, err := s.applyOperation(ctx, tx, profile, operation, accepted, now)
+	if err != nil {
+		return nil, err
+	}
+	response, err := json.Marshal(result)
+	if err != nil {
+		return nil, err
+	}
+	outcome := HumanOutcome{OperationID: operation.eventID(), RequestDigest: operation.digest.String(), ParticipantID: accepted.human.ParticipantID, ActorID: accepted.actorID, Response: response}
+	if err := outcome.Validate(); err != nil {
+		return nil, err
+	}
+	if err := tx.PutHumanOutcome(ctx, outcome); err != nil {
+		return nil, err
+	}
+	// Trusted policy/delegation callbacks may have taken time after proof
+	// verification. Expiry here rolls back mutation, replay, outbox and outcome.
+	if !s.currentTime().Before(accepted.expiresAt) {
+		return nil, errOperationAuthorization
+	}
+	return response, nil
+}
+
+func (s *Ingress) applyOperation(ctx context.Context, store taskcoord.Store, profile Profile, operation operationEnvelope, accepted acceptance, now time.Time) (ExecuteResponse, error) {
 	switch operation.kind {
 	case RequestKindAssignmentOffer:
-		s.executeOffer(w, r, profile, *operation.offer, accepted, now)
-	case RequestKindAssignmentTransition:
-		s.executeTransition(w, r, profile, *operation.transition, accepted, now)
-	case RequestKindAssignmentDelegation:
-		s.executeDelegation(w, r, profile, *operation.delegation, accepted, now)
-	case RequestKindInteractionAppend:
-		s.executeInteraction(w, r, profile, *operation.interaction, accepted, now)
-	default:
-		s.writeIngressError(w, IngressCodeInvalidRequest)
-	}
-}
-
-func (s *Ingress) executeOffer(
-	w http.ResponseWriter,
-	r *http.Request,
-	profile Profile,
-	request OfferRequest,
-	accepted acceptance,
-	now time.Time,
-) {
-	transition, err := profile.offerAccepted(r.Context(), request, accepted, now)
-	if err != nil {
-		s.writeIngressError(w, ingressCodeForError(err))
-		return
-	}
-	if err := s.Store.CommitAssignment(r.Context(), 0, transition.Assignment, transition.Record); err != nil {
-		s.writeIngressError(w, ingressCodeForError(err))
-		return
-	}
-	writeIngressJSON(w, http.StatusOK, ExecuteResponse{
-		Operation: OperationAssignmentOffer, Assignment: &transition.Assignment, Record: &transition.Record,
-	})
-}
-
-func (s *Ingress) executeTransition(
-	w http.ResponseWriter,
-	r *http.Request,
-	profile Profile,
-	request TransitionRequest,
-	accepted acceptance,
-	now time.Time,
-) {
-	current, err := s.Store.LoadAssignment(r.Context(), request.AssignmentID)
-	if err != nil {
-		s.writeIngressError(w, ingressCodeForError(err))
-		return
-	}
-	if current.TaskID != request.TaskID || current.Revision != request.ExpectedRevision {
-		s.writeIngressError(w, IngressCodeStateConflict)
-		return
-	}
-	transition, err := profile.applyAccepted(current, request, accepted, now)
-	if err != nil {
-		s.writeIngressError(w, ingressCodeForError(err))
-		return
-	}
-	if err := s.Store.CommitAssignment(r.Context(), request.ExpectedRevision, transition.Assignment, transition.Record); err != nil {
-		s.writeIngressError(w, ingressCodeForError(err))
-		return
-	}
-	writeIngressJSON(w, http.StatusOK, ExecuteResponse{
-		Operation: OperationAssignmentTransition, Assignment: &transition.Assignment, Record: &transition.Record,
-	})
-}
-
-func (s *Ingress) executeInteraction(
-	w http.ResponseWriter,
-	r *http.Request,
-	profile Profile,
-	request InteractionRequest,
-	accepted acceptance,
-	now time.Time,
-) {
-	current, err := s.Store.LoadAssignment(r.Context(), request.AssignmentID)
-	if err != nil {
-		s.writeIngressError(w, ingressCodeForError(err))
-		return
-	}
-	if current.TaskID != request.TaskID {
-		s.writeIngressError(w, IngressCodeStateConflict)
-		return
-	}
-	event, err := profile.newInteractionEventAccepted(request, accepted, now)
-	if err != nil {
-		s.writeIngressError(w, ingressCodeForError(err))
-		return
-	}
-	if err := s.Store.AppendInteractionEvent(r.Context(), event); err != nil {
-		s.writeIngressError(w, ingressCodeForError(err))
-		return
-	}
-	writeIngressJSON(w, http.StatusOK, ExecuteResponse{Operation: OperationInteractionAppend, Interaction: &event})
-}
-
-func (s *Ingress) executeDelegation(
-	w http.ResponseWriter,
-	r *http.Request,
-	profile Profile,
-	request DelegationRequest,
-	accepted acceptance,
-	now time.Time,
-) {
-	if isNilDelegationVerifier(s.Policy.DelegationVerifier) {
-		s.writeIngressError(w, IngressCodeOperationRejected)
-		return
-	}
-	parent, err := s.Store.LoadAssignment(r.Context(), request.ParentAssignmentID)
-	if err != nil {
-		s.writeIngressError(w, ingressCodeForError(err))
-		return
-	}
-	if parent.TaskID != request.ParentTaskID || parent.Revision != request.ExpectedRevision {
-		s.writeIngressError(w, IngressCodeStateConflict)
-		return
-	}
-	verifyDelegation := func(
-		ctx context.Context,
-		current taskcoord.Assignment,
-		delegationRequest DelegationRequest,
-		at time.Time,
-	) (taskcoord.VerifiedDelegation, error) {
-		verified, verifyErr := s.Policy.DelegationVerifier.VerifyDelegation(ctx, current, delegationRequest, at)
-		if verifyErr != nil || verified.Validate() != nil ||
-			verified.DecisionID != delegationRequest.DecisionID ||
-			verified.ParentAssignmentID != current.AssignmentID ||
-			verified.ChildAssignmentID != delegationRequest.ChildAssignmentID ||
-			verified.FromParticipantID != current.ParticipantID ||
-			verified.ToParticipantID != delegationRequest.TargetParticipantID ||
-			verified.ParentAuthorityDigest != current.AuthorityDigest ||
-			verified.ChildAuthorityDigest != delegationRequest.AuthorityDigest ||
-			verified.VerifiedAt.After(at) {
-			return taskcoord.VerifiedDelegation{}, errOperationAuthorization
+		transition, err := profile.offerAccepted(ctx, *operation.offer, accepted, now)
+		if err != nil {
+			return ExecuteResponse{}, err
 		}
-		return verified, nil
+		if err := store.CommitAssignment(ctx, 0, transition.Assignment, transition.Record); err != nil {
+			return ExecuteResponse{}, err
+		}
+		return ExecuteResponse{Operation: OperationAssignmentOffer, Assignment: &transition.Assignment, Record: &transition.Record}, nil
+	case RequestKindAssignmentTransition:
+		request := *operation.transition
+		current, err := store.LoadAssignment(ctx, request.AssignmentID)
+		if err != nil {
+			return ExecuteResponse{}, err
+		}
+		if current.TaskID != request.TaskID || current.Revision != request.ExpectedRevision {
+			return ExecuteResponse{}, taskcoord.ErrRevisionConflict
+		}
+		transition, err := profile.applyAccepted(current, request, accepted, now)
+		if err != nil {
+			return ExecuteResponse{}, err
+		}
+		if err := store.CommitAssignment(ctx, request.ExpectedRevision, transition.Assignment, transition.Record); err != nil {
+			return ExecuteResponse{}, err
+		}
+		return ExecuteResponse{Operation: OperationAssignmentTransition, Assignment: &transition.Assignment, Record: &transition.Record}, nil
+	case RequestKindInteractionAppend:
+		request := *operation.interaction
+		current, err := store.LoadAssignment(ctx, request.AssignmentID)
+		if err != nil {
+			return ExecuteResponse{}, err
+		}
+		if current.TaskID != request.TaskID {
+			return ExecuteResponse{}, taskcoord.ErrRevisionConflict
+		}
+		event, err := profile.newInteractionEventAccepted(request, accepted, now)
+		if err != nil {
+			return ExecuteResponse{}, err
+		}
+		if err := store.AppendInteractionEvent(ctx, event); err != nil {
+			return ExecuteResponse{}, err
+		}
+		return ExecuteResponse{Operation: OperationInteractionAppend, Interaction: &event}, nil
+	case RequestKindAssignmentDelegation:
+		request := *operation.delegation
+		if isNilDelegationVerifier(s.Policy.DelegationVerifier) {
+			return ExecuteResponse{}, errOperationAuthorization
+		}
+		parent, err := store.LoadAssignment(ctx, request.ParentAssignmentID)
+		if err != nil {
+			return ExecuteResponse{}, err
+		}
+		if parent.TaskID != request.ParentTaskID || parent.Revision != request.ExpectedRevision {
+			return ExecuteResponse{}, taskcoord.ErrRevisionConflict
+		}
+		verifyDelegation := func(ctx context.Context, current taskcoord.Assignment, request DelegationRequest, at time.Time) (taskcoord.VerifiedDelegation, error) {
+			verified, err := s.Policy.DelegationVerifier.VerifyDelegation(ctx, current, request, at)
+			if err != nil || verified.Validate() != nil ||
+				verified.DecisionID != request.DecisionID || verified.ParentAssignmentID != current.AssignmentID ||
+				verified.ChildAssignmentID != request.ChildAssignmentID || verified.FromParticipantID != current.ParticipantID ||
+				verified.ToParticipantID != request.TargetParticipantID || verified.ParentAuthorityDigest != current.AuthorityDigest ||
+				verified.ChildAuthorityDigest != request.AuthorityDigest || verified.VerifiedAt.After(at) {
+				return taskcoord.VerifiedDelegation{}, errOperationAuthorization
+			}
+			return verified, nil
+		}
+		transition, err := profile.delegateAccepted(ctx, parent, request, accepted, now, verifyDelegation)
+		if err != nil {
+			return ExecuteResponse{}, err
+		}
+		if err := store.CommitDelegation(ctx, request.ExpectedRevision, transition); err != nil {
+			return ExecuteResponse{}, err
+		}
+		return ExecuteResponse{Operation: OperationAssignmentDelegation, ParentAssignment: &transition.Parent, ParentRecord: &transition.ParentRecord, ChildAssignment: &transition.Child, ChildRecord: &transition.ChildRecord, Delegation: &transition.Delegation}, nil
+	default:
+		return ExecuteResponse{}, ErrUnsupportedOperationKind
 	}
-	transition, err := profile.delegateAccepted(
-		r.Context(), parent, request, accepted, now, verifyDelegation,
-	)
-	if err != nil {
-		s.writeIngressError(w, ingressCodeForError(err))
-		return
+}
+
+func (o operationEnvelope) eventID() string {
+	switch o.kind {
+	case RequestKindAssignmentOffer:
+		return o.offer.EventID
+	case RequestKindAssignmentTransition:
+		return o.transition.EventID
+	case RequestKindAssignmentDelegation:
+		return o.delegation.EventID
+	case RequestKindInteractionAppend:
+		return o.interaction.EventID
+	default:
+		return ""
 	}
-	if err := s.Store.CommitDelegation(r.Context(), request.ExpectedRevision, transition); err != nil {
-		s.writeIngressError(w, ingressCodeForError(err))
-		return
-	}
-	writeIngressJSON(w, http.StatusOK, ExecuteResponse{
-		Operation:        OperationAssignmentDelegation,
-		ParentAssignment: &transition.Parent,
-		ParentRecord:     &transition.ParentRecord,
-		ChildAssignment:  &transition.Child,
-		ChildRecord:      &transition.ChildRecord,
-		Delegation:       &transition.Delegation,
-	})
 }
 
 func (o operationEnvelope) participantID() string {
@@ -497,6 +544,8 @@ func (o operationEnvelope) participantID() string {
 		return o.delegation.ParticipantID
 	case RequestKindInteractionAppend:
 		return o.interaction.ParticipantID
+	case RequestKindOperationRecover:
+		return o.recovery.ParticipantID
 	default:
 		return ""
 	}
@@ -535,6 +584,13 @@ func decodeOperation(kind string, raw json.RawMessage) (operationEnvelope, error
 		}
 		digest, err := InteractionDigest(request)
 		return operationEnvelope{kind: RequestKindInteractionAppend, digest: digest, interaction: &request}, err
+	case OperationRecover:
+		var request RecoveryRequest
+		if err := decodeIngressJSON(bytes.NewReader(raw), &request); err != nil {
+			return operationEnvelope{}, err
+		}
+		digest, err := RecoveryDigest(request)
+		return operationEnvelope{kind: RequestKindOperationRecover, digest: digest, recovery: &request}, err
 	default:
 		return operationEnvelope{}, ErrUnsupportedOperationKind
 	}

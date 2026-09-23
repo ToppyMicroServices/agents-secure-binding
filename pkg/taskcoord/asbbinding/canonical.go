@@ -29,6 +29,7 @@ const (
 	RequestKindAssignmentTransition RequestKind = "ASSIGNMENT_TRANSITION"
 	RequestKindAssignmentDelegation RequestKind = "ASSIGNMENT_DELEGATION"
 	RequestKindInteractionAppend    RequestKind = "INTERACTION_APPEND"
+	RequestKindOperationRecover     RequestKind = "OPERATION_RECOVER"
 )
 
 const (

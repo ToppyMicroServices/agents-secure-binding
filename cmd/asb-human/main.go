@@ -84,10 +84,10 @@ func defaultDataDir() (string, error) {
 
 func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if len(args) == 0 {
-		return errors.New("usage: asb-human <self-test|demo|init|serve|agent|inspect> [flags]")
+		return errors.New("usage: asb-human <self-test|demo|init|serve|agent|inspect|credentials-status|credentials-rotate|token-rotate|storage-status|storage-export|storage-verify> [flags]")
 	}
 	if args[0] == "help" || args[0] == "--help" || args[0] == "-h" {
-		_, err := fmt.Fprintln(stdout, "usage: asb-human <self-test|demo|init|serve|agent|inspect> [flags]\nTry self-test for an automatic local check, or demo for a browser review.\nUse a command with --help for its options.")
+		_, err := fmt.Fprintln(stdout, "usage: asb-human <self-test|demo|init|serve|agent|inspect|credentials-status|credentials-rotate|token-rotate|storage-status|storage-export|storage-verify> [flags]\nTry self-test for an automatic local check, or demo for a browser review.\nUse a command with --help for its options.")
 		return err
 	}
 	if args[0] == "self-test" {
@@ -104,8 +104,9 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	var serveCfg serveOptions
 	var agentCfg agentOptions
 	var operationID, receiptPath, digest string
+	var archivePath, manifestPath string
 	switch args[0] {
-	case "init":
+	case "init", "credentials-status", "credentials-rotate", "token-rotate", "storage-status":
 	case "serve", commandDemo:
 		serveCfg.demo = args[0] == commandDemo
 		coreAddress, webAddress := defaultCoreAddress, defaultWebAddress
@@ -130,6 +131,11 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		flags.StringVar(&operationID, "operation-id", "", "proposal identifier")
 		flags.StringVar(&receiptPath, "receipt", "", "read a saved proposal receipt")
 		flags.StringVar(&digest, "digest", "", "proposal digest, required with --operation-id unless its derived receipt exists")
+	case "storage-export":
+		flags.StringVar(&archivePath, "output", "", "new SQLite snapshot path; a manifest sidecar is written next to it")
+	case "storage-verify":
+		flags.StringVar(&archivePath, "archive", "", "SQLite snapshot to verify")
+		flags.StringVar(&manifestPath, "manifest", "", "snapshot manifest; defaults to <archive>.manifest.json")
 	default:
 		return fmt.Errorf("unknown command %q", args[0])
 	}
@@ -146,12 +152,93 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
+	if args[0] == "serve" || args[0] == commandDemo {
+		if err := humanapp.Initialize(dir); err != nil {
+			return err
+		}
+	}
+	if args[0] == "serve" || args[0] == commandDemo || args[0] == "agent" || args[0] == "inspect" || args[0] == "storage-status" || args[0] == "storage-export" {
+		lock, err := humanapp.HoldDataDirectory(dir)
+		if err != nil {
+			return err
+		}
+		defer lock.Close()
+	}
 	switch args[0] {
 	case "init":
 		if err := humanapp.Initialize(dir); err != nil {
 			return err
 		}
 		return writeJSON(stdout, map[string]string{"event": "initialized", "data_dir": dir})
+	case "credentials-status":
+		status, err := humanapp.CredentialsStatus(dir)
+		if err != nil {
+			return err
+		}
+		return writeJSON(stdout, map[string]any{
+			"event":          "credentials_status",
+			"generation":     status.Generation,
+			"legacy_layout":  status.LegacyLayout,
+			"not_after":      status.NotAfter.Format(time.RFC3339),
+			"expired":        !time.Now().UTC().Before(status.NotAfter),
+			"ca_fingerprint": status.CAFingerprint,
+		})
+	case "credentials-rotate":
+		status, err := humanapp.RotateCredentials(dir)
+		if err != nil {
+			return err
+		}
+		return writeJSON(stdout, map[string]any{
+			"event":          "credentials_rotated",
+			"generation":     status.Generation,
+			"not_after":      status.NotAfter.Format(time.RFC3339),
+			"ca_fingerprint": status.CAFingerprint,
+		})
+	case "token-rotate":
+		if err := humanapp.RotateLoginToken(dir); err != nil {
+			return err
+		}
+		return writeJSON(stdout, map[string]string{"event": "token_rotated"})
+	case "storage-status":
+		store, err := humanapp.OpenStoreContext(ctx, filepath.Join(dir, "human-approval.sqlite"))
+		if err != nil {
+			return err
+		}
+		defer store.Close()
+		capacity, err := store.Capacity(ctx)
+		if err != nil {
+			return err
+		}
+		return writeJSON(stdout, map[string]any{"event": "storage_status", "capacity": capacity})
+	case "storage-export":
+		if strings.TrimSpace(archivePath) == "" {
+			return errors.New("provide --output for a new archive")
+		}
+		store, err := humanapp.OpenStoreContext(ctx, filepath.Join(dir, "human-approval.sqlite"))
+		if err != nil {
+			return err
+		}
+		defer store.Close()
+		manifest, err := store.ExportSnapshot(ctx, archivePath)
+		if err != nil {
+			return err
+		}
+		return writeJSON(stdout, map[string]any{"event": "storage_exported", "manifest": manifest})
+	case "storage-verify":
+		if strings.TrimSpace(archivePath) == "" {
+			return errors.New("provide --archive")
+		}
+		if manifestPath == "" {
+			manifestPath = archivePath + ".manifest.json"
+		}
+		manifest, err := humanapp.ReadStoreArchiveManifest(manifestPath)
+		if err != nil {
+			return err
+		}
+		if err := humanapp.VerifyStoreArchive(ctx, archivePath, manifest); err != nil {
+			return err
+		}
+		return writeJSON(stdout, map[string]string{"event": "storage_verified", "sha256": manifest.SHA256})
 	case "serve", commandDemo:
 		serveCfg.dir = dir
 		return serve(ctx, serveCfg, stdout, stderr)

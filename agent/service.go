@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -73,7 +72,8 @@ const (
 )
 
 const (
-	algoFilePermission = 0o700
+	algoFilePermission    = 0o700
+	datasetFilePermission = 0o600
 )
 
 var (
@@ -357,6 +357,57 @@ func datasetFilePath(filename string) (string, error) {
 	return target, nil
 }
 
+func ensurePrivateDirectory(path string) error {
+	if err := os.MkdirAll(path, 0o700); err != nil {
+		return err
+	}
+	info, err := os.Lstat(path)
+	if err != nil {
+		return err
+	}
+	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("private path is not a directory")
+	}
+	return os.Chmod(path, 0o700)
+}
+
+func writePrivateFile(path string, data []byte, mode os.FileMode) error {
+	dir := filepath.Dir(path)
+	f, err := os.CreateTemp(dir, "."+filepath.Base(path)+".tmp-*")
+	if err != nil {
+		return err
+	}
+	tempPath := f.Name()
+	defer func() { _ = os.Remove(tempPath) }()
+	if _, err := f.Write(data); err != nil {
+		_ = f.Close()
+		return err
+	}
+	if err := f.Chmod(mode); err != nil {
+		_ = f.Close()
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tempPath, path)
+}
+
+func normalizedAlgorithmType(algoType string) string {
+	if algoType == "" {
+		return string(algorithm.AlgoTypeBin)
+	}
+	return algoType
+}
+
+func algorithmCommitment(algoType string, args []string, program, requirements []byte) [32]byte {
+	return AlgorithmCommitment(algoType, args, program, requirements)
+}
+
+func algorithmCommitmentMatches(expected [32]byte, algoType string, args []string, program, requirements []byte) bool {
+	return algorithmCommitment(algoType, args, program, requirements) == expected
+}
+
 // downloadAlgorithmIfRemote automatically downloads the algorithm if it has a remote source.
 // This is called as an action when entering the ReceivingAlgorithm state.
 func (as *agentService) downloadAlgorithmIfRemote(state statemachine.State) {
@@ -386,11 +437,16 @@ func (as *agentService) downloadAlgorithmIfRemote(state statemachine.State) {
 			as.sm.SendEvent(RunFailed)
 			return
 		}
+		defer func() {
+			if err := res.Close(); err != nil {
+				as.logger.Warn("failed to remove private OCI workspace", "error", err)
+			}
+		}()
 
-		// Verify hash
-		hash := sha3.Sum256(res.Data)
-		if hash != as.computation.Algorithm.Hash {
-			as.runError = fmt.Errorf("algorithm hash mismatch: expected %x, got %x", as.computation.Algorithm.Hash, hash)
+		algoType := normalizedAlgorithmType(as.computation.Algorithm.AlgoType)
+		if !algorithmCommitmentMatches(as.computation.Algorithm.Hash, algoType, as.computation.Algorithm.AlgoArgs, res.Data, res.Requirements) {
+			hash := algorithmCommitment(algoType, as.computation.Algorithm.AlgoArgs, res.Data, res.Requirements)
+			as.runError = fmt.Errorf("algorithm execution-bundle hash mismatch: expected %x, got %x", as.computation.Algorithm.Hash, hash)
 			as.logger.Error(as.runError.Error())
 			as.sm.SendEvent(RunFailed)
 			return
@@ -405,68 +461,23 @@ func (as *agentService) downloadAlgorithmIfRemote(state statemachine.State) {
 			return
 		}
 
-		// If a source directory is available (e.g. from OCI extraction), copy all files
-		if res.SourceDir != "" {
-			as.logger.Info("copying extracted algorithm directory", "src", res.SourceDir, "dst", currentDir)
-			// Simple recursive copy (using shell cp for simplicity and reliability on Linux)
-			// Ensure we copy contents of SourceDir into currentDir
-			// Simple recursive copy (using shell cp for simplicity and reliability on Linux)
-			// Ensure we copy contents of SourceDir into currentDir
-			cmd := exec.Command("cp", "-r", res.SourceDir+"/.", currentDir)
-			if out, err := cmd.CombinedOutput(); err != nil {
-				as.runError = fmt.Errorf("error copying algorithm directory: %v, output: %s", err, out)
-				as.logger.Error(as.runError.Error())
-				as.sm.SendEvent(RunFailed)
-				return
-			}
+		if err := ensurePrivateDirectory(algorithm.DatasetsDir); err != nil {
+			as.runError = fmt.Errorf("error creating datasets directory: %w", err)
+			as.logger.Error(as.runError.Error())
+			as.sm.SendEvent(RunFailed)
+			return
 		}
-
-		f, err := os.Create(filepath.Join(currentDir, "algo"))
-		if err != nil {
+		if err := writePrivateFile(filepath.Join(currentDir, "algo"), res.Data, algoFilePermission); err != nil {
 			as.runError = fmt.Errorf("error creating algorithm file: %w", err)
 			as.logger.Error(as.runError.Error())
 			as.sm.SendEvent(RunFailed)
 			return
 		}
 
-		if _, err := f.Write(res.Data); err != nil {
-			as.runError = fmt.Errorf("error writing algorithm to file: %w", err)
-			as.logger.Error(as.runError.Error())
-			f.Close()
-			as.sm.SendEvent(RunFailed)
-			return
-		}
-
-		if err := os.Chmod(f.Name(), algoFilePermission); err != nil {
-			as.runError = fmt.Errorf("error changing file permissions: %w", err)
-			as.logger.Error(as.runError.Error())
-			f.Close()
-			as.sm.SendEvent(RunFailed)
-			return
-		}
-
-		if err := f.Close(); err != nil {
-			as.runError = fmt.Errorf("error closing file: %w", err)
-			as.logger.Error(as.runError.Error())
-			as.sm.SendEvent(RunFailed)
-			return
-		}
-
 		as.algoReceived = true
-		as.algoRequirements = res.Requirements // Store requirements for installation
+		as.algoRequirements = append([]byte(nil), res.Requirements...)
 
-		// Create datasets directory
-		if err := os.Mkdir(algorithm.DatasetsDir, 0o755); err != nil {
-			as.runError = fmt.Errorf("error creating datasets directory: %w", err)
-			as.logger.Error(as.runError.Error())
-			as.sm.SendEvent(RunFailed)
-			return
-		}
-
-		as.algoType = as.computation.Algorithm.AlgoType
-		if as.algoType == "" {
-			as.algoType = string(algorithm.AlgoTypeBin)
-		}
+		as.algoType = algoType
 		as.algoArgs = as.computation.Algorithm.AlgoArgs
 
 		as.logger.Info("algorithm downloaded and saved successfully", "type", as.algoType, "has_requirements", len(res.Requirements) > 0)
@@ -499,6 +510,12 @@ func (as *agentService) downloadDatasetsIfRemote(state statemachine.State) {
 		// No remote datasets, wait for direct uploads via Data() RPC calls
 		return
 	}
+	if err := ensurePrivateDirectory(algorithm.DatasetsDir); err != nil {
+		as.runError = fmt.Errorf("error creating datasets directory: %w", err)
+		as.logger.Error(as.runError.Error())
+		as.sm.SendEvent(RunFailed)
+		return
+	}
 
 	// Download all remote datasets
 	ctx := context.Background()
@@ -514,6 +531,11 @@ func (as *agentService) downloadDatasetsIfRemote(state statemachine.State) {
 				as.sm.SendEvent(RunFailed)
 				return
 			}
+			defer func(resource *DecryptedResource) {
+				if err := resource.Close(); err != nil {
+					as.logger.Warn("failed to remove private OCI workspace", "error", err)
+				}
+			}(res)
 
 			// Verify hash
 			hash := sha3.Sum256(res.Data)
@@ -539,23 +561,9 @@ func (as *agentService) downloadDatasetsIfRemote(state statemachine.State) {
 					as.sm.SendEvent(RunFailed)
 					return
 				}
-				f, err := os.Create(datasetPath)
-				if err != nil {
+				if err := writePrivateFile(datasetPath, res.Data, datasetFilePermission); err != nil {
 					as.runError = fmt.Errorf("error creating dataset file: %w", err)
 					as.logger.Error("error creating dataset file", "error", err, "filename", d.Filename)
-					as.sm.SendEvent(RunFailed)
-					return
-				}
-				if _, err := f.Write(res.Data); err != nil {
-					as.runError = fmt.Errorf("error writing dataset to file: %w", err)
-					as.logger.Error("error writing dataset to file", "error", err, "filename", d.Filename)
-					f.Close()
-					as.sm.SendEvent(RunFailed)
-					return
-				}
-				if err := f.Close(); err != nil {
-					as.runError = fmt.Errorf("error closing dataset file: %w", err)
-					as.logger.Error("error closing file", "error", err, "filename", d.Filename)
 					as.sm.SendEvent(RunFailed)
 					return
 				}
@@ -580,6 +588,18 @@ type DecryptedResource struct {
 	Data         []byte
 	Requirements []byte
 	SourceDir    string
+	workspace    string
+}
+
+// Close removes the private plaintext workspace owned by this resource.
+// It is safe to call more than once.
+func (r *DecryptedResource) Close() error {
+	if r == nil || r.workspace == "" {
+		return nil
+	}
+	workspace := r.workspace
+	r.workspace = ""
+	return os.RemoveAll(workspace)
 }
 
 // downloadAndDecryptResource downloads and decrypts a resource using OCI images and CoCo Keyprovider.
@@ -622,11 +642,19 @@ func (as *agentService) downloadAndDecryptOCIImage(ctx context.Context, source *
 		KBSResourcePath: source.KBSResourcePath,
 	}
 
-	// Pull and decrypt image
-	// CoCo Keyprovider will automatically handle decryption via ocicrypt
-	// Sanitize directory name to avoid Skopeo interpreting ':' as tag separator
-	sanitizedName := strings.ReplaceAll(filepath.Base(source.URL), ":", "_")
-	destDir := filepath.Join(os.TempDir(), "agents-secure-binding-oci", "images", sanitizedName)
+	// Pull and decrypt into an operation-private directory. The returned
+	// resource owns this plaintext workspace and every caller must close it.
+	workspace, err := os.MkdirTemp("", "agents-secure-binding-oci-")
+	if err != nil {
+		return nil, fmt.Errorf("failed to create private OCI workspace: %w", err)
+	}
+	cleanup := true
+	defer func() {
+		if cleanup {
+			_ = os.RemoveAll(workspace)
+		}
+	}()
+	destDir := filepath.Join(workspace, "image")
 	if err := as.ociClient.PullAndDecrypt(ctx, ociSource, destDir); err != nil {
 		return nil, fmt.Errorf("failed to pull and decrypt OCI image: %w", err)
 	}
@@ -634,17 +662,16 @@ func (as *agentService) downloadAndDecryptOCIImage(ctx context.Context, source *
 	as.logger.Info("OCI image downloaded and decrypted", "dest", destDir)
 
 	// Extract algorithm file from OCI layers
-	extractDir := filepath.Join(os.TempDir(), "agents-secure-binding-oci", "extracted", sanitizedName)
+	extractDir := filepath.Join(workspace, "extracted")
 	var algorithmPath string
 	var requirementsPath string
-	var err error
 
 	var files []string
 	if resourceType == "algorithm" {
 		if as.computation.Algorithm.AlgoType == string(algorithm.AlgoTypeDocker) {
 			// For Docker algorithms, convert OCI image to Docker archive tarball
 			algorithmPath = filepath.Join(extractDir, "image.tar")
-			if err := os.MkdirAll(extractDir, 0o755); err != nil {
+			if err := os.MkdirAll(extractDir, 0o700); err != nil {
 				return nil, fmt.Errorf("failed to create extract directory: %w", err)
 			}
 			if err := as.ociClient.ToDockerArchive(ctx, destDir, algorithmPath); err != nil {
@@ -656,6 +683,9 @@ func (as *agentService) downloadAndDecryptOCIImage(ctx context.Context, source *
 			algorithmPath, requirementsPath, err = oci.ExtractAlgorithm(ctx, as.logger, destDir, extractDir, as.computation.Algorithm.AlgoType)
 			if err != nil {
 				return nil, fmt.Errorf("failed to extract algorithm from OCI image: %w", err)
+			}
+			if err := validateSingleFileAlgorithmPackage(extractDir, algorithmPath, requirementsPath); err != nil {
+				return nil, err
 			}
 			as.logger.Info("algorithm extracted from OCI image", "path", algorithmPath)
 			files = []string{algorithmPath}
@@ -710,11 +740,32 @@ func (as *agentService) downloadAndDecryptOCIImage(ctx context.Context, source *
 
 	as.logger.Info("resource loaded from OCI", "type", resourceType, "size", len(resourceData), "hash_path", hashPath)
 
+	cleanup = false
 	return &DecryptedResource{
 		Data:         resourceData,
 		Requirements: reqData,
 		SourceDir:    extractDir,
+		workspace:    workspace,
 	}, nil
+}
+
+func validateSingleFileAlgorithmPackage(root, algorithmPath, requirementsPath string) error {
+	allowed := map[string]struct{}{filepath.Clean(algorithmPath): {}}
+	if requirementsPath != "" {
+		allowed[filepath.Clean(requirementsPath)] = struct{}{}
+	}
+	return filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		if _, ok := allowed[filepath.Clean(path)]; !ok {
+			return fmt.Errorf("OCI algorithm package contains unsupported runtime file %q; only one program and optional requirements.txt are committed", path)
+		}
+		return nil
+	})
 }
 
 func (as *agentService) Algo(ctx context.Context, algo Algorithm) error {
@@ -728,6 +779,7 @@ func (as *agentService) Algo(ctx context.Context, algo Algorithm) error {
 	}
 
 	var algoData []byte
+	var requirements []byte
 
 	// Check if algorithm should be downloaded from remote source
 	if as.computation.Algorithm.Source != nil && as.computation.KBS.Enabled {
@@ -737,17 +789,27 @@ func (as *agentService) Algo(ctx context.Context, algo Algorithm) error {
 		if err != nil {
 			return fmt.Errorf("failed to download and decrypt algorithm: %w", err)
 		}
+		defer func() {
+			if err := res.Close(); err != nil {
+				as.logger.Warn("failed to remove private OCI workspace", "error", err)
+			}
+		}()
 
 		algoData = res.Data
-		as.algoRequirements = res.Requirements
+		requirements = res.Requirements
 	} else {
 		// Use directly uploaded algorithm
 		algoData = algo.Algorithm
+		requirements = algo.Requirements
 	}
 
-	hash := sha3.Sum256(algoData)
-
-	if hash != as.computation.Algorithm.Hash {
+	expectedType := normalizedAlgorithmType(as.computation.Algorithm.AlgoType)
+	receivedType := normalizedAlgorithmType(algorithm.AlgorithmTypeFromContext(ctx))
+	receivedArgs := algorithm.AlgorithmArgsFromContext(ctx)
+	if receivedType != expectedType || !slices.Equal(receivedArgs, as.computation.Algorithm.AlgoArgs) {
+		return ErrHashMismatch
+	}
+	if !algorithmCommitmentMatches(as.computation.Algorithm.Hash, expectedType, as.computation.Algorithm.AlgoArgs, algoData, requirements) {
 		return ErrHashMismatch
 	}
 
@@ -756,38 +818,17 @@ func (as *agentService) Algo(ctx context.Context, algo Algorithm) error {
 		return fmt.Errorf("error getting current directory: %v", err)
 	}
 
-	f, err := os.Create(filepath.Join(currentDir, "algo"))
-	if err != nil {
+	if err := ensurePrivateDirectory(algorithm.DatasetsDir); err != nil {
+		return fmt.Errorf("error creating datasets directory: %v", err)
+	}
+	if err := writePrivateFile(filepath.Join(currentDir, "algo"), algoData, algoFilePermission); err != nil {
 		return fmt.Errorf("error creating algorithm file: %v", err)
 	}
 
-	if _, err := f.Write(algoData); err != nil {
-		return fmt.Errorf("error writing algorithm to file: %v", err)
-	}
-
-	if err := os.Chmod(f.Name(), algoFilePermission); err != nil {
-		return fmt.Errorf("error changing file permissions: %v", err)
-	}
-
-	if err := f.Close(); err != nil {
-		return fmt.Errorf("error closing file: %v", err)
-	}
-
-	algoType := algorithm.AlgorithmTypeFromContext(ctx)
-	if algoType == "" {
-		algoType = string(algorithm.AlgoTypeBin)
-	}
-
-	args := algorithm.AlgorithmArgsFromContext(ctx)
-
-	as.algoType = algoType
-	as.algoArgs = args
-	as.algoRequirements = algo.Requirements
+	as.algoType = expectedType
+	as.algoArgs = append([]string(nil), as.computation.Algorithm.AlgoArgs...)
+	as.algoRequirements = append([]byte(nil), requirements...)
 	as.algoReceived = true
-
-	if err := os.Mkdir(algorithm.DatasetsDir, 0o755); err != nil {
-		return fmt.Errorf("error creating datasets directory: %v", err)
-	}
 
 	if as.algoReceived {
 		as.sm.SendEvent(AlgorithmReceived)
@@ -819,6 +860,11 @@ func (as *agentService) Data(ctx context.Context, dataset Dataset) error {
 			if err != nil {
 				return fmt.Errorf("failed to download and decrypt dataset: %w", err)
 			}
+			defer func(resource *DecryptedResource) {
+				if err := resource.Close(); err != nil {
+					as.logger.Warn("failed to remove private OCI workspace", "error", err)
+				}
+			}(downloadedData)
 
 			datasetData = downloadedData.Data
 			datasetFilename = d.Filename
@@ -842,6 +888,9 @@ func (as *agentService) Data(ctx context.Context, dataset Dataset) error {
 				return ErrFileNameMismatch
 			}
 
+			if err := ensurePrivateDirectory(algorithm.DatasetsDir); err != nil {
+				return fmt.Errorf("error creating datasets directory: %v", err)
+			}
 			if DecompressFromContext(ctx) {
 				if err := internal.UnzipFromMemory(datasetData, algorithm.DatasetsDir); err != nil {
 					return fmt.Errorf("error decompressing dataset: %v", err)
@@ -851,16 +900,8 @@ func (as *agentService) Data(ctx context.Context, dataset Dataset) error {
 				if err != nil {
 					return err
 				}
-				f, err := os.Create(datasetPath)
-				if err != nil {
+				if err := writePrivateFile(datasetPath, datasetData, datasetFilePermission); err != nil {
 					return fmt.Errorf("error creating dataset file: %v", err)
-				}
-
-				if _, err := f.Write(datasetData); err != nil {
-					return fmt.Errorf("error writing dataset to file: %v", err)
-				}
-				if err := f.Close(); err != nil {
-					return fmt.Errorf("error closing file: %v", err)
 				}
 			}
 

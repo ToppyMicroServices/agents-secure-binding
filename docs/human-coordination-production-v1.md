@@ -24,9 +24,9 @@ The following are separate claims:
 
 | Capability | Required profile | Current repository evidence |
 | --- | --- | --- |
-| Task Participant and TaskCoord state | `asb.human-coordination.core/v1` | In-memory reference behavior; Redis/Valkey candidate tested against a protocol test double |
-| Human TLS ingress | `asb.human-coordination.http/v1` | Repository-local TLS 1.3/mTLS implementation and tests |
-| Task–Action binding | `asb.human-coordination.task-action/v1` | In-process reference Store only |
+| Task Participant and TaskCoord state | `asb.human-coordination.core/v1` | Reference behavior; Redis/Valkey protocol tests; bounded single-host SQLite adapter with restart and multiprocess tests |
+| Human TLS ingress | `asb.human-coordination.http/v1` | TLS 1.3/mTLS and all four operation recovery paths tested with SQLite |
+| Task–Action binding | `asb.human-coordination.task-action/v1` | Reference Store and single-host SQLite implementation of the complete Store interface |
 | Agent-to-Human relay | `asb.human-coordination.relay/v1` | In-process Store and local gateway sink only |
 | Production overlay | `asb.human-coordination.production/v1` | Unavailable; live qualification and production adapters are incomplete |
 
@@ -119,7 +119,10 @@ qualification.
 - reconciliation of unknown executor outcomes; and
 - operational qualification of every selected wait and recovery mode.
 
-No production Task–Action Store is implemented in this repository.
+The [SQLite adapter](taskcoord-sqlite-store.md) implements the complete Store
+contract for a bounded single-host deployment. Local transaction and recovery
+tests are available; a production declaration still requires the selected
+deployment's operational qualification.
 
 ### Agent-to-Human relay
 

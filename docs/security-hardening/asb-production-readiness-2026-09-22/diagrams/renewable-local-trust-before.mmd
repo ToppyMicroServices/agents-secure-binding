@@ -1,0 +1,8 @@
+flowchart LR
+  Init[init] --> CA[Ephemeral CA key]
+  CA --> Certs[One-year fixed certificates]
+  Init --> T[Persistent ui-token]
+  Certs --> App[Local approval app]
+  T --> App
+  DB[(state.db and receipts)] --> App
+  Expiry[Expiry or token exposure] --> Block[New directory or service failure]

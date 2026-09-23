@@ -91,9 +91,9 @@ func ingressFailureForCode(code IngressErrorCode) ingressFailure {
 
 func ingressCodeForError(err error) IngressErrorCode {
 	switch {
-	case errors.Is(err, taskcoord.ErrNotFound):
+	case errors.Is(err, taskcoord.ErrNotFound), errors.Is(err, ErrHumanOutcomeNotFound):
 		return IngressCodeNotFound
-	case errors.Is(err, taskcoord.ErrRevisionConflict),
+	case errors.Is(err, ErrHumanOutcomeConflict), errors.Is(err, taskcoord.ErrRevisionConflict),
 		errors.Is(err, taskcoord.ErrEventConflict),
 		errors.Is(err, taskcoord.ErrAlreadyExists),
 		errors.Is(err, taskcoord.ErrInvalidTransition),

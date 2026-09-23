@@ -1,0 +1,7 @@
+flowchart LR
+  Requests[Authenticated commands] --> DB[(SQLite online state)]
+  DB --> O[5000 operations]
+  DB --> M[10000 mutation results]
+  DB --> R[100000 live replay records]
+  O --> Full[Fail closed at capacity]
+  M --> Full

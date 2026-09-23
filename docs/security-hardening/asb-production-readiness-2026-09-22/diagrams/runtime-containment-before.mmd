@@ -1,0 +1,9 @@
+flowchart LR
+  Admin[Operator/root] --> AU[Agent systemd unit]
+  Admin --> RU[Runner systemd unit]
+  AU -->|Unix socket| S[(runner.sock 0600)]
+  RU --> S
+  RU --> C[Computation process]
+  C --> D[Descendants]
+  W[Windows stop] -->|kills direct PID| C
+  D -.may survive.-> Sink[CPU, files, network capability]

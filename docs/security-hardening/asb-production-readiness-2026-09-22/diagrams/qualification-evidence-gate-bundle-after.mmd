@@ -1,0 +1,8 @@
+flowchart LR
+  Source[Commit and dirty-state check] --> Harness[Qualification harness]
+  Env[OS, kernel, filesystem, browser, hardware] --> Harness
+  Harness --> Tests[Mandatory profile tests]
+  Tests --> Bundle[Signed manifest, logs, hashes, results]
+  Bundle --> Gate{All mandatory checks pass?}
+  Gate -->|yes| Claim[Profile-specific qualified result]
+  Gate -->|no or unavailable| Unqualified[Remain unqualified]

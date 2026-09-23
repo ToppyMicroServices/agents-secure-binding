@@ -8,10 +8,12 @@
     { "$ref": "#/$defs/challengeTransition" },
     { "$ref": "#/$defs/challengeDelegation" },
     { "$ref": "#/$defs/challengeInteraction" },
+    { "$ref": "#/$defs/challengeRecovery" },
     { "$ref": "#/$defs/executeOffer" },
     { "$ref": "#/$defs/executeTransition" },
     { "$ref": "#/$defs/executeDelegation" },
-    { "$ref": "#/$defs/executeInteraction" }
+    { "$ref": "#/$defs/executeInteraction" },
+    { "$ref": "#/$defs/executeRecovery" }
   ],
   "$defs": {
     "challengeEnvelope": {
@@ -19,7 +21,8 @@
         { "$ref": "#/$defs/challengeOffer" },
         { "$ref": "#/$defs/challengeTransition" },
         { "$ref": "#/$defs/challengeDelegation" },
-        { "$ref": "#/$defs/challengeInteraction" }
+        { "$ref": "#/$defs/challengeInteraction" },
+        { "$ref": "#/$defs/challengeRecovery" }
       ]
     },
     "executeEnvelope": {
@@ -371,6 +374,82 @@
             "request": { "$ref": "#/$defs/interaction" },
             "grant_jwt": { "type": "string", "minLength": 1, "maxLength": 262144 },
             "session_binding_jwt": { "type": "string", "minLength": 1, "maxLength": 262144 }
+          }
+        }
+      ]
+    },
+    "recovery": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "participant_id",
+        "operation_id",
+        "request_digest"
+      ],
+      "properties": {
+        "participant_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "operation_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "request_digest": {
+          "$ref": "#/$defs/digest"
+        }
+      }
+    },
+    "challengeRecovery": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "operation",
+        "request"
+      ],
+      "properties": {
+        "operation": {
+          "const": "OPERATION_RECOVER"
+        },
+        "request": {
+          "$ref": "#/$defs/recovery"
+        }
+      }
+    },
+    "executeRecovery": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/executeBase"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "challenge_id",
+            "operation",
+            "request",
+            "grant_jwt",
+            "session_binding_jwt"
+          ],
+          "properties": {
+            "challenge_id": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "operation": {
+              "const": "OPERATION_RECOVER"
+            },
+            "request": {
+              "$ref": "#/$defs/recovery"
+            },
+            "grant_jwt": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 262144
+            },
+            "session_binding_jwt": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 262144
+            }
           }
         }
       ]

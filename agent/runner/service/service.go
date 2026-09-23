@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"path/filepath"
 	"sync"
 
 	"github.com/ToppyMicroServices/agents-secure-binding/v2/agent/algorithm"
@@ -26,11 +25,17 @@ const (
 
 var _ pb.ComputationRunnerServer = (*RunnerService)(nil)
 
+var createAlgorithmFile = os.CreateTemp
+
 type RunnerService struct {
 	pb.UnimplementedComputationRunnerServer
 	logger      *slog.Logger
 	eventSvc    events.Service
 	currentAlgo algorithm.Algorithm
+	currentID   string
+	running     bool
+	cancelled   bool
+	done        chan struct{}
 	mu          sync.Mutex
 }
 
@@ -42,19 +47,34 @@ func New(logger *slog.Logger, eventSvc events.Service) *RunnerService {
 }
 
 func (s *RunnerService) Run(ctx context.Context, req *pb.RunRequest) (*pb.RunResponse, error) {
+	if req == nil {
+		return nil, fmt.Errorf("missing run request")
+	}
 	s.mu.Lock()
-	if s.currentAlgo != nil {
+	if s.running {
 		s.mu.Unlock()
 		return &pb.RunResponse{
 			ComputationId: req.ComputationId,
 			Error:         "computation already running",
 		}, nil
 	}
+	s.running = true
+	s.cancelled = false
+	s.currentID = req.ComputationId
+	s.done = make(chan struct{})
+	done := s.done
 	s.mu.Unlock()
 
 	defer func() {
 		s.mu.Lock()
 		s.currentAlgo = nil
+		s.currentID = ""
+		s.running = false
+		s.cancelled = false
+		if s.done == done {
+			close(done)
+			s.done = nil
+		}
 		s.mu.Unlock()
 	}()
 
@@ -63,27 +83,29 @@ func (s *RunnerService) Run(ctx context.Context, req *pb.RunRequest) (*pb.RunRes
 		return nil, fmt.Errorf("error getting current directory: %v", err)
 	}
 
-	// Write Algo File
-	algoPath := filepath.Join(currentDir, "algo")
-	f, err := os.Create(algoPath)
+	// Use a private per-run executable so preparation from one request cannot
+	// overwrite or remove another request's code.
+	f, err := createAlgorithmFile(currentDir, ".asb-algo-*")
 	if err != nil {
 		return nil, fmt.Errorf("error creating algorithm file: %v", err)
 	}
+	algoPath := f.Name()
+	defer func() {
+		if err := os.Remove(algoPath); err != nil && !os.IsNotExist(err) {
+			s.logger.Warn("error removing algorithm file", "error", err)
+		}
+	}()
 	if _, err := f.Write(req.Algorithm); err != nil {
+		_ = f.Close()
 		return nil, fmt.Errorf("error writing algorithm to file: %v", err)
 	}
 	if err := os.Chmod(algoPath, algoFilePermission); err != nil {
+		_ = f.Close()
 		return nil, fmt.Errorf("error changing file permissions: %v", err)
 	}
 	if err := f.Close(); err != nil {
 		return nil, fmt.Errorf("error closing file: %v", err)
 	}
-	defer func() {
-		if err := os.Remove(algoPath); err != nil {
-			s.logger.Warn("error removing algorithm file", "error", err)
-		}
-	}()
-
 	var algo algorithm.Algorithm
 
 	switch req.AlgoType {
@@ -102,6 +124,7 @@ func (s *RunnerService) Run(ctx context.Context, req *pb.RunRequest) (*pb.RunRes
 				}
 			}()
 			if _, err := fr.Write(req.Requirements); err != nil {
+				_ = fr.Close()
 				return nil, fmt.Errorf("error writing requirements to file: %v", err)
 			}
 			if err := fr.Close(); err != nil {
@@ -122,6 +145,10 @@ func (s *RunnerService) Run(ctx context.Context, req *pb.RunRequest) (*pb.RunRes
 	}
 
 	s.mu.Lock()
+	if s.cancelled {
+		s.mu.Unlock()
+		return &pb.RunResponse{ComputationId: req.ComputationId, Error: algorithm.ErrStopped.Error()}, nil
+	}
 	s.currentAlgo = algo
 	s.mu.Unlock()
 
@@ -140,12 +167,32 @@ func (s *RunnerService) Run(ctx context.Context, req *pb.RunRequest) (*pb.RunRes
 
 func (s *RunnerService) Stop(ctx context.Context, req *pb.StopRequest) (*emptypb.Empty, error) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
+	if !s.running && s.currentAlgo == nil {
+		s.mu.Unlock()
+		return &emptypb.Empty{}, nil
+	}
+	if req != nil && req.ComputationId != "" && s.currentID != "" && req.ComputationId != s.currentID {
+		s.mu.Unlock()
+		return nil, fmt.Errorf("computation %q is not running", req.ComputationId)
+	}
+	s.cancelled = true
+	algo := s.currentAlgo
+	done := s.done
+	s.mu.Unlock()
 
-	if s.currentAlgo != nil {
-		if err := s.currentAlgo.Stop(); err != nil {
-			return nil, err
+	var stopErr error
+	if algo != nil {
+		stopErr = algo.Stop()
+	}
+	if done != nil {
+		select {
+		case <-done:
+		case <-ctx.Done():
+			return nil, ctx.Err()
 		}
+	}
+	if stopErr != nil {
+		return nil, stopErr
 	}
 	return &emptypb.Empty{}, nil
 }

@@ -12,8 +12,11 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
+
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/internal/safearchive"
 )
 
 // OCILayout represents the OCI image layout.
@@ -73,6 +76,11 @@ func ExtractAlgorithm(ctx context.Context, logger *slog.Logger, ociDir, destPath
 	var algorithmPath string
 	var requirementsPath string
 	var allSeenFiles []string
+	extractionRoot, err := safearchive.OpenRoot(destPath, 0o700)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to open extraction root: %w", err)
+	}
+	defer extractionRoot.Close()
 
 	// Process layers in reverse order (top layers first)
 	for i := len(manifest.Layers) - 1; i >= 0; i-- {
@@ -80,7 +88,7 @@ func ExtractAlgorithm(ctx context.Context, logger *slog.Logger, ociDir, destPath
 		layerPath := filepath.Join(ociDir, "blobs", strings.Replace(layer.Digest, ":", "/", 1))
 
 		// Try to extract and find algorithm file
-		algoP, reqP, seenFiles, err := extractLayerAndFindAlgorithm(logger, layerPath, destPath, algoType)
+		algoP, reqP, seenFiles, err := extractLayerAndFindAlgorithm(logger, layerPath, extractionRoot, destPath, algoType)
 		if len(seenFiles) > 0 {
 			allSeenFiles = append(allSeenFiles, seenFiles...)
 		}
@@ -111,7 +119,7 @@ func ExtractAlgorithm(ctx context.Context, logger *slog.Logger, ociDir, destPath
 }
 
 // extractLayerAndFindAlgorithm extracts a layer and searches for algorithm files.
-func extractLayerAndFindAlgorithm(logger *slog.Logger, layerPath, destPath, algoType string) (string, string, []string, error) {
+func extractLayerAndFindAlgorithm(logger *slog.Logger, layerPath string, root *os.Root, destPath, algoType string) (string, string, []string, error) {
 	// Open layer file
 	layerFile, err := os.Open(layerPath)
 	if err != nil {
@@ -144,8 +152,9 @@ func extractLayerAndFindAlgorithm(logger *slog.Logger, layerPath, destPath, algo
 
 		logger.Debug("inspecting file in layer", "name", header.Name, "type", header.Typeflag)
 
-		// Skip directories
-		if header.Typeflag == tar.TypeDir {
+		// Only regular files are executable or dependency inputs. Do not
+		// reinterpret archive links or special files as regular files.
+		if header.Typeflag != tar.TypeReg && header.Typeflag != tar.TypeRegA {
 			continue
 		}
 
@@ -156,29 +165,20 @@ func extractLayerAndFindAlgorithm(logger *slog.Logger, layerPath, destPath, algo
 		isReq := filepath.Base(header.Name) == "requirements.txt"
 
 		if isAlgo || isReq {
-			// Extract to destination, preserving directory structure
-			// Clean the name to prevent path traversal
-			cleanName := filepath.Clean(header.Name)
-			if strings.HasPrefix(cleanName, "..") || strings.HasPrefix(cleanName, "/") {
+			cleanName, ok := cleanOCIEntryName(header.Name)
+			if !ok {
 				continue
 			}
 
 			targetPath := filepath.Join(destPath, cleanName)
 
-			if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
-				return "", "", seenFiles, fmt.Errorf("failed to create dir: %w", err)
+			mode := os.FileMode(0o600)
+			if isAlgo {
+				mode = 0o700
 			}
-
-			outFile, err := os.OpenFile(targetPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, os.FileMode(header.Mode))
-			if err != nil {
-				return "", "", seenFiles, fmt.Errorf("failed to create file: %w", err)
-			}
-
-			if _, err := io.Copy(outFile, tarReader); err != nil {
-				outFile.Close()
+			if err := safearchive.WriteFile(root, cleanName, mode, tarReader); err != nil {
 				return "", "", seenFiles, fmt.Errorf("failed to write file: %w", err)
 			}
-			outFile.Close()
 
 			if isAlgo && algorithmPath == "" {
 				algorithmPath = targetPath
@@ -270,6 +270,11 @@ func ExtractDataset(ociDir, destPath string) ([]string, error) {
 	}
 
 	var datasetFiles []string
+	extractionRoot, err := safearchive.OpenRoot(destPath, 0o700)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open extraction root: %w", err)
+	}
+	defer extractionRoot.Close()
 
 	// Extract all layers and collect dataset files
 	// Iterate layers in reverse order to find user data first (usually in top layers)
@@ -277,7 +282,7 @@ func ExtractDataset(ociDir, destPath string) ([]string, error) {
 		layer := manifest.Layers[i]
 		layerPath := filepath.Join(ociDir, "blobs", strings.Replace(layer.Digest, ":", "/", 1))
 
-		files, err := extractLayerDataFiles(layerPath, destPath)
+		files, err := extractLayerDataFiles(layerPath, extractionRoot, destPath)
 		if err != nil {
 			slog.Warn("error extracting layer", "digest", layer.Digest, "error", err)
 			continue
@@ -293,7 +298,7 @@ func ExtractDataset(ociDir, destPath string) ([]string, error) {
 }
 
 // extractLayerDataFiles extracts data files from a layer.
-func extractLayerDataFiles(layerPath, destPath string) ([]string, error) {
+func extractLayerDataFiles(layerPath string, root *os.Root, destPath string) ([]string, error) {
 	layerFile, err := os.Open(layerPath)
 	if err != nil {
 		return nil, err
@@ -318,40 +323,39 @@ func extractLayerDataFiles(layerPath, destPath string) ([]string, error) {
 			return nil, err
 		}
 
-		if header.Typeflag == tar.TypeDir {
+		if header.Typeflag != tar.TypeReg && header.Typeflag != tar.TypeRegA {
 			continue
 		}
 
 		// Check if this is a data file
 		if isDataFile(header.Name) {
-			// Extract to destination, preserving directory structure
-			cleanName := filepath.Clean(header.Name)
-			if strings.HasPrefix(cleanName, "..") || strings.HasPrefix(cleanName, "/") {
+			cleanName, ok := cleanOCIEntryName(header.Name)
+			if !ok {
 				continue
 			}
 
 			targetPath := filepath.Join(destPath, cleanName)
 
-			if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
+			if err := safearchive.WriteFile(root, cleanName, 0o600, tarReader); err != nil {
 				return nil, err
 			}
-
-			outFile, err := os.OpenFile(targetPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, os.FileMode(header.Mode))
-			if err != nil {
-				return nil, err
-			}
-
-			if _, err := io.Copy(outFile, tarReader); err != nil {
-				outFile.Close()
-				return nil, err
-			}
-			outFile.Close()
 
 			extractedFiles = append(extractedFiles, targetPath)
 		}
 	}
 
 	return extractedFiles, nil
+}
+
+func cleanOCIEntryName(name string) (string, bool) {
+	if name == "" || strings.Contains(name, "\x00") || strings.Contains(name, "\\") || path.IsAbs(name) {
+		return "", false
+	}
+	cleanName := path.Clean(name)
+	if cleanName == "." || cleanName == ".." || strings.HasPrefix(cleanName, "../") {
+		return "", false
+	}
+	return filepath.FromSlash(cleanName), true
 }
 
 // isDataFile checks if a file is likely a dataset file.

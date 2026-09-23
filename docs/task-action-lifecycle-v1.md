@@ -229,9 +229,13 @@ multi-record atomicity, CAS, event deduplication, and dependency TOCTOU
 rejection under one process lock. It is not restart-durable and is not a
 production database implementation.
 
-This repository supplies the state machines, application service, reference
-adapter, and Store contract. It does not claim a production database adapter,
-replication, outbox delivery, or disaster recovery implementation.
+`sqlitestore.Store` implements the complete Store contract using a shared local
+SQLite transaction with TaskCoord. Current Assignments come from the same
+transaction, including revocation state. Tests cover restart, concurrent
+processes, failure, lease expiry and reconciliation. See the
+[adapter guide](taskcoord-sqlite-store.md) for capacity, backup/restore and
+external-effect limits. Managed replication and production qualification remain
+separate from this single-host implementation.
 
 ## Security boundary
 

@@ -4,9 +4,12 @@ package algorithm
 
 import (
 	"context"
+	"errors"
 
 	"google.golang.org/grpc/metadata"
 )
+
+var ErrStopped = errors.New("algorithm stopped")
 
 type AlgorithType string
 

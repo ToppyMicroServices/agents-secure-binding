@@ -36,8 +36,11 @@ func NewSkopeoClient(workDir string) (*SkopeoClient, error) {
 	if err != nil {
 		return nil, fmt.Errorf("skopeo not found in PATH: %w", err)
 	}
-	if err := os.MkdirAll(workDir, 0o755); err != nil {
+	if err := os.MkdirAll(workDir, 0o700); err != nil {
 		return nil, fmt.Errorf("failed to create work directory: %w", err)
+	}
+	if err := os.Chmod(workDir, 0o700); err != nil {
+		return nil, fmt.Errorf("failed to restrict work directory: %w", err)
 	}
 	return &SkopeoClient{skopeoPath: skopeoPath, workDir: workDir}, nil
 }
@@ -50,7 +53,7 @@ func (s *SkopeoClient) PullAndDecrypt(ctx context.Context, source ResourceSource
 	if destDir == "" {
 		return fmt.Errorf("oci destination directory is empty")
 	}
-	if err := os.MkdirAll(destDir, 0o755); err != nil {
+	if err := os.MkdirAll(destDir, 0o700); err != nil {
 		return fmt.Errorf("failed to create destination directory: %w", err)
 	}
 	return s.run(ctx, "skopeo copy failed", s.pullAndDecryptArgs(source, destDir))

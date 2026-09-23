@@ -5,6 +5,16 @@ Requires=log-forwarder.service computation-runner.service egress-proxy.service c
 Before=docker.service
 
 [Service]
+User=asb
+Group=asb
+UMask=0077
+LogsDirectory=agents-secure-binding
+LogsDirectoryMode=0750
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
 WorkingDirectory=/agents-secure-binding
 Environment="HTTP_PROXY=http://localhost:3128"
 Environment="HTTPS_PROXY=http://localhost:3128"

@@ -184,8 +184,11 @@ deduplication、dependency TOCTOU rejectionを検証するreference adapterで�
 restart durabilityを持たず、production database implementationではない。
 
 本repositoryはstate machine、application service、reference adapter、Store
-contractを実装する。production database adapter、replication、outbox、disaster
-recoveryを実装済みとは主張しない。
+contractを実装する。また、`sqlitestore.Store`は単一hostのSQLiteでTaskCoordと共有するtransactionにより、
+Store interface全体を実装する。現在のAssignmentと撤回状態を同じtransactionから読み、
+再起動、複数process、保存失敗、lease期限、reconciliationをtestする。容量、backup/restore、
+外部effectの境界は[adapter guide](taskcoord-sqlite-store.md)に記載する。
+managed replicationとproduction qualificationは別途必要な検証として残る。
 
 ## 7. JSON Schemaとsemantic validation
 

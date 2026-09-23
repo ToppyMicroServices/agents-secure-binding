@@ -1,0 +1,8 @@
+flowchart LR
+  Controller[Rotation controller] --> New[New CA and leaf generation]
+  Old[Old generation] --> Bundle[Overlapping trust bundle]
+  New --> Bundle
+  Bundle --> Nodes[Running app, agent, gateway]
+  Nodes --> Ack[Generation acknowledgements]
+  Ack --> Retire[Retire old generation after deadline]
+  DB[(Unchanged state)] --> Nodes

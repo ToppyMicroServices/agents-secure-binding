@@ -3,8 +3,8 @@ SERVICES = manager cli attestation-service log-forwarder computation-runner egre
 DIRECT_AGENT_CORE_PKGS = ./pkg/atls/... ./pkg/clients/... ./pkg/agtp/... ./pkg/production
 ASB_CORE_PKGS = ./pkg/atls/... ./pkg/clients ./pkg/clients/http ./pkg/clients/grpc ./pkg/agtp/... ./pkg/tls
 PRODUCTION_CONSUMER_PKGS = ./examples/protected-change-consumer
-HUMAN_COORDINATION_PKGS = ./pkg/actionlifecycle ./pkg/humanrelay/... ./pkg/taskcoord/... ./pkg/production ./schemas ./examples/human-coordination-e2e
 HUMAN_COORDINATION_REDTEAM_PKGS = ./internal/strictjson ./pkg/actionlifecycle ./pkg/humanrelay/... ./pkg/operationjournal ./pkg/taskcoord/... ./pkg/production ./schemas
+HUMAN_COORDINATION_PKGS = $(HUMAN_COORDINATION_REDTEAM_PKGS) ./examples/human-coordination-e2e
 HUMAN_COORDINATION_FUZZTIME ?= 2m
 CGO_ENABLED ?= 0
 GOARCH ?= amd64
@@ -106,12 +106,14 @@ product-security-gate:
 
 human-coordination-gate:
 	python3 scripts/verify-action-transcript-v1.py
+	python3 scripts/verify-human-recovery-transcript-v1.py
 	GOWORK=off GOTOOLCHAIN=go1.26.6+auto go test -race -count=1 $(HUMAN_COORDINATION_PKGS)
 
 # Bounded, hardware-independent misuse gate. Long-running fuzz campaigns use
 # human-coordination-fuzz and are intentionally not dependencies of this target.
 human-coordination-red-team:
 	python3 scripts/verify-action-transcript-v1.py
+	python3 scripts/verify-human-recovery-transcript-v1.py
 	GOWORK=off GOTOOLCHAIN=go1.26.6+auto go test -v -race -count=1 $(HUMAN_COORDINATION_REDTEAM_PKGS)
 
 human-coordination-fuzz:

@@ -25,10 +25,11 @@ Human
   -> TaskCoord Store create / revision CAS / atomic delegation / immutable interaction append
 ```
 
-The ingress accepts the four `gateway-asserted-for-human` request kinds defined
+The ingress accepts the four `gateway-asserted-for-human` mutation kinds defined
 by the binding profile: `ASSIGNMENT_OFFER`, `ASSIGNMENT_TRANSITION`,
 `ASSIGNMENT_DELEGATION`, and `INTERACTION_APPEND`. Delegation is disabled unless
-the deployment configures a `DelegationDecisionVerifier`.
+the deployment configures a `DelegationDecisionVerifier`. A transactional store also
+enables `OPERATION_RECOVER` for separately authorized retrieval of a saved response.
 
 `gateway-asserted-for-human` means that the operation authority authorizes the
 gateway Actor, and the gateway proves possession and the exact TLS-bound
@@ -37,13 +38,14 @@ establish authenticated-Human evidence, Human liveness, UI confirmation, or
 legal consent. Audit systems must retain the distinct Actor and Participant
 identifiers and label this profile's assurance accordingly.
 
-このHTTP surfaceで実装済みなのは、次の2 endpointだけである。
+このHTTP surfaceは次のendpointを持つ。
 
 - `POST /v1/human-operations/challenge`: successは`201 Created`;
-- `POST /v1/human-operations/execute`: successは`200 OK`。
+- `POST /v1/human-operations/execute`: successは`200 OK`;
+- `POST /v1/human-operations/recover`: transactional storeを使う場合のみ有効。元の成功本文を`200 OK`で返す。
 
 Agent-to-Human relay専用endpointとAction lifecycle用endpointは実装していない。
-`pkg/humanrelay`と`pkg/actionlifecycle`の内部APIを、この2 endpointの一部として扱っては
+`pkg/humanrelay`と`pkg/actionlifecycle`の内部APIを、これらのendpointの一部として扱っては
 ならない。
 
 受付serviceは次をHTTP requestから取得しない。
@@ -232,14 +234,33 @@ replica acknowledgement有効時のidempotent retryは同一connection上のrepl
 
 ## Retry boundary
 
-ASB replay insertはTaskCoord Store commitの直前に行うが、両者は同じtransactionではない。
-execute応答またはStore commit結果が失われた場合、そのproofは再利用せず、結果をunknownとして
-trusted Store stateとevent historyからreconcileする。fresh proofによる同じeventのblind retryは、
-最初のcommitが成功していればrevision conflictまたはevent conflictになり得る。これは最初の
-operation失敗の証拠ではない。
+通常の`taskcoord.Store`だけを渡す場合、ASB replay insertとTaskCoord commitは
+別transactionになる。応答消失後はtrusted stateからreconcileし、同じeventをfresh proofで
+blind retryしない。conflictは最初のoperation失敗の証拠ではない。
 
-このdemoはrepositoryの`pkg/operationjournal`へ接続されておらず、外部向けstatus/read
-endpointも、cross-proof retryへ以前のresponseを返すapplication transactionもない。
-必要なdeploymentはrequest digestに束縛したreservationとresponseをTaskCoord mutationと
-atomicに保存する。このdemoはfail-closedを示すが、databaseとreplay stateをまたぐ
-exactly-onceまたはend-to-end idempotencyを主張しない。
+`pkg/taskcoord/sqlitestore.Open`のStoreを`Ingress.Store`へ渡すと、追加の
+`HumanTransactionStore` contractを使う。offer、transition、delegation、interactionの
+全てで、現在のParticipant確認、replay consume、TaskCoord mutation、outbox、最初の成功
+responseを同じtransactionで保存する。この構成では`Policy.ReplayCache`の代わりに
+transaction内のreplayを使う。transaction開始後にproof期限を再検査する。
+verifier callbackはこのtransactionを保持した状態で呼ばれるため、同じStoreへ再入してはならない。
+
+operation IDは元のrequestの`event_id`であり、Storeのrealm内でoperation種別をまたいで一意
+にする。request digestはchallenge responseでも取得できる。応答消失後は次の手順を使う。
+
+1. `operation: "OPERATION_RECOVER"`と、`participant_id`、元の`operation_id`、
+   元の`request_digest`を持つrequestでchallengeを取得する。
+2. recovery request専用の`RecoveryDigest`を認可するfresh grantと、そのchallengeの
+   TLS bindingを持つfresh session proofを作る。元のexecute grantは代用できない。
+3. 同じTLS connectionから`POST /v1/human-operations/recover`へexecute形式のenvelopeを送る。
+
+recoveryは現在のverifier policyとACTIVEなHumanを確認し、保存済みのHuman、gateway Actor、
+元のrequest digestとの一致を要求する。成功時は最初のresponse本文をそのまま返し、最初の
+proof provenanceを保持する。Assignmentを再実行せず、新しいoutbox eventも作らない。
+元のgrantが期限切れでも、現在有効なrecovery専用grantがあれば取得できる。current policyが
+recoveryを拒否した場合は返さない。元の成功を新しい承認や現在の実行権限と解釈してはならない。
+
+保存済みoperationへのexecute再送は`STATE_CONFLICT`となる。recoveryが`NOT_FOUND`でも
+元の実行を自動再送しない。commit結果不明時は同じoperation IDを保持する。
+SQLite adapterの対象は単一hostのlocal databaseであり、外部effectのexactly-once、multi-host
+failover、古いbackupへのrollback耐性を保証しない。

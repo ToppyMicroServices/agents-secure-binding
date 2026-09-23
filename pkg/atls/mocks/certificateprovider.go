@@ -5,6 +5,7 @@
 package mocks
 
 import (
+	"context"
 	"crypto/tls"
 	"crypto/x509"
 
@@ -14,6 +15,10 @@ import (
 
 type CertificateProvider struct {
 	mock.Mock
+}
+
+func (_m *CertificateProvider) BuildLeafExtensionsContext(_ context.Context, st *tls.ConnectionState, req *ea.AuthenticatorRequest, leaf *x509.Certificate) ([]ea.Extension, error) {
+	return _m.BuildLeafExtensions(st, req, leaf)
 }
 
 func (_m *CertificateProvider) BuildLeafExtensions(st *tls.ConnectionState, req *ea.AuthenticatorRequest, leaf *x509.Certificate) ([]ea.Extension, error) {

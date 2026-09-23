@@ -1,0 +1,22 @@
+{
+  "profileVersion": 1,
+  "id": "local-human-preview",
+  "claim": "Local Human approval runtime behavior on the recorded OS",
+  "targetOs": ["darwin", "linux", "windows"],
+  "checks": [
+    {
+      "id": "humanapp-tests",
+      "required": true,
+      "command": ["go", "test", "-count=1", "./internal/humanapp", "./cmd/asb-human"],
+      "timeoutSeconds": 600,
+      "environment": {"GOWORK": "off"}
+    },
+    {
+      "id": "humanapp-vet",
+      "required": true,
+      "command": ["go", "vet", "./internal/humanapp", "./cmd/asb-human"],
+      "timeoutSeconds": 600,
+      "environment": {"GOWORK": "off"}
+    }
+  ]
+}

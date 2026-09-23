@@ -1,0 +1,7 @@
+flowchart LR
+  Release[Immutable candidate] --> Lab[Independent controlled environment]
+  Policy[Published profile and acceptance policy] --> Lab
+  Lab --> Bundle[Reproducible evidence bundle]
+  Bundle --> Review[Independent review or attestation]
+  Review --> Claim[Time-bounded profile claim]
+  Drift[OS, firmware, collateral, config drift] --> Requalify[Requalification trigger]

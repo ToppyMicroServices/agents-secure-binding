@@ -5,6 +5,18 @@ Before=agents-secure-binding-agent.service
 Requires=log-forwarder.service
 
 [Service]
+User=asb
+Group=asb
+UMask=0077
+RuntimeDirectory=agents-secure-binding
+RuntimeDirectoryMode=0700
+LogsDirectory=agents-secure-binding
+LogsDirectoryMode=0750
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
 WorkingDirectory=/agents-secure-binding
 StandardOutput=file:/var/log/agents-secure-binding/runner.stdout
 StandardError=file:/var/log/agents-secure-binding/runner.stderr

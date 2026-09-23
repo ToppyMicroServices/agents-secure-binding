@@ -4,13 +4,13 @@ package python
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
+	goruntime "runtime"
 	"sync"
 
 	"github.com/ToppyMicroServices/agents-secure-binding/v2/agent/algorithm"
@@ -46,6 +46,7 @@ type python struct {
 	requirementsFile string
 	args             []string
 	cmd              *exec.Cmd
+	stopped          bool
 	mu               sync.Mutex
 }
 
@@ -66,52 +67,44 @@ func NewAlgorithm(logger *slog.Logger, eventsSvc events.Service, runtime, requir
 }
 
 func (p *python) Run() error {
-	venvPath := "venv"
+	venvParent, err := os.MkdirTemp("", "asb-python-venv-")
+	if err != nil {
+		return fmt.Errorf("error creating virtual environment directory: %w", err)
+	}
 	defer func() {
-		if err := os.RemoveAll(venvPath); err != nil {
+		if err := os.RemoveAll(venvParent); err != nil {
 			_, _ = p.stderr.Write([]byte(fmt.Sprintf("error removing virtual environment: %v\n", err)))
 		}
 	}()
+	venvPath := filepath.Join(venvParent, "venv")
 
 	createVenvCmd := exec.Command(p.runtime, "-m", "venv", venvPath)
 	createVenvCmd.Stderr = p.stderr
 	createVenvCmd.Stdout = p.stdout
-	if err := createVenvCmd.Run(); err != nil {
-		return fmt.Errorf("error creating virtual environment: %v", err)
+	if err := p.runCommand(createVenvCmd); err != nil {
+		return fmt.Errorf("error creating virtual environment: %w", err)
 	}
 
 	pythonPath := filepath.Join(venvPath, "bin", "python")
-
-	updatePipCmd := exec.Command(pythonPath, "-m", "pip", "install", "--upgrade", "pip", "setuptools", "wheel")
-	updatePipCmd.Stderr = p.stderr
-	updatePipCmd.Stdout = p.stdout
-	if err := updatePipCmd.Run(); err != nil {
-		return fmt.Errorf("error updating pip, setuptools and wheel: %v", err)
+	if goruntime.GOOS == "windows" {
+		pythonPath = filepath.Join(venvPath, "Scripts", "python.exe")
 	}
 
 	if p.requirementsFile != "" {
-		rcmd := exec.Command(pythonPath, "-m", "pip", "install", "-r", p.requirementsFile)
+		rcmd := exec.Command(pythonPath, "-m", "pip", "install", "--disable-pip-version-check", "--no-input", "-r", p.requirementsFile)
 		rcmd.Stderr = p.stderr
 		rcmd.Stdout = p.stdout
-		if err := rcmd.Run(); err != nil {
-			return fmt.Errorf("error installing requirements: %v", err)
+		if err := p.runCommand(rcmd); err != nil {
+			return fmt.Errorf("error installing requirements: %w", err)
 		}
 	}
 
 	args := append([]string{p.algoFile}, p.args...)
-	p.mu.Lock()
-	p.cmd = exec.Command(pythonPath, args...)
-	p.cmd.Stderr = p.stderr
-	p.cmd.Stdout = p.stdout
-
-	if err := p.cmd.Start(); err != nil {
-		p.mu.Unlock()
-		return fmt.Errorf("error starting algorithm: %v", err)
-	}
-	p.mu.Unlock()
-
-	if err := p.cmd.Wait(); err != nil {
-		return fmt.Errorf("algorithm execution error: %v", err)
+	cmd := exec.Command(pythonPath, args...)
+	cmd.Stderr = p.stderr
+	cmd.Stdout = p.stdout
+	if err := p.runCommand(cmd); err != nil {
+		return fmt.Errorf("algorithm execution error: %w", err)
 	}
 
 	return nil
@@ -120,6 +113,7 @@ func (p *python) Run() error {
 func (p *python) Stop() error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	p.stopped = true
 
 	if p.cmd == nil {
 		return nil
@@ -129,9 +123,33 @@ func (p *python) Stop() error {
 		return nil
 	}
 
-	if err := p.cmd.Process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
+	if err := algorithm.StopCommand(p.cmd); err != nil {
 		return fmt.Errorf("error stopping algorithm: %v", err)
 	}
 
 	return nil
+}
+
+func (p *python) runCommand(cmd *exec.Cmd) error {
+	p.mu.Lock()
+	if p.stopped {
+		p.mu.Unlock()
+		return algorithm.ErrStopped
+	}
+	algorithm.ConfigureCommand(cmd)
+	p.cmd = cmd
+	if err := algorithm.StartCommand(p.cmd); err != nil {
+		p.cmd = nil
+		p.mu.Unlock()
+		return err
+	}
+	p.mu.Unlock()
+
+	err := algorithm.WaitCommand(cmd)
+	p.mu.Lock()
+	if p.cmd == cmd {
+		p.cmd = nil
+	}
+	p.mu.Unlock()
+	return err
 }

@@ -1,0 +1,13 @@
+flowchart LR
+  Pkg[Package installer] --> AG[asb-agent user]
+  Pkg --> RG[asb-runner user]
+  Pkg --> G[asb-runtime group]
+  AG --> A[Agent]
+  RG --> R[Runner]
+  G --> S[(systemd-owned socket 0660)]
+  A --> S
+  R --> S
+  R --> L[Windows suspended launcher]
+  L -->|assign then resume| J[Per-run Job]
+  J --> C[Computation and descendants]
+  J -->|close or terminate| Stop[bounded teardown]

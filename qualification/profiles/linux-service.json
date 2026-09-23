@@ -1,0 +1,22 @@
+{
+  "profileVersion": 1,
+  "id": "linux-service",
+  "claim": "Dedicated-user systemd service installation on the recorded Linux target",
+  "targetOs": ["linux"],
+  "checks": [
+    {
+      "id": "systemd-unit-verify",
+      "required": true,
+      "command": ["systemd-analyze", "verify", "init/systemd/agents-secure-binding-agent.service", "init/systemd/computation-runner.service"],
+      "timeoutSeconds": 120,
+      "environment": {}
+    },
+    {
+      "id": "computation-runner-tests",
+      "required": true,
+      "command": ["go", "test", "-count=1", "./cmd/computation-runner", "./agent/algorithm/..."],
+      "timeoutSeconds": 600,
+      "environment": {"GOWORK": "off"}
+    }
+  ]
+}

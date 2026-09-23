@@ -25,6 +25,7 @@ var (
 	humanIngress          *jsonschema.Schema
 	humanIngressChallenge *jsonschema.Schema
 	humanIngressExecute   *jsonschema.Schema
+	humanIngressRecover   *jsonschema.Schema
 	errHumanIngress       error
 )
 
@@ -53,6 +54,10 @@ func PrepareHumanIngressValidator() error {
 			return
 		}
 		humanIngressExecute, errHumanIngress = compiler.Compile(humanIngressSchemaURL + "#/$defs/executeEnvelope")
+		if errHumanIngress != nil {
+			return
+		}
+		humanIngressRecover, errHumanIngress = compiler.Compile(humanIngressSchemaURL + "#/$defs/executeRecovery")
 	})
 	if errHumanIngress != nil {
 		return fmt.Errorf("compile Human ingress schema: %w", errHumanIngress)
@@ -93,6 +98,12 @@ func ValidateHumanIngressExecuteJSON(raw []byte) error {
 	return validateHumanIngressRouteJSON(raw, "execute")
 }
 
+// ValidateHumanIngressRecoverJSON validates a separately authorized outcome
+// lookup. Mutation envelopes are rejected before challenge lookup.
+func ValidateHumanIngressRecoverJSON(raw []byte) error {
+	return validateHumanIngressRouteJSON(raw, "recover")
+}
+
 func validateHumanIngressRouteJSON(raw []byte, route string) error {
 	if err := PrepareHumanIngressValidator(); err != nil {
 		return err
@@ -100,6 +111,8 @@ func validateHumanIngressRouteJSON(raw []byte, route string) error {
 	schema := humanIngressChallenge
 	if route == "execute" {
 		schema = humanIngressExecute
+	} else if route == "recover" {
+		schema = humanIngressRecover
 	}
 	if err := strictjson.ValidateDocument(raw, maxHumanIngressJSONBytes); err != nil {
 		return fmt.Errorf("decode Human ingress %s JSON: %w", route, err)

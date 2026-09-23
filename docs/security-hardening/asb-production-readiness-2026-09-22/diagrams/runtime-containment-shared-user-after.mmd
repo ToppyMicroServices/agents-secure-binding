@@ -1,0 +1,10 @@
+flowchart LR
+  Pkg[Package installer] --> U[asb service user]
+  U --> AU[Agent]
+  U --> RU[Runner]
+  AU -->|0600 socket| S[(runner.sock)]
+  RU --> S
+  RU --> C[Computation]
+  W[Windows Job assigned after start] --> C
+  C --> D[Descendants in Job]
+  D --> Sink[bounded capability]

@@ -13,7 +13,7 @@ func CMWAttestationOfferExtension() Extension {
 }
 
 func CMWAttestationDataExtension(cmw []byte) (Extension, error) {
-	if len(cmw) == 0 || len(cmw)+cmwAttestationLengthBytes > 0xFFFF {
+	if len(cmw) == 0 || len(cmw) > 0xFFFF-cmwAttestationLengthBytes {
 		return Extension{}, ErrInvalidLength
 	}
 	data := make([]byte, cmwAttestationLengthBytes+len(cmw))

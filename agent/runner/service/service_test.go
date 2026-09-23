@@ -3,11 +3,13 @@
 package service
 
 import (
+	"archive/zip"
 	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -75,12 +77,13 @@ func TestRunWithPythonAlgorithm(t *testing.T) {
 	eventSvc := &MockEventService{}
 	rs := New(logger, eventSvc)
 
+	wheelPath := writeRunnerTestWheel(t, t.TempDir())
 	req := &pb.RunRequest{
 		ComputationId: "test-python",
 		AlgoType:      "python",
-		Algorithm:     []byte("print('hello')"),
+		Algorithm:     []byte("import asb_runner_test_dependency\nprint(asb_runner_test_dependency.VERSION)"),
 		Args:          []string{},
-		Requirements:  []byte("numpy==2.2.0"),
+		Requirements:  []byte(wheelPath + "\n"),
 	}
 
 	resp, err := rs.Run(context.Background(), req)
@@ -91,6 +94,29 @@ func TestRunWithPythonAlgorithm(t *testing.T) {
 	t.Cleanup(func() {
 		_ = os.Remove("algo")
 	})
+}
+
+func writeRunnerTestWheel(t *testing.T, dir string) string {
+	t.Helper()
+	wheelPath := filepath.Join(dir, "asb_runner_test_dependency-1.0.0-py3-none-any.whl")
+	file, err := os.Create(wheelPath)
+	require.NoError(t, err)
+	archive := zip.NewWriter(file)
+	files := map[string]string{
+		"asb_runner_test_dependency.py":                       "VERSION = '1.0.0'\n",
+		"asb_runner_test_dependency-1.0.0.dist-info/METADATA": "Metadata-Version: 2.1\nName: asb-runner-test-dependency\nVersion: 1.0.0\n",
+		"asb_runner_test_dependency-1.0.0.dist-info/WHEEL":    "Wheel-Version: 1.0\nGenerator: ASB test\nRoot-Is-Purelib: true\nTag: py3-none-any\n",
+		"asb_runner_test_dependency-1.0.0.dist-info/RECORD":   "asb_runner_test_dependency.py,,\nasb_runner_test_dependency-1.0.0.dist-info/METADATA,,\nasb_runner_test_dependency-1.0.0.dist-info/WHEEL,,\nasb_runner_test_dependency-1.0.0.dist-info/RECORD,,\n",
+	}
+	for name, contents := range files {
+		entry, createErr := archive.Create(name)
+		require.NoError(t, createErr)
+		_, writeErr := entry.Write([]byte(contents))
+		require.NoError(t, writeErr)
+	}
+	require.NoError(t, archive.Close())
+	require.NoError(t, file.Close())
+	return wheelPath
 }
 
 // TestRunWithPythonAlgorithmNoRequirements tests running Python without requirements.
@@ -185,6 +211,7 @@ func TestRunWithUnsupportedAlgorithmType(t *testing.T) {
 
 // TestRunAlreadyRunning tests running computation when one is already running.
 func TestRunAlreadyRunning(t *testing.T) {
+	t.Chdir(t.TempDir())
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 	eventSvc := &MockEventService{}
 	rs := New(logger, eventSvc)
@@ -198,8 +225,10 @@ func TestRunAlreadyRunning(t *testing.T) {
 	}
 
 	// Start first computation (will run for 30 seconds)
+	done := make(chan error, 1)
 	go func() {
-		_, _ = rs.Run(context.Background(), req)
+		_, err := rs.Run(context.Background(), req)
+		done <- err
 	}()
 
 	// Give it time to start
@@ -210,9 +239,9 @@ func TestRunAlreadyRunning(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 	assert.Equal(t, "computation already running", resp.Error)
-	t.Cleanup(func() {
-		_ = os.Remove("algo")
-	})
+	_, err = rs.Stop(context.Background(), &pb.StopRequest{ComputationId: req.ComputationId})
+	require.NoError(t, err)
+	require.NoError(t, <-done)
 }
 
 // TestStopWhenRunning tests stopping a running computation.
@@ -254,17 +283,18 @@ func TestRunErrors(t *testing.T) {
 	rs := New(logger, eventSvc)
 
 	t.Run("create algo file failure", func(t *testing.T) {
-		// Create a directory named "algo" to make os.Create("algo") fail
-		err := os.Mkdir("algo", 0o755)
-		require.NoError(t, err)
-		defer os.RemoveAll("algo")
+		originalCreate := createAlgorithmFile
+		createAlgorithmFile = func(string, string) (*os.File, error) {
+			return nil, fmt.Errorf("injected create failure")
+		}
+		defer func() { createAlgorithmFile = originalCreate }()
 
 		req := &pb.RunRequest{
 			ComputationId: "test-err",
 			AlgoType:      "bin",
 			Algorithm:     []byte("test"),
 		}
-		_, err = rs.Run(context.Background(), req)
+		_, err := rs.Run(context.Background(), req)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "error creating algorithm file")
 	})
@@ -345,6 +375,62 @@ func TestConcurrentRun(t *testing.T) {
 	assert.Equal(t, "computation already running", resp2.Error)
 	_, _ = rs.Stop(context.Background(), &pb.StopRequest{})
 	<-done
+}
+
+func TestRunReservesBeforePreparingAndStopWaits(t *testing.T) {
+	origDir, _ := os.Getwd()
+	tmpDir := t.TempDir()
+	require.NoError(t, os.Chdir(tmpDir))
+	defer func() { require.NoError(t, os.Chdir(origDir)) }()
+
+	originalCreate := createAlgorithmFile
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	createAlgorithmFile = func(dir, pattern string) (*os.File, error) {
+		close(entered)
+		<-release
+		return os.CreateTemp(dir, pattern)
+	}
+	t.Cleanup(func() { createAlgorithmFile = originalCreate })
+
+	rs := New(slog.New(slog.NewTextHandler(os.Stdout, nil)), &MockEventService{})
+	req := &pb.RunRequest{ComputationId: "first", AlgoType: "bin", Algorithm: []byte("#!/bin/sh\nexit 0\n")}
+	runDone := make(chan error, 1)
+	go func() {
+		_, err := rs.Run(context.Background(), req)
+		runDone <- err
+	}()
+	<-entered
+
+	second, err := rs.Run(context.Background(), &pb.RunRequest{ComputationId: "second", AlgoType: "bin", Algorithm: req.Algorithm})
+	require.NoError(t, err)
+	require.Equal(t, "computation already running", second.Error)
+
+	stopDone := make(chan error, 1)
+	go func() {
+		_, err := rs.Stop(context.Background(), &pb.StopRequest{ComputationId: "first"})
+		stopDone <- err
+	}()
+	select {
+	case err := <-stopDone:
+		t.Fatalf("Stop returned before preparation ended: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(release)
+	require.NoError(t, <-stopDone)
+	require.NoError(t, <-runDone)
+}
+
+func TestStopRejectsDifferentComputation(t *testing.T) {
+	rs := New(slog.New(slog.NewTextHandler(os.Stdout, nil)), &MockEventService{})
+	rs.running = true
+	rs.currentID = "current"
+	rs.done = make(chan struct{})
+	if _, err := rs.Stop(context.Background(), &pb.StopRequest{ComputationId: "stale"}); err == nil {
+		t.Fatal("stale Stop request accepted")
+	}
+	rs.running = false
+	close(rs.done)
 }
 
 // TestRunWithMultipleArgs tests running with multiple arguments.

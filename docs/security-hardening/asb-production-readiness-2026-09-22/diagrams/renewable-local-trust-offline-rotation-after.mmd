@@ -1,0 +1,8 @@
+flowchart LR
+  Stop[Stop app and acquire maintenance lock] --> Stage[Stage new credential generation]
+  Stage --> Validate[Verify keys, chains, expiry, permissions]
+  Validate --> Swap[Atomic generation pointer swap]
+  Swap --> App[Restart app]
+  DB[(Unchanged state.db and receipts)] --> App
+  Token[Independent token generation] --> Swap
+  Old[Bounded previous generation] --> Rollback[Rollback if restart fails]

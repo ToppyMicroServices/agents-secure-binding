@@ -4,9 +4,11 @@ package agent
 
 import (
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 
+	"golang.org/x/crypto/sha3"
 	"google.golang.org/grpc/metadata"
 )
 
@@ -81,6 +83,45 @@ type Algorithm struct {
 	Source       *ResourceSource `json:"source,omitempty"` // Optional remote source
 	AlgoType     string          `json:"algo_type,omitempty"`
 	AlgoArgs     []string        `json:"algo_args,omitempty"`
+}
+
+// AlgorithmCommitment returns the manifest commitment accepted for an
+// algorithm. The original program-only digest remains valid only for a binary
+// with no arguments or requirements.
+func AlgorithmCommitment(algoType string, args []string, program, requirements []byte) [32]byte {
+	if algoType == "" {
+		algoType = "bin"
+	}
+	if algoType == "bin" && len(args) == 0 && len(requirements) == 0 {
+		return sha3.Sum256(program)
+	}
+	return ExecutionBundleHash(algoType, args, program, requirements)
+}
+
+// ExecutionBundleHash returns the v1 commitment for every input that changes
+// algorithm execution. Producers must use it whenever the execution is not a
+// legacy binary with no arguments or requirements.
+func ExecutionBundleHash(algoType string, args []string, program, requirements []byte) [32]byte {
+	h := sha3.New256()
+	writeHashPart := func(value []byte) {
+		var size [8]byte
+		binary.BigEndian.PutUint64(size[:], uint64(len(value)))
+		_, _ = h.Write(size[:])
+		_, _ = h.Write(value)
+	}
+	writeHashPart([]byte("asb.execution-bundle.v1"))
+	writeHashPart([]byte(algoType))
+	var count [8]byte
+	binary.BigEndian.PutUint64(count[:], uint64(len(args)))
+	_, _ = h.Write(count[:])
+	for _, arg := range args {
+		writeHashPart([]byte(arg))
+	}
+	writeHashPart(program)
+	writeHashPart(requirements)
+	var result [32]byte
+	copy(result[:], h.Sum(nil))
+	return result
 }
 
 type ManifestIndexKey struct{}
