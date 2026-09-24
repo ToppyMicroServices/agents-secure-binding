@@ -483,7 +483,8 @@ def verify_bundle(args: argparse.Namespace) -> int:
         raise ValueError("non-claim bundle must not contain a qualification signature")
     print(json.dumps({
         "event": "qualification_bundle_verified", "status": report["status"],
-        "qualificationClaim": report["qualificationClaim"], "signer": verified_signer,
+        "qualificationClaim": report["qualificationClaim"],
+        "signerVerified": verified_signer is not None,
         "report": str(bundle / "qa-report.json"),
     }, separators=(",", ":")))
     return 0

@@ -218,6 +218,8 @@ class QualificationHarnessTest(unittest.TestCase):
             env=gpg_env,
         )
         self.assertEqual(verified.returncode, 0, verified.stderr)
+        self.assertIn('"signerVerified":true', verified.stdout)
+        self.assertNotIn(fingerprint, verified.stdout)
 
         attack = self.base / "attack-bundle"
         shutil.copytree(trusted, attack)
