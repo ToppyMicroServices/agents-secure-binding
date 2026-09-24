@@ -119,7 +119,7 @@ func TestBootstrapDemoSeparatesCredentialsAndTrust(t *testing.T) {
 			t.Fatalf("unexpected state path for %s", role)
 		}
 		stat, err := os.Stat(config.StateDir)
-		if err != nil || !stat.IsDir() || stat.Mode().Perm() != 0700 {
+		if err != nil || !stat.IsDir() || stat.Mode().Perm() != 0o700 {
 			t.Fatalf("state directory for %s does not have private permissions", role)
 		}
 		serialized, err := json.Marshal(config)
@@ -149,7 +149,7 @@ func TestBootstrapDemoSeparatesCredentialsAndTrust(t *testing.T) {
 	}
 	target := configs[roleAgentA].Target
 	endpoint, err := url.Parse(target.Endpoint)
-	if err != nil || endpoint.Scheme != "https" || usedEndpoints[endpoint.Host] {
+	if err != nil || endpoint.Scheme != httpsScheme || usedEndpoints[endpoint.Host] {
 		t.Fatal("task listener does not have a separate HTTPS endpoint")
 	}
 	if err := validateLoopbackEndpoint(endpoint.Host); err != nil {

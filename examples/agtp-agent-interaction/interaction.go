@@ -142,7 +142,7 @@ func taskActionContext(body []byte) ([]byte, error) {
 
 func (config processConfig) taskEndpoint(raw string) (*url.URL, error) {
 	endpoint, err := url.Parse(raw)
-	if err != nil || endpoint.Scheme != "https" || endpoint.User != nil || endpoint.Path != "" || endpoint.RawQuery != "" || endpoint.Fragment != "" || endpoint.ForceQuery {
+	if err != nil || endpoint.Scheme != httpsScheme || endpoint.User != nil || endpoint.Path != "" || endpoint.RawQuery != "" || endpoint.Fragment != "" || endpoint.ForceQuery {
 		return nil, errors.New("invalid task endpoint")
 	}
 	if err := config.validateEndpoint(endpoint.Host); err != nil {
@@ -151,7 +151,7 @@ func (config processConfig) taskEndpoint(raw string) (*url.URL, error) {
 	return endpoint, nil
 }
 
-func startTaskServer(config processConfig) (func(context.Context) error, error) {
+func startTaskServer(ctx context.Context, config processConfig) (func(context.Context) error, error) {
 	if config.Self.Role != roleAgentB || config.Target.AgentID != roleAgentB || config.Target.Audience == "" || config.StateDir == "" {
 		return nil, errors.New("task server requires the configured Agent B")
 	}
@@ -188,7 +188,7 @@ func startTaskServer(config processConfig) (func(context.Context) error, error) 
 		Mode: identitypolicy.ModeRequired, SetMode: identitypolicy.SetModeExact, Expected: taskValues(),
 		Require: identitypolicy.Requirements{L3: true, L4: true, L5: true, L6: true},
 	}
-	if err := profile.Validate(context.Background()); err != nil {
+	if err := profile.Validate(ctx); err != nil {
 		return nil, err
 	}
 	nonces := &taskNonceStore{entries: make(map[string]taskNonceEntry)}
@@ -464,9 +464,17 @@ func decodeTaskJSON(body []byte, target any) error {
 }
 
 func writeTaskJSON(writer http.ResponseWriter, value any) {
+	raw, err := json.Marshal(value)
+	if err != nil {
+		http.Error(writer, "response encoding failed", http.StatusInternalServerError)
+		return
+	}
 	writer.Header().Set("Content-Type", "application/json")
 	writer.Header().Set("Cache-Control", "no-store")
-	_ = json.NewEncoder(writer).Encode(value)
+	if _, err := writer.Write(append(raw, '\n')); err != nil {
+		// A partial response is an uncertain outcome; do not retry the task.
+		return
+	}
 }
 
 func taskRandomID() (string, error) {

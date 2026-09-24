@@ -11,9 +11,12 @@ func TestDemoNetworkRequiresExactPrivateHosts(t *testing.T) {
 		endpoint string
 		valid    bool
 	}{
-		{"10.203.0.11:9443", true}, {"10.203.0.13:9444", true},
-		{"10.203.0.14:9443", false}, {"127.0.0.1:9443", false},
-		{"0.0.0.0:9443", false}, {"10.203.0.11:0", false},
+		{"10.203.0.11:9443", true},
+		{"10.203.0.13:9444", true},
+		{"10.203.0.14:9443", false},
+		{"127.0.0.1:9443", false},
+		{"0.0.0.0:9443", false},
+		{"10.203.0.11:0", false},
 		{"example.test:9443", false},
 	} {
 		if err := config.validateEndpoint(test.endpoint); (err == nil) != test.valid {

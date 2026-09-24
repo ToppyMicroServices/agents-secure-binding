@@ -35,6 +35,7 @@ const (
 	taskPath           = "/v1/task"
 	taskNoncePath      = "/v1/task/nonce"
 	loopbackServerName = "localhost"
+	httpsScheme        = "https"
 )
 
 type trustedIdentity struct {
@@ -213,7 +214,7 @@ func readConfig(path string) (processConfig, error) {
 		}
 	}
 	endpoint, err := url.Parse(config.Target.Endpoint)
-	if err != nil || endpoint.Scheme != "https" || endpoint.User != nil || endpoint.Path != "" || endpoint.RawQuery != "" || endpoint.Fragment != "" {
+	if err != nil || endpoint.Scheme != httpsScheme || endpoint.User != nil || endpoint.Path != "" || endpoint.RawQuery != "" || endpoint.Fragment != "" {
 		return config, errors.New("invalid task endpoint")
 	}
 	if err := config.validateEndpoint(endpoint.Host); err != nil {

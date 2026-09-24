@@ -121,22 +121,22 @@ func runProcessRole(ctx context.Context, opts commandOptions) (runErr error) {
 	if config.Self.Role != opts.role {
 		return errors.New("role does not match configured identity")
 	}
-	node, err := startDiscovery(config)
+	node, err := startDiscovery(ctx, config)
 	if err != nil {
 		return err
 	}
 	defer func() {
-		stopCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		stopCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cancel()
 		runErr = errors.Join(runErr, node.Stop(stopCtx))
 	}()
 	if opts.role == roleAgentB {
-		stop, err := startTaskServer(config)
+		stop, err := startTaskServer(ctx, config)
 		if err != nil {
 			return err
 		}
 		defer func() {
-			stopCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			stopCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 			defer cancel()
 			runErr = errors.Join(runErr, stop(stopCtx))
 		}()

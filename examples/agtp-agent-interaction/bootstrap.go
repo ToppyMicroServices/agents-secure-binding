@@ -99,7 +99,7 @@ func bootstrapDemo(rootDir string) (map[string]processConfig, error) {
 		}
 		nodeID := sha256.Sum256([]byte("asb-interaction:" + role))
 		stateDir := filepath.Join(rootDir, role)
-		if err := os.MkdirAll(stateDir, 0700); err != nil {
+		if err := os.MkdirAll(stateDir, 0o700); err != nil {
 			return nil, err
 		}
 		configs[role] = processConfig{

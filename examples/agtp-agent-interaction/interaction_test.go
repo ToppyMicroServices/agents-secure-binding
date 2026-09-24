@@ -21,7 +21,7 @@ func TestTaskRequiresIndependentAuthorization(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	stop, err := startTaskServer(configs[roleAgentB])
+	stop, err := startTaskServer(context.Background(), configs[roleAgentB])
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -52,7 +52,7 @@ func TestTaskRequiresIndependentAuthorization(t *testing.T) {
 		t.Fatalf("authorized task result = %+v", result)
 	}
 	info, err := os.Stat(replayPath)
-	if err != nil || info.Size() == 0 || info.Mode().Perm() != 0600 {
+	if err != nil || info.Size() == 0 || info.Mode().Perm() != 0o600 {
 		t.Fatalf("durable task replay file = %v, error %v", info, err)
 	}
 }

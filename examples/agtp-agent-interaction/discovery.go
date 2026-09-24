@@ -25,7 +25,7 @@ type discoveryEvidence struct {
 	Endpoint       string `json:"endpoint"`
 }
 
-func startDiscovery(config processConfig) (_ *peer.Node, result error) {
+func startDiscovery(ctx context.Context, config processConfig) (_ *peer.Node, result error) {
 	if config.StateDir == "" || len(config.SigningKey) != ed25519.PrivateKeySize {
 		return nil, errors.New("missing discovery state or signing key")
 	}
@@ -80,9 +80,9 @@ func startDiscovery(config processConfig) (_ *peer.Node, result error) {
 	}
 	defer func() {
 		if result != nil {
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			stopCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 			defer cancel()
-			result = errors.Join(result, node.Stop(ctx))
+			result = errors.Join(result, node.Stop(stopCtx))
 		}
 	}()
 	seedRoles := []string{roleRelay}
