@@ -56,6 +56,7 @@ jobs:
           go test -race -c -o "$RUNNER_TEMP/asb-interaction.test" ./examples/agtp-agent-interaction
           sudo env ASB_INTERACTION_NETNS_TEST=1 ASB_INTERACTION_NETNS_REPORT="$GITHUB_WORKSPACE/evidence/network-namespaces.json" \
             "$RUNNER_TEMP/asb-interaction.test" -test.v -test.run '^TestLinuxNamespaceInteraction$' | tee evidence/network-namespaces.log
+          sudo chown "$(id -u):$(id -g)" evidence/network-namespaces.json
           jq -e '.os == "linux" and .host_count == 1 and .distinct_network_namespaces and .network_cleanup_passed and .interaction.passed and .interaction.authorized_status == 200 and .interaction.without_task_proof_status == 401' evidence/network-namespaces.json
       - name: Upload non-secret evidence
         if: always()
