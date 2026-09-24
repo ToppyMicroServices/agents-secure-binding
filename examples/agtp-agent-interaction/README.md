@@ -103,6 +103,11 @@ the opt-in local interface test, the standalone interaction, and a separate
 network namespace integration test. It retains non-secret evidence for one day.
 It does not start the repository's macOS jobs.
 
+The main `CI` workflow also accepts a manual `linux_only=true` input. This runs
+the existing Linux lint, module tests, and product checks, including the ordinary
+interaction test. Its macOS jobs are skipped for that manual invocation; normal
+push and pull-request invocations retain their existing platform coverage.
+
 On a disposable Linux runner with `iproute2` and root access:
 
 ```sh

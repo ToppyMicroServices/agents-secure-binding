@@ -2,7 +2,7 @@ name: ASB Discovery Linux
 
 on:
   push:
-    branches: [test/asb-linux-discovery]
+    branches: [main, test/asb-linux-discovery]
   workflow_dispatch:
 
 permissions:
