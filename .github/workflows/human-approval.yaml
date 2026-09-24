@@ -43,7 +43,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: ${{ fromJSON(contains(github.event.pull_request.labels.*.name, 'ci:linux-only') && '["ubuntu-latest"]' || '["ubuntu-latest","macos-latest","windows-latest"]') }}
     env:
       GOWORK: "off"
       GOFLAGS: "-mod=readonly"
@@ -116,16 +116,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - os: ubuntu-latest
-            goos: linux
-            goarch: amd64
-          - os: macos-latest
-            goos: darwin
-            goarch: arm64
-          - os: windows-latest
-            goos: windows
-            goarch: amd64
+        include: >-
+          ${{ fromJSON(contains(github.event.pull_request.labels.*.name, 'ci:linux-only')
+            && '[{"os":"ubuntu-latest","goos":"linux","goarch":"amd64"}]'
+            || '[{"os":"ubuntu-latest","goos":"linux","goarch":"amd64"},{"os":"macos-latest","goos":"darwin","goarch":"arm64"},{"os":"windows-latest","goos":"windows","goarch":"amd64"}]') }}
     steps:
       # Use this run's uploaded bytes: no checkout, Go setup, or rebuild.
       - name: Download the matching preview artifact

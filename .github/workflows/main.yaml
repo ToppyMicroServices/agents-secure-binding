@@ -42,7 +42,7 @@ jobs:
         run: make
 
   mac-debug-a2a:
-    if: ${{ github.event_name != 'workflow_dispatch' || !inputs.linux_only }}
+    if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.linux_only) && !contains(github.event.pull_request.labels.*.name, 'ci:linux-only') }}
     runs-on: macos-latest
     needs: lint
     timeout-minutes: 15
@@ -59,7 +59,7 @@ jobs:
         run: GOTOOLCHAIN=go1.26.6+auto make mac-debug-a2a
 
   mac-human-coordination-e2e:
-    if: ${{ github.event_name != 'workflow_dispatch' || !inputs.linux_only }}
+    if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.linux_only) && !contains(github.event.pull_request.labels.*.name, 'ci:linux-only') }}
     runs-on: macos-latest
     needs: lint
     timeout-minutes: 15

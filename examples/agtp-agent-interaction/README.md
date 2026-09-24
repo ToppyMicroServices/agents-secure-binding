@@ -128,3 +128,15 @@ does not alter the host's default route or firewall, and gives the namespaces
 no external gateway. This verifies communication across Linux network stacks
 on one host. It does not qualify separate VMs, cloud firewalls, VPN links, or
 multi-host credential distribution.
+
+### Linux-only pull request checks
+
+A maintainer can apply the `ci:linux-only` label before pushing a new PR commit
+or reopening the PR. The normal pull-request workflows then run their Linux
+checks, including every required check, without starting macOS or Windows
+runners. Human-approval cross-compilation still runs on Ubuntu for all targets.
+Unlabelled PRs and normal pushes retain the full platform matrix.
+
+The `CI` workflow also accepts `linux_only=true` for manual diagnosis. GitHub
+does not count `workflow_dispatch` jobs toward required PR status checks, so
+use the normal pull-request event when preparing a merge.
