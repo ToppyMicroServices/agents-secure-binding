@@ -15,6 +15,7 @@ import (
 	"mime"
 	"net"
 	"net/http"
+	"reflect"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -32,10 +33,12 @@ const (
 	DefaultRequestBurst      = 40
 )
 
-// Config fixes the bounded single-host product profile.
+// Config fixes the bounded discovery profile. NetworkPolicy opts in to
+// explicitly configured LAN/VPC peers; nil keeps loopback networking.
 type Config struct {
 	Info               discovery.NodeInfo
 	ListenAddress      string
+	NetworkPolicy      *NetworkPolicy
 	TLSConfig          *tls.Config
 	Directory          *PeerDirectory
 	Client             *Client
@@ -70,12 +73,14 @@ type Node struct {
 	limiter  *peerRateLimiter
 
 	stateMu      sync.Mutex
+	dirty        bool // a failed snapshot must be retried before acknowledging replication
 	remoteMu     sync.Mutex
 	remoteDigest map[string]discovery.Digest
 	remoteNames  map[string]map[string]uint64
 	blocked      map[string]bool
 
 	server      *http.Server
+	lifecycleMu sync.Mutex
 	listener    net.Listener
 	ctx         context.Context
 	cancel      context.CancelFunc
@@ -90,9 +95,14 @@ type Node struct {
 // until Start succeeds.
 func NewNode(config Config) (*Node, error) {
 	config = withDefaults(config)
+	config.NetworkPolicy = config.NetworkPolicy.clone()
 	if err := validateConfig(config); err != nil {
 		return nil, err
 	}
+	// Give the node its own transport policy without changing a caller's client.
+	client := *config.Client
+	client.NetworkPolicy = config.NetworkPolicy.clone()
+	config.Client = &client
 	routing, err := discovery.NewRoutingTable(config.Info, min(config.MaxPeers, 20))
 	if err != nil {
 		return nil, err
@@ -150,6 +160,8 @@ func NewNode(config Config) (*Node, error) {
 
 // Start opens the configured real TCP port and starts periodic gossip.
 func (n *Node) Start() error {
+	n.lifecycleMu.Lock()
+	defer n.lifecycleMu.Unlock()
 	if n.closed.Load() || !n.started.CompareAndSwap(false, true) {
 		return errors.New("agtp discovery peer: node already started or closed")
 	}
@@ -164,9 +176,11 @@ func (n *Node) Start() error {
 		return fmt.Errorf("agtp discovery peer: write startup audit: %w", err)
 	}
 	n.listener = listener
-	n.infoMu.Lock()
-	n.info.Endpoint = listener.Addr().String()
-	n.infoMu.Unlock()
+	if n.config.NetworkPolicy == nil {
+		n.infoMu.Lock()
+		n.info.Endpoint = listener.Addr().String()
+		n.infoMu.Unlock()
+	}
 	n.ready.Store(true)
 	n.wg.Add(1)
 	go func() {
@@ -193,6 +207,8 @@ func (n *Node) Stop(ctx context.Context) error {
 	if ctx == nil {
 		return errors.New("agtp discovery peer: missing shutdown context")
 	}
+	n.lifecycleMu.Lock()
+	defer n.lifecycleMu.Unlock()
 	if n.closed.Swap(true) {
 		return nil
 	}
@@ -202,6 +218,7 @@ func (n *Node) Stop(ctx context.Context) error {
 	if n.started.Load() {
 		if err := n.server.Shutdown(ctx); err != nil {
 			result = errors.Join(result, err)
+			result = errors.Join(result, n.server.Close())
 		}
 	}
 	n.wg.Wait()
@@ -285,16 +302,30 @@ func (n *Node) Deregister(name string, version uint64) (bool, error) {
 
 // Discover queries local live Presence state.
 func (n *Node) Discover(ctx context.Context, query discovery.Query, requester discovery.Requester) (discovery.Response, error) {
+	n.stateMu.Lock()
+	defer n.stateMu.Unlock()
+	if err := n.ensureOpen(); err != nil {
+		return discovery.Response{}, err
+	}
+	if n.dirty {
+		return discovery.Response{}, errors.New("agtp discovery peer: persistence unavailable")
+	}
 	return n.presence.Discover(ctx, query, requester)
 }
 
 // Resolve resolves one live ANS name.
-func (n *Node) Resolve(name string) (discovery.NameBinding, bool) { return n.names.Resolve(name) }
+func (n *Node) Resolve(name string) (discovery.NameBinding, bool) {
+	n.stateMu.Lock()
+	defer n.stateMu.Unlock()
+	if n.ensureOpen() != nil || n.dirty {
+		return discovery.NameBinding{}, false
+	}
+	return n.names.Resolve(name)
+}
 
 // AddPeer adds a verifier-configured peer and commits routing state.
 func (n *Node) AddPeer(peer discovery.NodeInfo) error {
-	identity, ok := n.config.Directory.LookupNode(peer.ID)
-	if !ok || identity.Node.Endpoint != peer.Endpoint {
+	if !n.trustedPeer(peer) {
 		return ErrUnauthorized
 	}
 	n.stateMu.Lock()
@@ -340,12 +371,18 @@ func (n *Node) GossipOnce(ctx context.Context) error {
 			continue
 		}
 		if err := n.gossipPeer(ctx, target); err != nil {
+			if n.closed.Load() {
+				return errors.Join(result, err)
+			}
 			n.metrics.GossipFailure.Add(1)
 			if auditErr := n.recordAudit(AuditEvent{NodeID: n.Info().ID, PeerID: target.ID, Action: string(ActionReplicate), Result: "error", Reason: "exchange-failed"}); auditErr != nil {
 				result = errors.Join(result, auditErr)
 			}
 			result = errors.Join(result, err)
 			continue
+		}
+		if n.closed.Load() {
+			return n.ensureOpen()
 		}
 		n.metrics.GossipSuccess.Add(1)
 		if err := n.recordAudit(AuditEvent{NodeID: n.Info().ID, PeerID: target.ID, Action: string(ActionReplicate), Result: "ok"}); err != nil {
@@ -360,8 +397,22 @@ func (n *Node) Locate(ctx context.Context, target string, count int) ([]discover
 	if err := n.ensureOpen(); err != nil {
 		return nil, err
 	}
-	peers, err := n.routing.IterativeLocate(ctx, target, min(count, n.config.MaxPeers), 3,
+	// Lookup learns into a private table. Only commit after rechecking lifecycle
+	// and capacity, so shutdown and concurrent AddPeer cannot invalidate them.
+	routing, err := discovery.NewRoutingTable(n.Info(), min(n.config.MaxPeers, 20))
+	if err != nil {
+		return nil, err
+	}
+	for _, known := range n.routing.Peers() {
+		if n.trustedPeer(known) {
+			_, _ = routing.Observe(known)
+		}
+	}
+	peers, err := routing.IterativeLocate(ctx, target, min(count, n.config.MaxPeers), 3,
 		func(ctx context.Context, peerInfo discovery.NodeInfo, target string) ([]discovery.NodeInfo, error) {
+			if !n.trustedPeer(peerInfo) {
+				return nil, ErrUnauthorized
+			}
 			if n.peerBlocked(peerInfo.ID) {
 				return nil, errors.New("agtp discovery peer: peer partitioned")
 			}
@@ -372,16 +423,23 @@ func (n *Node) Locate(ctx context.Context, target string, count int) ([]discover
 				return nil, err
 			}
 			trusted := make([]discovery.NodeInfo, 0, len(response.Peers))
-			remaining := n.config.MaxPeers - len(n.routing.Peers())
+			known := make(map[string]bool)
+			for _, current := range routing.Peers() {
+				known[current.ID] = true
+			}
+			remaining := n.config.MaxPeers - len(known)
 			for _, candidate := range response.Peers {
-				identity, ok := n.config.Directory.LookupNode(candidate.ID)
-				if !ok || identity.Node.Endpoint != candidate.Endpoint {
+				if candidate.ID == n.Info().ID || known[candidate.ID] {
+					continue
+				}
+				if !n.trustedPeer(candidate) {
 					continue
 				}
 				if remaining <= 0 {
 					break
 				}
 				trusted = append(trusted, candidate)
+				known[candidate.ID] = true
 				remaining--
 			}
 			return trusted, nil
@@ -389,7 +447,23 @@ func (n *Node) Locate(ctx context.Context, target string, count int) ([]discover
 	if err != nil {
 		return nil, err
 	}
-	if err := n.persist(); err != nil {
+	n.stateMu.Lock()
+	defer n.stateMu.Unlock()
+	if err := n.ensureOpen(); err != nil {
+		return nil, err
+	}
+	known := make(map[string]bool)
+	for _, current := range n.routing.Peers() {
+		known[current.ID] = true
+	}
+	for _, candidate := range routing.Peers() {
+		if known[candidate.ID] || len(known) >= n.config.MaxPeers || !n.trustedPeer(candidate) {
+			continue
+		}
+		_, _ = n.routing.Observe(candidate)
+		known[candidate.ID] = true
+	}
+	if err := n.persistLocked(); err != nil {
 		return nil, err
 	}
 	return peers, nil
@@ -409,7 +483,28 @@ func (n *Node) routes() http.Handler {
 	mux.HandleFunc(FindNodePath, n.authenticated(ActionFindNode, n.handleFindNode))
 	mux.HandleFunc(HealthPath, n.handleHealth)
 	mux.HandleFunc(MetricsPath, n.handleMetrics)
-	return mux
+	if n.config.NetworkPolicy == nil {
+		return mux
+	}
+	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		// RemoteAddr is the accepted socket's address; forwarding headers do
+		// not establish membership in this administrative network.
+		if !n.config.NetworkPolicy.allowsRemoteAddress(request.RemoteAddr) {
+			n.reject(writer, "outside-network")
+			return
+		}
+		identity, _, err := requireTLSIdentity(request.TLS, n.config.Directory)
+		if err != nil || !n.trustedPeer(identity.Node) {
+			n.reject(writer, "unknown-peer")
+			return
+		}
+		mux.ServeHTTP(writer, request)
+	})
+}
+
+func (n *Node) trustedPeer(peer discovery.NodeInfo) bool {
+	identity, ok := n.config.Directory.LookupNode(peer.ID)
+	return ok && identity.Node == peer && n.config.NetworkPolicy.validateEndpoint(peer.Endpoint, false) == nil
 }
 
 func (n *Node) handleNonce(writer http.ResponseWriter, request *http.Request) {
@@ -513,15 +608,15 @@ func (n *Node) handleReplicate(writer http.ResponseWriter, _ *http.Request, iden
 	}
 	n.stateMu.Lock()
 	defer n.stateMu.Unlock()
-	beforeDigest := n.presence.Digest()
-	beforeNames := n.names.Digest()
-	if err := n.names.Merge(request.Names); err != nil {
-		_ = n.persistLocked()
-		http.Error(writer, "merge failed", http.StatusConflict)
+	if err := n.ensureOpen(); err != nil {
+		http.Error(writer, "node closed", http.StatusServiceUnavailable)
 		return
 	}
-	if err := n.presence.Merge(request.Delta); err != nil {
-		_ = n.persistLocked()
+	if err := n.mergeLocked(request.Delta, request.Names); err != nil {
+		if n.dirty {
+			http.Error(writer, "persistence failed", http.StatusInternalServerError)
+			return
+		}
 		http.Error(writer, "merge failed", http.StatusConflict)
 		return
 	}
@@ -531,10 +626,6 @@ func (n *Node) handleReplicate(writer http.ResponseWriter, _ *http.Request, iden
 		Delta:      n.presence.Delta(request.Digest),
 		NameDigest: n.names.Digest(),
 		Names:      n.names.Delta(request.NameDigest),
-	}
-	if (!equalDigest(beforeDigest, response.Digest) || !equalVersions(beforeNames, response.NameDigest)) && n.persistLocked() != nil {
-		http.Error(writer, "persistence failed", http.StatusInternalServerError)
-		return
 	}
 	if err := writeJSON(writer, response); err != nil {
 		return
@@ -558,7 +649,10 @@ func (n *Node) handleFindNode(writer http.ResponseWriter, _ *http.Request, ident
 }
 
 func (n *Node) handleHealth(writer http.ResponseWriter, request *http.Request) {
-	if request.Method != http.MethodGet || !n.ready.Load() {
+	n.stateMu.Lock()
+	ready := n.ready.Load() && !n.dirty
+	n.stateMu.Unlock()
+	if request.Method != http.MethodGet || !ready {
 		http.Error(writer, "not ready", http.StatusServiceUnavailable)
 		return
 	}
@@ -614,10 +708,24 @@ func (n *Node) gossipLoop() {
 }
 
 func (n *Node) gossipPeer(ctx context.Context, target discovery.NodeInfo) error {
+	if !n.trustedPeer(target) {
+		return ErrUnauthorized
+	}
 	n.remoteMu.Lock()
 	remoteDigest := n.remoteDigest[target.ID]
 	remoteNames := n.remoteNames[target.ID]
 	n.remoteMu.Unlock()
+	n.stateMu.Lock()
+	if err := n.ensureOpen(); err != nil {
+		n.stateMu.Unlock()
+		return err
+	}
+	if n.dirty {
+		if err := n.persistLocked(); err != nil {
+			n.stateMu.Unlock()
+			return err
+		}
+	}
 	request := ReplicateRequest{
 		Protocol:   ProtocolVersion,
 		Sender:     n.Info(),
@@ -626,28 +734,18 @@ func (n *Node) gossipPeer(ctx context.Context, target discovery.NodeInfo) error 
 		NameDigest: n.names.Digest(),
 		Names:      n.names.Delta(remoteNames),
 	}
+	n.stateMu.Unlock()
 	response, err := n.config.Client.Replicate(ctx, target, request)
 	if err != nil {
 		return err
 	}
 	n.stateMu.Lock()
 	defer n.stateMu.Unlock()
-	beforeDigest := n.presence.Digest()
-	beforeNames := n.names.Digest()
-	if err := n.names.Merge(response.Names); err != nil {
-		_ = n.persistLocked()
+	if err := n.ensureOpen(); err != nil {
 		return err
 	}
-	if err := n.presence.Merge(response.Delta); err != nil {
-		_ = n.persistLocked()
+	if err := n.mergeLocked(response.Delta, response.Names); err != nil {
 		return err
-	}
-	afterDigest := n.presence.Digest()
-	afterNames := n.names.Digest()
-	if !equalDigest(beforeDigest, afterDigest) || !equalVersions(beforeNames, afterNames) {
-		if err := n.persistLocked(); err != nil {
-			return err
-		}
 	}
 	n.remoteMu.Lock()
 	n.remoteDigest[target.ID] = response.Digest
@@ -667,15 +765,17 @@ func (n *Node) load() error {
 	if err != nil || !found {
 		return err
 	}
+	if err := n.presence.Merge(discovery.Delta{Tombstones: state.Presence.Tombstones}); err != nil {
+		return err
+	}
 	if err := n.names.Merge(state.Names); err != nil {
 		return err
 	}
-	if err := n.presence.Merge(state.Presence); err != nil {
+	if err := n.presence.Merge(discovery.Delta{Records: state.Presence.Records}); err != nil {
 		return err
 	}
 	for _, peerInfo := range state.Peers {
-		identity, ok := n.config.Directory.LookupNode(peerInfo.ID)
-		if !ok || identity.Node.Endpoint != peerInfo.Endpoint || len(n.routing.Peers()) >= n.config.MaxPeers {
+		if !n.trustedPeer(peerInfo) || len(n.routing.Peers()) >= n.config.MaxPeers {
 			continue
 		}
 		if _, err := n.routing.Observe(peerInfo); err != nil {
@@ -692,13 +792,35 @@ func (n *Node) persist() error {
 }
 
 func (n *Node) persistLocked() error {
-	err := n.state.Save(PersistentState{
+	err := n.state.Save(n.snapshotLocked())
+	n.dirty = err != nil
+	if err != nil {
+		n.metrics.PersistenceErrors.Add(1)
+	}
+	return err
+}
+
+func (n *Node) snapshotLocked() PersistentState {
+	return PersistentState{
 		Presence: n.presence.Snapshot(),
 		Names:    n.names.Bindings(),
 		Peers:    n.routing.Peers(),
-	})
-	if err != nil {
-		n.metrics.PersistenceErrors.Add(1)
+	}
+}
+
+// mergeLocked preserves withdrawals before admitting replacement names. Full
+// snapshots include retention metadata that the version-only wire digest omits.
+func (n *Node) mergeLocked(delta discovery.Delta, names []discovery.NameBinding) error {
+	before := n.snapshotLocked()
+	err := n.presence.Merge(discovery.Delta{Tombstones: delta.Tombstones})
+	if err == nil {
+		err = n.names.Merge(names)
+	}
+	if err == nil {
+		err = n.presence.Merge(discovery.Delta{Records: delta.Records})
+	}
+	if n.dirty || !reflect.DeepEqual(before, n.snapshotLocked()) {
+		err = errors.Join(err, n.persistLocked())
 	}
 	return err
 }
@@ -759,29 +881,28 @@ func validateConfig(config Config) error {
 	if config.MaxPeers < 2 || config.MaxPeers > DefaultMaxPeers || config.MaxTombstones < config.MaxRecords {
 		return errors.New("agtp discovery peer: invalid state limits")
 	}
-	if err := validateLoopback(config.ListenAddress); err != nil {
+	if err := config.NetworkPolicy.validate(); err != nil {
 		return err
+	}
+	if err := config.NetworkPolicy.validateEndpoint(config.ListenAddress, true); err != nil {
+		return err
+	}
+	if err := config.NetworkPolicy.validateEndpoint(config.Info.Endpoint, true); err != nil {
+		return err
+	}
+	if config.NetworkPolicy != nil {
+		if config.ListenAddress != config.Info.Endpoint {
+			return errors.New("agtp discovery peer: LAN listener must match its advertised IP endpoint")
+		}
+		if config.Client.TLSConfig.InsecureSkipVerify || config.TLSConfig.GetConfigForClient != nil {
+			return errors.New("agtp discovery peer: LAN profile requires standard TLS verification")
+		}
 	}
 	if _, err := discovery.NewRoutingTable(config.Info, 1); err != nil {
 		return err
 	}
 	if len(config.TLSConfig.Certificates) == 0 || config.TLSConfig.ClientCAs == nil {
 		return errors.New("agtp discovery peer: mTLS certificate and client CA required")
-	}
-	return nil
-}
-
-func validateLoopback(address string) error {
-	host, _, err := net.SplitHostPort(address)
-	if err != nil {
-		return err
-	}
-	if host == "localhost" {
-		return nil
-	}
-	ip := net.ParseIP(host)
-	if ip == nil || !ip.IsLoopback() {
-		return errors.New("agtp discovery peer: product scope requires a loopback listener")
 	}
 	return nil
 }
@@ -815,20 +936,4 @@ func min(left, right int) int {
 		return left
 	}
 	return right
-}
-
-func equalDigest(left, right discovery.Digest) bool {
-	return equalVersions(left.Records, right.Records) && equalVersions(left.Tombstones, right.Tombstones)
-}
-
-func equalVersions(left, right map[string]uint64) bool {
-	if len(left) != len(right) {
-		return false
-	}
-	for key, value := range left {
-		if right[key] != value {
-			return false
-		}
-	}
-	return true
 }

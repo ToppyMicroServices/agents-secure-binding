@@ -1,0 +1,67 @@
+name: ASB Discovery Linux
+
+on:
+  push:
+    branches: [test/asb-linux-discovery]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: asb-discovery-linux-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  discovery:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      GOWORK: "off"
+      GOTOOLCHAIN: go1.26.6+auto
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version: 1.26.6
+      - name: Record Linux runtime
+        run: |
+          test "$(uname -s)" = Linux
+          mkdir -p evidence
+          uname -a > evidence/runtime.txt
+          go version >> evidence/runtime.txt
+          git rev-parse HEAD > evidence/source-commit.txt
+      - name: Verify and test discovery and interaction
+        run: |
+          set -o pipefail
+          go mod verify
+          go vet ./pkg/agtp/discovery/... ./examples/agtp-agent-interaction
+          go test -race -count=1 -json ./pkg/agtp/discovery/... ./examples/agtp-agent-interaction | tee evidence/tests.jsonl
+      - name: Run Linux interface integration
+        run: |
+          set -o pipefail
+          interface_ip=$(ip -j -4 address show scope global | python3 -c 'import json,sys,ipaddress; print(next(a["local"] for i in json.load(sys.stdin) for a in i["addr_info"] if ipaddress.ip_address(a["local"]).is_private))')
+          ASB_DISCOVERY_LAN_TEST_ADDR="$interface_ip" go test -race -count=1 -json ./pkg/agtp/discovery/peer -run '^TestLANInterfaceDiscovery$' | tee evidence/linux-interface-tests.jsonl
+      - name: Run separate agents
+        run: |
+          go build -o "$RUNNER_TEMP/asb-agent-interaction" ./examples/agtp-agent-interaction
+          "$RUNNER_TEMP/asb-agent-interaction" --report evidence/interaction.json
+          jq -e '.passed and .distinct_processes and .distinct_tls_keys and .discovery.dht_found and .result.sum == 31 and .result.executions == 1 and .without_task_proof_status == 401 and .authorized_status == 200' evidence/interaction.json
+          sha256sum "$RUNNER_TEMP/asb-agent-interaction" > evidence/binary.sha256
+      - name: Run three private Linux network namespaces
+        run: |
+          set -o pipefail
+          go test -race -c -o "$RUNNER_TEMP/asb-interaction.test" ./examples/agtp-agent-interaction
+          sudo env ASB_INTERACTION_NETNS_TEST=1 ASB_INTERACTION_NETNS_REPORT="$GITHUB_WORKSPACE/evidence/network-namespaces.json" \
+            "$RUNNER_TEMP/asb-interaction.test" -test.v -test.run '^TestLinuxNamespaceInteraction$' | tee evidence/network-namespaces.log
+          jq -e '.os == "linux" and .host_count == 1 and .distinct_network_namespaces and .network_cleanup_passed and .interaction.passed and .interaction.authorized_status == 200 and .interaction.without_task_proof_status == 401' evidence/network-namespaces.json
+      - name: Upload non-secret evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: asb-discovery-linux-${{ github.run_id }}
+          path: evidence/
+          if-no-files-found: error
+          retention-days: 1
