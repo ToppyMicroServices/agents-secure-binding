@@ -52,6 +52,8 @@ type storeArchiveSnapshot struct {
 	file         *os.File
 	original     *os.File
 	databasePath string
+	cleanupPath  string
+	cleanupDir   string
 }
 
 func (s *storeArchiveSnapshot) Close() error {
@@ -64,6 +66,16 @@ func (s *storeArchiveSnapshot) Close() error {
 	}
 	if s.original != nil && s.original != s.file {
 		if err := s.original.Close(); first == nil {
+			first = err
+		}
+	}
+	if s.cleanupPath != "" {
+		if err := os.Remove(s.cleanupPath); first == nil && !errors.Is(err, os.ErrNotExist) {
+			first = err
+		}
+	}
+	if s.cleanupDir != "" {
+		if err := os.Remove(s.cleanupDir); first == nil && !errors.Is(err, os.ErrNotExist) {
 			first = err
 		}
 	}
@@ -263,8 +275,11 @@ func inspectOpenedStoreArchive(ctx context.Context, file *os.File, databasePath 
 	}
 	defer db.Close()
 	var check string
-	if err := db.QueryRowContext(ctx, "PRAGMA quick_check").Scan(&check); err != nil || check != "ok" {
-		return manifest, fmt.Errorf("archive integrity check failed")
+	if err := db.QueryRowContext(ctx, "PRAGMA quick_check").Scan(&check); err != nil {
+		return manifest, fmt.Errorf("archive integrity check failed: %w", err)
+	}
+	if check != "ok" {
+		return manifest, fmt.Errorf("archive integrity check failed: %s", check)
 	}
 	if err := db.QueryRowContext(ctx, "PRAGMA user_version").Scan(&manifest.SchemaVersion); err != nil {
 		return manifest, err

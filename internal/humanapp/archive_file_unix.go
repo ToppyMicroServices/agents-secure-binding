@@ -10,14 +10,13 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"runtime"
 
 	"golang.org/x/sys/unix"
 )
 
-// openStoreArchiveSnapshot copies one open source descriptor into an unlinked
-// private file. Digest and SQLite checks then share bytes that neither path
-// replacement nor an in-place write to the source can change.
+// openStoreArchiveSnapshot copies one open source descriptor into a private
+// temporary directory. Digest and SQLite checks then share bytes that neither
+// path replacement nor an in-place write to the source can change.
 func openStoreArchiveSnapshot(path string) (*storeArchiveSnapshot, error) {
 	fd, err := unix.Open(path, unix.O_RDONLY|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0)
 	if err != nil {
@@ -54,34 +53,36 @@ func openStoreArchiveSnapshot(path string) (*storeArchiveSnapshot, error) {
 		return nil, err
 	}
 	closeSnapshot := true
+	cleanupSnapshot := true
 	defer func() {
 		if closeSnapshot {
 			_ = snapshot.Close()
 		}
-		_ = os.Remove(temporary)
-		_ = os.Remove(dir)
+		if cleanupSnapshot {
+			_ = os.Remove(temporary)
+			_ = os.Remove(dir)
+		}
 	}()
 	if _, err := io.Copy(snapshot, original); err != nil {
+		return nil, err
+	}
+	if err := snapshot.Sync(); err != nil {
+		return nil, err
+	}
+	if err := snapshot.Chmod(0o400); err != nil {
 		return nil, err
 	}
 	if _, err := snapshot.Seek(0, io.SeekStart); err != nil {
 		return nil, err
 	}
-	if err := os.Remove(temporary); err != nil {
-		return nil, err
-	}
-	if err := os.Remove(dir); err != nil {
-		return nil, err
-	}
-	descriptorRoot := "/dev/fd"
-	if runtime.GOOS == "linux" {
-		descriptorRoot = "/proc/self/fd"
-	}
-	databasePath := fmt.Sprintf("%s/%d", descriptorRoot, snapshot.Fd())
-	if _, err := os.Stat(databasePath); err != nil {
-		return nil, fmt.Errorf("resolve archive file descriptor: %w", err)
-	}
 	closeOriginal = false
 	closeSnapshot = false
-	return &storeArchiveSnapshot{file: snapshot, original: original, databasePath: databasePath}, nil
+	cleanupSnapshot = false
+	return &storeArchiveSnapshot{
+		file:         snapshot,
+		original:     original,
+		databasePath: temporary,
+		cleanupPath:  temporary,
+		cleanupDir:   dir,
+	}, nil
 }
