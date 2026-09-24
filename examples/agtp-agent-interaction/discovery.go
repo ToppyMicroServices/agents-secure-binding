@@ -108,6 +108,7 @@ func startDiscovery(ctx context.Context, config processConfig) (_ *peer.Node, re
 			return nil, err
 		}
 	}
+	//nolint:contextcheck // Node owns the gossip context; deferred Stop cancels and joins it.
 	if err := node.Start(); err != nil {
 		return nil, err
 	}
