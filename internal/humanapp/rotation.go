@@ -22,6 +22,8 @@ import (
 const (
 	credentialPointerFile = "credential-generation"
 	credentialSetsDir     = "credential-generations"
+	credentialLegacy      = "legacy"
+	goosWindows           = "windows"
 )
 
 // CredentialStatus describes the active local trust generation without
@@ -41,7 +43,7 @@ func validateInitializedDirectory(dir string) error {
 	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
 		return fmt.Errorf("data directory must be a real directory")
 	}
-	if runtime.GOOS != "windows" && info.Mode().Perm()&0o077 != 0 {
+	if runtime.GOOS != goosWindows && info.Mode().Perm()&0o077 != 0 {
 		return fmt.Errorf("data directory must be private (mode 0700)")
 	}
 	marker, err := os.ReadFile(filepath.Join(dir, "initialized"))
@@ -142,7 +144,7 @@ func validatePrivateDirectory(dir string) error {
 	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
 		return fmt.Errorf("credential directory must be a real directory")
 	}
-	if runtime.GOOS != "windows" && info.Mode().Perm()&0o077 != 0 {
+	if runtime.GOOS != goosWindows && info.Mode().Perm()&0o077 != 0 {
 		return fmt.Errorf("credential directory must be private (mode 0700)")
 	}
 	return nil
@@ -189,7 +191,7 @@ func credentialStatusUnlocked(dir string) (CredentialStatus, error) {
 	fingerprint := sha256.Sum256(block.Bytes)
 	return CredentialStatus{
 		Generation:    generation,
-		LegacyLayout:  generation == "legacy",
+		LegacyLayout:  generation == credentialLegacy,
 		NotAfter:      ca.NotAfter.UTC(),
 		CAFingerprint: "sha256:" + hex.EncodeToString(fingerprint[:]),
 	}, nil
@@ -199,7 +201,7 @@ func activeCredentialDirectory(dir string) (string, string, error) {
 	pointer := filepath.Join(dir, credentialPointerFile)
 	info, err := os.Lstat(pointer)
 	if errors.Is(err, os.ErrNotExist) {
-		return dir, "legacy", nil
+		return dir, credentialLegacy, nil
 	}
 	if err != nil {
 		return "", "", err
@@ -207,7 +209,7 @@ func activeCredentialDirectory(dir string) (string, string, error) {
 	if !info.Mode().IsRegular() || info.Size() <= 0 || info.Size() > 128 {
 		return "", "", fmt.Errorf("invalid credential generation pointer")
 	}
-	if runtime.GOOS != "windows" && info.Mode().Perm()&0o077 != 0 {
+	if runtime.GOOS != goosWindows && info.Mode().Perm()&0o077 != 0 {
 		return "", "", fmt.Errorf("credential generation pointer must be private")
 	}
 	raw, err := os.ReadFile(pointer)

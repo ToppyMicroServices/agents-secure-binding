@@ -60,8 +60,13 @@ type serveOptions struct {
 }
 
 const (
-	commandDemo = "demo"
-	goosWindows = "windows"
+	commandAgent         = "agent"
+	commandDemo          = "demo"
+	commandInspect       = "inspect"
+	commandServe         = "serve"
+	commandStorageExport = "storage-export"
+	commandStorageStatus = "storage-status"
+	goosWindows          = "windows"
 )
 
 func main() {
@@ -106,8 +111,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	var operationID, receiptPath, digest string
 	var archivePath, manifestPath string
 	switch args[0] {
-	case "init", "credentials-status", "credentials-rotate", "token-rotate", "storage-status":
-	case "serve", commandDemo:
+	case "init", "credentials-status", "credentials-rotate", "token-rotate", commandStorageStatus:
+	case commandServe, commandDemo:
 		serveCfg.demo = args[0] == commandDemo
 		coreAddress, webAddress := defaultCoreAddress, defaultWebAddress
 		if serveCfg.demo {
@@ -118,7 +123,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		if serveCfg.demo {
 			flags.BoolVar(&serveCfg.enabled, "enabled", true, "propose the local maintenance_mode value")
 		}
-	case "agent":
+	case commandAgent:
 		flags.StringVar(&agentCfg.address, "core-address", defaultCoreAddress, "core address: explicit loopback IP and port")
 		flags.StringVar(&agentCfg.operationID, "operation-id", "", "proposal identifier; generated when omitted")
 		flags.StringVar(&agentCfg.receipt, "receipt", "", "save or resume an immutable proposal receipt")
@@ -126,12 +131,12 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		flags.BoolVar(&agentCfg.wait, "wait", false, "poll until the proposal is applied, denied, or stale")
 		flags.DurationVar(&agentCfg.poll, "poll-interval", time.Second, "interval between freshly authenticated status requests")
 		flags.DurationVar(&agentCfg.timeout, "timeout", 0, "stop waiting after this duration; zero waits until interrupted")
-	case "inspect":
+	case commandInspect:
 		flags.StringVar(&agentCfg.address, "core-address", defaultCoreAddress, "core address: explicit loopback IP and port")
 		flags.StringVar(&operationID, "operation-id", "", "proposal identifier")
 		flags.StringVar(&receiptPath, "receipt", "", "read a saved proposal receipt")
 		flags.StringVar(&digest, "digest", "", "proposal digest, required with --operation-id unless its derived receipt exists")
-	case "storage-export":
+	case commandStorageExport:
 		flags.StringVar(&archivePath, "output", "", "new SQLite snapshot path; a manifest sidecar is written next to it")
 	case "storage-verify":
 		flags.StringVar(&archivePath, "archive", "", "SQLite snapshot to verify")
@@ -152,12 +157,12 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
-	if args[0] == "serve" || args[0] == commandDemo {
+	if args[0] == commandServe || args[0] == commandDemo {
 		if err := humanapp.Initialize(dir); err != nil {
 			return err
 		}
 	}
-	if args[0] == "serve" || args[0] == commandDemo || args[0] == "agent" || args[0] == "inspect" || args[0] == "storage-status" || args[0] == "storage-export" {
+	if args[0] == commandServe || args[0] == commandDemo || args[0] == commandAgent || args[0] == commandInspect || args[0] == commandStorageStatus || args[0] == commandStorageExport {
 		lock, err := humanapp.HoldDataDirectory(dir)
 		if err != nil {
 			return err
@@ -199,7 +204,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 			return err
 		}
 		return writeJSON(stdout, map[string]string{"event": "token_rotated"})
-	case "storage-status":
+	case commandStorageStatus:
 		store, err := humanapp.OpenStoreContext(ctx, filepath.Join(dir, "human-approval.sqlite"))
 		if err != nil {
 			return err
@@ -210,7 +215,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 			return err
 		}
 		return writeJSON(stdout, map[string]any{"event": "storage_status", "capacity": capacity})
-	case "storage-export":
+	case commandStorageExport:
 		if strings.TrimSpace(archivePath) == "" {
 			return errors.New("provide --output for a new archive")
 		}
@@ -239,10 +244,10 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 			return err
 		}
 		return writeJSON(stdout, map[string]string{"event": "storage_verified", "sha256": manifest.SHA256})
-	case "serve", commandDemo:
+	case commandServe, commandDemo:
 		serveCfg.dir = dir
 		return serve(ctx, serveCfg, stdout, stderr)
-	case "agent":
+	case commandAgent:
 		flags.Visit(func(f *flag.Flag) {
 			if f.Name == "enabled" {
 				agentCfg.enabledSet = true
@@ -257,7 +262,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 			return err
 		}
 		return runAgent(ctx, agentCfg, client.Execute, stdout)
-	case "inspect":
+	case commandInspect:
 		command, err := inspectionCommand(dir, receiptPath, operationID, digest)
 		if err != nil {
 			return err
@@ -732,7 +737,7 @@ func serve(ctx context.Context, cfg serveOptions, stdout, stderr io.Writer) erro
 		if err != nil {
 			return err
 		}
-		child := exec.CommandContext(childCtx, executable, "agent", "--data-dir", cfg.dir, "--core-address", running.coreAddress, "--enabled="+strconv.FormatBool(cfg.enabled), "--wait")
+		child := exec.CommandContext(childCtx, executable, commandAgent, "--data-dir", cfg.dir, "--core-address", running.coreAddress, "--enabled="+strconv.FormatBool(cfg.enabled), "--wait")
 		child.Stdout, child.Stderr = stdout, stderr
 		if err := child.Start(); err != nil {
 			return err

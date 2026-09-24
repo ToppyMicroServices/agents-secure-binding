@@ -40,7 +40,7 @@ func TestStoreSnapshotIsExclusiveAndIndependentlyVerifiable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := file.Write([]byte("tamper")); err != nil {
+	if _, err := file.WriteString("tamper"); err != nil {
 		_ = file.Close()
 		t.Fatal(err)
 	}
@@ -89,7 +89,7 @@ func TestStoreArchiveInspectionUsesOpenedFile(t *testing.T) {
 	}
 	defer snapshot.Close()
 	if err := os.Rename(secondPath, firstPath); err != nil {
-		if runtime.GOOS == "windows" {
+		if runtime.GOOS == goosWindows {
 			return // The non-shareable Windows handle blocks replacement directly.
 		}
 		t.Fatal(err)
@@ -156,7 +156,7 @@ func TestStoreArchiveSnapshotIsolatedFromInPlaceMutation(t *testing.T) {
 	defer snapshot.Close()
 	file, err := os.OpenFile(firstPath, os.O_WRONLY|os.O_TRUNC, 0)
 	if err != nil {
-		if runtime.GOOS == "windows" {
+		if runtime.GOOS == goosWindows {
 			return // The Windows source handle denies write sharing.
 		}
 		t.Fatal(err)
