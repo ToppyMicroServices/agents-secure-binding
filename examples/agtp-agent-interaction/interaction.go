@@ -140,7 +140,7 @@ func taskActionContext(body []byte) ([]byte, error) {
 	}{"asb.agent-interaction/v1", http.MethodPost, taskPath, roleAgentA, roleAgentB, hex.EncodeToString(digest[:])})
 }
 
-func taskEndpoint(raw string) (*url.URL, error) {
+func (config processConfig) taskEndpoint(raw string) (*url.URL, error) {
 	endpoint, err := url.Parse(raw)
 	if err != nil || endpoint.Scheme != "https" || endpoint.User != nil || endpoint.Path != "" || endpoint.RawQuery != "" || endpoint.Fragment != "" || endpoint.ForceQuery {
 		return nil, errors.New("invalid task endpoint")
@@ -155,7 +155,7 @@ func startTaskServer(config processConfig) (func(context.Context) error, error) 
 	if config.Self.Role != roleAgentB || config.Target.AgentID != roleAgentB || config.Target.Audience == "" || config.StateDir == "" {
 		return nil, errors.New("task server requires the configured Agent B")
 	}
-	endpoint, err := taskEndpoint(config.Target.Endpoint)
+	endpoint, err := config.taskEndpoint(config.Target.Endpoint)
 	if err != nil {
 		return nil, err
 	}
@@ -309,7 +309,7 @@ func sendTask(ctx context.Context, config processConfig, discoveredEndpoint stri
 	if authorize && (config.TaskGrant == "" || len(config.SigningKey) != ed25519.PrivateKeySize) {
 		return taskResult{}, 0, errors.New("task credentials are unavailable")
 	}
-	endpoint, err := taskEndpoint(discoveredEndpoint)
+	endpoint, err := config.taskEndpoint(discoveredEndpoint)
 	if err != nil {
 		return taskResult{}, 0, err
 	}
