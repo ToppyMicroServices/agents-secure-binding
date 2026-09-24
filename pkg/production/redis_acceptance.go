@@ -330,8 +330,7 @@ func (s *RedisAcceptanceStore) runJournalScript(ctx context.Context, script stri
 	if err := s.validateAcceptanceConfig(); err != nil {
 		return redisJournalReply{}, err
 	}
-	command := make([]string, 0, 3+len(keys)+len(arguments))
-	command = append(command, "EVAL", script, strconv.Itoa(len(keys)))
+	command := []string{"EVAL", script, strconv.Itoa(len(keys))}
 	command = append(command, keys...)
 	command = append(command, arguments...)
 	session, err := s.RedisSetNXStore.openSession(ctx)

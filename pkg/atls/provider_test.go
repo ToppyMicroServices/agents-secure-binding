@@ -27,15 +27,33 @@ import (
 
 type recordingEvidenceSource struct {
 	called  bool
+	ctx     context.Context
 	request eaattestation.EvidenceRequest
 	result  eaattestation.EvidenceResult
 	err     error
 }
 
-func (s *recordingEvidenceSource) GetEvidence(_ context.Context, request eaattestation.EvidenceRequest) (eaattestation.EvidenceResult, error) {
+func (s *recordingEvidenceSource) GetEvidence(ctx context.Context, request eaattestation.EvidenceRequest) (eaattestation.EvidenceResult, error) {
 	s.called = true
+	s.ctx = ctx
 	s.request = request
 	return s.result, s.err
+}
+
+func TestProviderBuildLeafExtensionsPropagatesContext(t *testing.T) {
+	certificate, leaf := providerTestCertificate(t)
+	server, client := providerTLSPair(t, certificate)
+	defer server.Close()
+	defer client.Close()
+
+	source := &recordingEvidenceSource{result: eaattestation.EvidenceResult{MediaType: "application/eat+cwt"}}
+	provider, err := NewProvider(source)
+	require.NoError(t, err)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	state := client.ConnectionState()
+	_, _ = provider.(ContextCertificateProvider).BuildLeafExtensionsContext(ctx, &state, &ea.AuthenticatorRequest{Context: []byte("context")}, leaf)
+	require.ErrorIs(t, source.ctx.Err(), context.Canceled)
 }
 
 func TestProviderBuildLeafExtensionsUsesSessionBinding(t *testing.T) {

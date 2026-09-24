@@ -3,11 +3,9 @@
 package binary
 
 import (
-	"errors"
 	"fmt"
 	"io"
 	"log/slog"
-	"os"
 	"os/exec"
 	"sync"
 
@@ -26,6 +24,7 @@ type binary struct {
 	stdout   io.Writer
 	args     []string
 	cmd      *exec.Cmd
+	stopped  bool
 	mu       sync.Mutex
 }
 
@@ -40,17 +39,22 @@ func NewAlgorithm(logger *slog.Logger, eventsSvc events.Service, algoFile string
 
 func (b *binary) Run() error {
 	b.mu.Lock()
+	if b.stopped {
+		b.mu.Unlock()
+		return algorithm.ErrStopped
+	}
 	b.cmd = execCommand(b.algoFile, b.args...)
+	algorithm.ConfigureCommand(b.cmd)
 	b.cmd.Stderr = b.stderr
 	b.cmd.Stdout = b.stdout
 
-	if err := b.cmd.Start(); err != nil {
+	if err := algorithm.StartCommand(b.cmd); err != nil {
 		b.mu.Unlock()
 		return fmt.Errorf("error starting algorithm: %v", err)
 	}
 	b.mu.Unlock()
 
-	if err := b.cmd.Wait(); err != nil {
+	if err := algorithm.WaitCommand(b.cmd); err != nil {
 		return fmt.Errorf("algorithm execution error: %v", err)
 	}
 
@@ -60,6 +64,7 @@ func (b *binary) Run() error {
 func (b *binary) Stop() error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	b.stopped = true
 
 	if b.cmd == nil {
 		return nil
@@ -69,7 +74,7 @@ func (b *binary) Stop() error {
 		return nil
 	}
 
-	if err := b.cmd.Process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
+	if err := algorithm.StopCommand(b.cmd); err != nil {
 		return fmt.Errorf("error stopping algorithm: %v", err)
 	}
 

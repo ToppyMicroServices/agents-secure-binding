@@ -1,0 +1,8 @@
+flowchart LR
+  DB[(SQLite online state)] --> Eligible[Terminal records past retry horizon]
+  Eligible --> Export[Canonical archive batch]
+  Export --> Verify[Write, hash, fsync, restore-check]
+  Verify --> Commit[Transactional compaction]
+  Commit --> Tomb[(ID tombstones and minimal outcomes)]
+  Commit --> Capacity[Reclaimed online capacity]
+  Pending[Pending or unresolved operations] --> DB

@@ -209,7 +209,7 @@ verifierは`authorization_details`をset包含ではなくexact setとして比�
 
 ## 7. Bound request kinds
 
-v1は次の4種類だけを定義する。記載順がcanonical field順である。
+v1は4種類のmutationと、durable ingress用のresponse recoveryを定義する。記載順がcanonical field順である。
 
 ### 7.1 `ASSIGNMENT_OFFER`
 
@@ -287,6 +287,22 @@ requestは結果の権限範囲を固定する`authority_digest`を束縛し、p
 本文は含めず、そのexact bytesを固定する`content_digest`を使用する。event `at`は
 verifier clockから生成する。
 
+### 7.5 `OPERATION_RECOVER`
+
+この追加kindはdurable ingressの保存済みresponseの取得だけを認可する。
+mutation用grantをrecoveryへ転用してはならない。canonical field順は次の通り。
+
+| Field | Encoding |
+| --- | --- |
+| `participant_id` | UTF-8 identifier |
+| `operation_id` | UTF-8 identifier; 元のmutationの`event_id` |
+| `request_digest` | 元のmutationの32-byte digest |
+
+kindはrequest transcriptへ含まれるため、元のmutationとrecoveryは別のdigestになる。
+同じgrant/session verificationとcurrent policy検査を通した後、保存済みHuman、Actor、
+request digestとの一致を確認し、fresh replayをconsumeして最初のresponseを返す。
+この操作はTaskCoord state machineを再実行せず、保存済みprovenanceも更新しない。
+
 ## 8. Verification algorithm
 
 verifier adapterは一つの閉じたcall boundaryで次を行わなければならない。外部ingressは
@@ -354,16 +370,19 @@ projectionは未検証token、HTTP header、request JSON内の同名fieldから�
   最初のcommit有無をreconcileする。fresh proofによるblind retryは、最初のcommitが成功して
   いればrevision conflictまたはevent conflictになり得る。このconflictを「最初のoperationが
   失敗した」と解釈してはならない。
-- このdemo ingressには外部向けstatus/read endpointとstable business-request outcome journalが
-  ない。cross-proof end-to-end idempotencyを必要とするdeploymentは、request digestに束縛した
-  operation reservationとresponseをTaskCoord mutationとatomicに永続化しなければならない。
-- replay consumeとTaskCoord Store commitは現実装では同一transactionではない。
-  commit error後も結果をunknownとしてreconcileする。このprofileはexactly-onceを主張しない。
+- `HumanTransactionStore`を実装するStoreを接続したIngressは、replay、TaskCoord mutation、
+  outbox、最初の成功responseを同一transactionで永続化する。`OPERATION_RECOVER`はfreshな
+  exact recovery proofで以前のresponseを取得し、元のproof provenanceを保持する。
+- 通常の`taskcoord.Store`だけを接続する構成ではreplayとmutationは別transactionであり、
+  外部recovery routeは使えない。低レベル`Profile`にもatomic persistenceの保証はない。
+- commit error後は結果をunknownとして同じoperation IDからreconcileする。現在のgrantや
+  Human statusが失効した場合、古い成功responseが新しい実行権限を与えることはない。
+  このprofileは外部effectのexactly-onceを主張しない。
 
 ## 11. Participant status
 
 statusはtokenやdigestへ固定せず、operation受理時に再解決する。v1 adapterは実装する
-4種類のrequestについて`ACTIVE` Humanを要求する。
+4種類のmutationとresponse recoveryについて`ACTIVE` Humanを要求する。
 
 将来、`SUSPENDED`または`REVOKED` Humanにもauthority-reducing operationだけを許可する
 場合は、revocation/withdrawal専用entrypointと明示的local policyを定義する。一律に
@@ -448,7 +467,7 @@ endpoint keyやTLS exporterを導出するTLS 1.3/mTLS受付serviceを含む。�
 
 低レベル`Profile`はcallerから渡されたcurrent Assignmentをtrusted Store snapshotとして扱い、
 transitionをStoreへcommitしない。`Ingress`は4種類の
-`gateway-asserted-for-human` requestを受け、request
+`gateway-asserted-for-human` mutation requestを受け、request
 IDからsnapshotを自身でloadし、profile callとStore commitを一つのapplication boundaryに
 置く。Offerはrevision 1のAssignmentを作成し、通常transitionはrevision CASを行い、
 delegationはparent transition、child offer、provenance edgeをatomic commitする。
@@ -470,7 +489,7 @@ Ingress instance全体の有限quotaで制限する。全体quotaは異なるcon
 canonical binding profile自体はJSON表現へ依存しない。repositoryのHTTP受付serviceは独立した
 `schemas/asb-taskcoord-human-ingress-v1.schema.json`でchallenge/execute envelopeを検証する。
 公開済みschema IDはrequest-only unionのまま維持し、endpoint実装はその
-`challengeEnvelope`または`executeEnvelope`部分schemaを選んで検証する。これにより、
+`challengeEnvelope`、`executeEnvelope`、recovery用の`executeRecovery`部分schemaを選んで検証する。これにより、
 challenge形状をexecute routeへ送るcross-route substitutionをchallenge lookupより前に拒否する。
 認証済みprojectionやASB evidenceは既存Task Participant durable-document unionへ追加しない。
 JSON Schemaによるshape検査は署名、issuer、audience、live TLS binding、registry state、

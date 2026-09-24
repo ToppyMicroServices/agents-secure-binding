@@ -1,0 +1,22 @@
+{
+  "profileVersion": 1,
+  "id": "windows-runner",
+  "claim": "Windows computation-runner process-tree containment on the recorded Windows target",
+  "targetOs": ["windows"],
+  "checks": [
+    {
+      "id": "algorithm-tests",
+      "required": true,
+      "command": ["go", "test", "-count=1", "./agent/algorithm/..."],
+      "timeoutSeconds": 600,
+      "environment": {"GOWORK": "off"}
+    },
+    {
+      "id": "runner-tests",
+      "required": true,
+      "command": ["go", "test", "-count=1", "./cmd/computation-runner"],
+      "timeoutSeconds": 600,
+      "environment": {"GOWORK": "off"}
+    }
+  ]
+}

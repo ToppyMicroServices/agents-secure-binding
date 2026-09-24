@@ -409,6 +409,79 @@ func TestUnzipFromMemory_MoreEdgeCases(t *testing.T) {
 	})
 }
 
+func TestUnzipFromMemory_RejectsPreexistingSymlinks(t *testing.T) {
+	makeZip := func(t *testing.T, name string) []byte {
+		t.Helper()
+		var buf bytes.Buffer
+		zw := zip.NewWriter(&buf)
+		entry, err := zw.Create(name)
+		require.NoError(t, err)
+		_, err = entry.Write([]byte("archive content"))
+		require.NoError(t, err)
+		require.NoError(t, zw.Close())
+		return buf.Bytes()
+	}
+
+	t.Run("parent symlink", func(t *testing.T) {
+		target := t.TempDir()
+		outside := t.TempDir()
+		if err := os.Symlink(outside, filepath.Join(target, "link")); err != nil {
+			t.Skipf("symlink unavailable: %v", err)
+		}
+
+		err := UnzipFromMemory(makeZip(t, "link/escape.txt"), target)
+		require.Error(t, err)
+		_, statErr := os.Stat(filepath.Join(outside, "escape.txt"))
+		assert.ErrorIs(t, statErr, os.ErrNotExist)
+	})
+
+	t.Run("final symlink", func(t *testing.T) {
+		target := t.TempDir()
+		outside := filepath.Join(t.TempDir(), "outside.txt")
+		require.NoError(t, os.WriteFile(outside, []byte("original"), 0o600))
+		if err := os.Symlink(outside, filepath.Join(target, "escape.txt")); err != nil {
+			t.Skipf("symlink unavailable: %v", err)
+		}
+
+		err := UnzipFromMemory(makeZip(t, "escape.txt"), target)
+		require.Error(t, err)
+		content, readErr := os.ReadFile(outside)
+		require.NoError(t, readErr)
+		assert.Equal(t, "original", string(content))
+	})
+
+	t.Run("destination symlink", func(t *testing.T) {
+		parent := t.TempDir()
+		outside := t.TempDir()
+		target := filepath.Join(parent, "target")
+		if err := os.Symlink(outside, target); err != nil {
+			t.Skipf("symlink unavailable: %v", err)
+		}
+
+		err := UnzipFromMemory(makeZip(t, "escape.txt"), target)
+		require.Error(t, err)
+		_, statErr := os.Stat(filepath.Join(outside, "escape.txt"))
+		assert.ErrorIs(t, statErr, os.ErrNotExist)
+	})
+
+	t.Run("hardlink", func(t *testing.T) {
+		target := t.TempDir()
+		outside := filepath.Join(t.TempDir(), "outside.txt")
+		require.NoError(t, os.WriteFile(outside, []byte("original"), 0o600))
+		if err := os.Link(outside, filepath.Join(target, "escape.txt")); err != nil {
+			t.Skipf("hardlink unavailable: %v", err)
+		}
+
+		require.NoError(t, UnzipFromMemory(makeZip(t, "escape.txt"), target))
+		outsideContent, err := os.ReadFile(outside)
+		require.NoError(t, err)
+		assert.Equal(t, "original", string(outsideContent))
+		extractedContent, err := os.ReadFile(filepath.Join(target, "escape.txt"))
+		require.NoError(t, err)
+		assert.Equal(t, "archive content", string(extractedContent))
+	})
+}
+
 func TestUnzipFromMemory_InvalidReader(t *testing.T) {
 	err := UnzipFromMemory([]byte("invalid"), t.TempDir())
 	assert.Error(t, err)

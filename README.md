@@ -112,7 +112,7 @@ that local policy.
 | Cocos adapter | **Experimental:** `v0.1.1` | Optional, independently versioned integration; not in the ASB root dependency graph |
 | Agent ↔ Human TaskCoord | **Experimental, current branch / next prerelease candidate** | Human Participant, gateway Actor, bounded TLS ingress, and a Redis/Valkey store candidate; live backend qualification incomplete |
 | Agent → Human relay | **Experimental, current branch / next prerelease candidate** | One active reachability grant queues one opaque relay intent; local gateway only, no real delivery provider |
-| Task–Action lifecycle | **Experimental, current branch / next prerelease candidate** | Separate responsibility and execution state machines; reference store only for the Action binding |
+| Task–Action lifecycle | **Experimental, current branch / next prerelease candidate** | Separate responsibility and execution state machines; bounded single-host SQLite transaction adapter |
 | Local Human approval app | **Experimental, current branch** | Browser inbox, real software-only ASB/mTLS, and SQLite-backed local setting changes; one trusted host and user |
 | Least-privilege execution | **Experimental, current branch** | Finite optimization, ASB-bound prior mandates, durable single-host admission, and a limited S3 executor; live AWS qualification pending |
 
@@ -316,13 +316,13 @@ surface; it does not send Email, SNS messages, or telephone calls.
 This is a repository-level experimental implementation, not a complete Human
 interaction product. The Redis/Valkey adapter has been exercised against a
 stateful TLS protocol test double, not a live Redis or Valkey deployment or a
-failover topology. The Action binding and Agent relay still use in-process
-reference stores. The local approval app has its own browser UI and SQLite
+failover topology. The [SQLite coordination adapter](docs/taskcoord-sqlite-store.md)
+now shares TaskCoord, Action, replay, outcome and outbox transactions, with local
+restart and multiprocess tests. Agent relay still uses an in-process reference store. The local approval app has its own browser UI and SQLite
 outcome journal; it does not provide those features for generic TaskCoord or
 relay operations. That broader coordination surface still lacks an end-user
 UI, contact vault, Email/SNS/TEL provider, general matching network, relay
-challenge/execute endpoint, outbox publisher, cross-proof Human-ingress outcome
-journal, and production-qualified deployment.
+challenge/execute endpoint, outbox publisher, and production-qualified deployment.
 
 Agent-authored TaskCoord operations, non-initial Action mutations, and
 consent/grant administration currently accept verifier-created internal

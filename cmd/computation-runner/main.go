@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 
 	"github.com/ToppyMicroServices/agents-secure-binding/v2/agent/cvms"
@@ -93,34 +94,13 @@ func main() {
 
 	eventSvc := runnerevents.NewAdapter(logClient, svcName)
 
-	// Remove existing socket if it exists
-	if _, err := os.Stat(socketPath); err == nil {
-		if err := os.Remove(socketPath); err != nil {
-			logger.Error(fmt.Sprintf("failed to remove existing socket: %s", err))
-			exitCode = 1
-			return
-		}
-	}
-
-	dir := socketPath[:len(socketPath)-len("/runner.sock")]
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		logger.Error(fmt.Sprintf("failed to create socket directory: %s", err))
-		exitCode = 1
-		return
-	}
-
-	lis, err := net.Listen("unix", socketPath)
+	lis, err := listenRunnerSocket(socketPath)
 	if err != nil {
 		logger.Error(fmt.Sprintf("failed to listen on socket: %s", err))
 		exitCode = 1
 		return
 	}
-
-	if err := os.Chmod(socketPath, 0o777); err != nil {
-		logger.Error(fmt.Sprintf("failed to chmod socket: %s", err))
-		exitCode = 1
-		return
-	}
+	defer lis.Close()
 
 	grpcServer := grpc.NewServer()
 	svc := service.New(logger, eventSvc)
@@ -150,4 +130,31 @@ func main() {
 	if err := g.Wait(); err != nil {
 		logger.Error(fmt.Sprintf("%s terminated: %s", svcName, err))
 	}
+}
+
+func listenRunnerSocket(path string) (net.Listener, error) {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return nil, fmt.Errorf("create socket directory: %w", err)
+	}
+	if info, err := os.Lstat(path); err == nil {
+		if info.Mode()&os.ModeSocket == 0 {
+			return nil, fmt.Errorf("refuse to replace non-socket path %q", path)
+		}
+		if err := os.Remove(path); err != nil {
+			return nil, fmt.Errorf("remove existing socket: %w", err)
+		}
+	} else if !os.IsNotExist(err) {
+		return nil, fmt.Errorf("inspect existing socket: %w", err)
+	}
+	lis, err := net.Listen("unix", path)
+	if err != nil {
+		return nil, err
+	}
+	if err := os.Chmod(path, 0o600); err != nil {
+		_ = lis.Close()
+		_ = os.Remove(path)
+		return nil, fmt.Errorf("restrict socket: %w", err)
+	}
+	return lis, nil
 }

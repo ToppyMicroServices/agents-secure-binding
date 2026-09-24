@@ -22,6 +22,13 @@ type CertificateProvider interface {
 	BuildLeafExtensions(st *tls.ConnectionState, req *ea.AuthenticatorRequest, leaf *x509.Certificate) ([]ea.Extension, error)
 }
 
+// ContextCertificateProvider allows a listener handshake deadline to cancel
+// evidence collection as well as socket I/O.
+type ContextCertificateProvider interface {
+	CertificateProvider
+	BuildLeafExtensionsContext(context.Context, *tls.ConnectionState, *ea.AuthenticatorRequest, *x509.Certificate) ([]ea.Extension, error)
+}
+
 type provider struct {
 	evidenceSource eaattestation.EvidenceSource
 }
@@ -34,6 +41,13 @@ func NewProvider(evidenceSource eaattestation.EvidenceSource) (CertificateProvid
 }
 
 func (p *provider) BuildLeafExtensions(st *tls.ConnectionState, req *ea.AuthenticatorRequest, leaf *x509.Certificate) ([]ea.Extension, error) {
+	return p.BuildLeafExtensionsContext(context.Background(), st, req, leaf)
+}
+
+func (p *provider) BuildLeafExtensionsContext(ctx context.Context, st *tls.ConnectionState, req *ea.AuthenticatorRequest, leaf *x509.Certificate) ([]ea.Extension, error) {
+	if ctx == nil {
+		return nil, fmt.Errorf("atls: missing evidence context")
+	}
 	if st == nil || req == nil || leaf == nil {
 		return nil, fmt.Errorf("atls: missing state, request, or leaf certificate")
 	}
@@ -47,7 +61,7 @@ func (p *provider) BuildLeafExtensions(st *tls.ConnectionState, req *ea.Authenti
 	var nonce [32]byte
 	copy(nonce[:], nonceBytes[:])
 
-	result, err := p.evidenceSource.GetEvidence(context.Background(), eaattestation.EvidenceRequest{
+	result, err := p.evidenceSource.GetEvidence(ctx, eaattestation.EvidenceRequest{
 		ReportData: reportData,
 		Nonce:      nonce,
 	})

@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"testing"
 
+	"golang.org/x/crypto/sha3"
 	"google.golang.org/grpc/metadata"
 )
 
@@ -25,6 +26,31 @@ func TestDatasetsString(t *testing.T) {
 
 	if result != expected {
 		t.Errorf("Datasets.String() = %v, want %v", result, expected)
+	}
+}
+
+func TestAlgorithmCommitmentPreservesOnlySafeLegacyCase(t *testing.T) {
+	program := []byte("program")
+	if got, want := AlgorithmCommitment("", nil, program, nil), sha3.Sum256(program); got != want {
+		t.Fatalf("legacy binary commitment = %x, want %x", got, want)
+	}
+	if got, want := AlgorithmCommitment("python", nil, program, nil), ExecutionBundleHash("python", nil, program, nil); got != want {
+		t.Fatalf("python commitment = %x, want %x", got, want)
+	}
+}
+
+func TestExecutionBundleHashBindsEveryRuntimeInput(t *testing.T) {
+	base := ExecutionBundleHash("python", []string{"--mode=strict"}, []byte("print('ok')"), []byte("pkg==1.0\n"))
+	variants := [][32]byte{
+		ExecutionBundleHash("bin", []string{"--mode=strict"}, []byte("print('ok')"), []byte("pkg==1.0\n")),
+		ExecutionBundleHash("python", []string{"--mode=other"}, []byte("print('ok')"), []byte("pkg==1.0\n")),
+		ExecutionBundleHash("python", []string{"--mode=strict"}, []byte("print('changed')"), []byte("pkg==1.0\n")),
+		ExecutionBundleHash("python", []string{"--mode=strict"}, []byte("print('ok')"), []byte("pkg==2.0\n")),
+	}
+	for i, variant := range variants {
+		if variant == base {
+			t.Fatalf("runtime input mutation %d did not change bundle hash", i)
+		}
 	}
 }
 

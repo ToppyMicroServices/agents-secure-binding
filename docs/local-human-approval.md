@@ -236,10 +236,33 @@ trusted OS user. Receipts are created exclusively, flushed before submission,
 and restricted to their owner on Unix. Windows access depends on the user's
 directory permissions; Unix file modes do not establish Windows ACLs.
 
-Local credentials expire one year after initialization. There is no
-credential-renewal or data-migration command yet, so this preview is not a
-long-term storage service. Do not discard old state to repair credential
-errors; retaining its history requires an explicit renewal or migration plan.
+Local credentials expire one year after initialization. Stop every process
+using the data directory, inspect the non-secret status, and rotate the complete
+local trust generation before expiry:
+
+```text
+asb-human credentials-status --data-dir ./.asb-human
+asb-human credentials-rotate --data-dir ./.asb-human
+```
+
+Rotation stages and validates a complete CA, server, agent, gateway, and
+authority-key generation before atomically selecting it. It does not move or
+rewrite the SQLite database, receipts, or bootstrap token. Previous generations
+remain private in `credential-generations` as recovery evidence; there is no
+supported rollback or automatic cleanup command yet. The data-directory lock rejects
+rotation while `serve`, `demo`, `agent`, `inspect`, or a storage operation is
+active.
+
+Rotate the bootstrap token independently after stopping the service, then
+restart it so the old in-memory browser sessions are gone:
+
+```text
+asb-human token-rotate --data-dir ./.asb-human
+```
+
+The command never prints the new token. The next `serve` or `demo` invocation
+prints the new private login URL. Rotation cannot remediate keys or tokens that
+were already copied from a compromised host.
 
 For a simple backup, stop the service and copy the **complete private
 directory**, including keys, receipts, and database sidecars. Do not copy only
@@ -259,6 +282,32 @@ retained without automatic deletion. STATUS and INBOX return current state,
 not old read receipts. Expired replay entries are cleaned during transactions,
 with at most 100,000 live replay entries. Reaching a limit rejects new work
 rather than evicting recovery records.
+
+Inspect the current online counts and limits without deleting records:
+
+```text
+asb-human storage-status --data-dir ./.asb-human
+```
+
+Create a consistent SQLite snapshot with a SHA-256-bound JSON manifest, then
+verify it independently:
+
+```text
+asb-human storage-export --data-dir ./.asb-human \
+  --output /private/archive/asb-human-2026-09-22.sqlite
+asb-human storage-verify --data-dir ./.asb-human \
+  --archive /private/archive/asb-human-2026-09-22.sqlite
+```
+
+The archive directory must be private on Unix, and existing archive or manifest
+files are never replaced. Verification on Unix creates a private temporary
+snapshot, rereads the source to reject in-place changes, and therefore needs
+free temporary space up to the archive size. On
+Windows it holds the archive open without write, delete, or rename sharing for
+the duration of verification. Export does not compact the online database, so
+the 5,000/10,000 limits remain a fail-closed boundary. Long-running deployments
+still need a selected retention policy and a tested compaction/tombstone design
+before they can reclaim online capacity.
 
 </details>
 

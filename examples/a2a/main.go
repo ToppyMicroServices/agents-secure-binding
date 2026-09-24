@@ -564,8 +564,7 @@ func writeDecision(w http.ResponseWriter, status int, decision decisionResponse)
 }
 
 func requestContext(body []byte) []byte {
-	context := make([]byte, 0, len(body)+len("POST\n/tasks\n"))
-	context = append(context, []byte("POST\n/tasks\n")...)
+	context := []byte("POST\n/tasks\n")
 	return append(context, body...)
 }
 

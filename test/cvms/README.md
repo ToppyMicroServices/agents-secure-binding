@@ -29,6 +29,7 @@ The service is configured using environment variables from the following table. 
 | Flag | Description |
 | ---- | ----------- |
 | `-algo-path` | Path to the algorithm file (required if not using remote algorithm) |
+| `-algo-requirements-path` | Optional `requirements.txt` path included in the algorithm commitment |
 | `-data-paths` | Comma-separated paths to dataset files (optional) |
 
 ### Remote Resource Mode Flags
@@ -40,9 +41,9 @@ The service is configured using environment variables from the following table. 
 | `-algo-kbs-path` | Algorithm KBS resource path (e.g., 'default/key/algo-key') |
 | `-dataset-source-urls` | Comma-separated dataset source URLs |
 | `-dataset-kbs-paths` | Comma-separated dataset KBS resource paths |
-| `-algo-type` | Algorithm execution type (binary, python, docker, etc.) |
+| `-algo-type` | Algorithm execution type (`bin`, `python`, `wasm`, or `docker`) |
 | `-algo-args` | Comma-separated algorithm arguments |
-| `-algo-hash` | Expected SHA3-256 hash of decrypted algorithm (hex) |
+| `-algo-hash` | Expected execution-bundle commitment (hex); see `docs/execution-bundle-hash-v1.md` |
 | `-dataset-hash` | Expected SHA3-256 hash of decrypted dataset (hex) |
 | `-dataset-decompress` | Whether to decompress datasets (true,false) |
 
@@ -122,8 +123,8 @@ go run ./test/cvms/main.go \
 - **Either** `-algo-path` **OR** (`-algo-source-url` AND `-algo-kbs-path`) must be provided.
 - When using remote datasets, `-dataset-source-urls` and `-dataset-kbs-paths` must have the same number of comma-separated values.
 - The `-kbs-url` flag should be provided when using any remote resources.
-- **Checksum Verification**: For remote resources, you must provide the actual SHA3-256 hash of the **decrypted plaintext** content via `-algo-hash` and `-dataset-hash`. The Agent will verify this hash after downloading and decrypting the resource.
-- **Calculating Hashes**: Use `cocos-cli checksum <path>` on your local source files (or directories) to generate the correct hash for the manifest.
+- **Commitment Verification**: Algorithm commitments bind the runtime type, ordered arguments, program bytes and exact requirements bytes. Dataset hashes continue to cover the decrypted dataset bytes.
+- **Calculating Hashes**: Direct mode computes the algorithm commitment automatically. Remote publishers must use `agent.AlgorithmCommitment`; `cocos-cli checksum` remains suitable only for dataset hashes and the legacy argument-free binary case.
 - See [TESTING_REMOTE_RESOURCES.md](../../agent/TESTING_REMOTE_RESOURCES.md) for a complete guide on testing remote resource downloads with KBS attestation.
 
 ## Architecture

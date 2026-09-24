@@ -183,7 +183,11 @@ func (p Profile) Verify(ctx context.Context, req VerifyRequest) (AcceptedIdentit
 		return AcceptedIdentity{}, fmt.Errorf("verify attestation: %w", err)
 	}
 
-	replayExpiry := earliestTime(verified.statement.Binding.ExpiresAt, req.Attestation.ExpiresAt, verified.grant.ExpiresAt)
+	// Attestation results may be renewed for the same authorization tuple, so
+	// their shorter lifetime must not retire the replay tombstone. Retain it for
+	// the full period in which both the grant and binding can still be accepted,
+	// including each authority's configured verification skew.
+	replayExpiry := identityReplayExpiry(verified, p.GrantAuthority.ClockSkew, p.BindingAuthority.ClockSkew)
 	replayKey := strings.Join([]string{
 		"asb.production.v1",
 		verified.grant.GrantHash,
@@ -338,4 +342,11 @@ func earliestTime(values ...time.Time) time.Time {
 		}
 	}
 	return earliest
+}
+
+func identityReplayExpiry(verified verifiedIdentity, grantSkew, bindingSkew time.Duration) time.Time {
+	return earliestTime(
+		verified.grant.ExpiresAt.Add(grantSkew),
+		verified.statement.Binding.ExpiresAt.Add(bindingSkew),
+	)
 }

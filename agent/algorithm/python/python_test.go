@@ -3,8 +3,11 @@
 package python
 
 import (
+	"archive/zip"
 	"bytes"
 	"context"
+	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"os"
@@ -12,7 +15,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/agent/algorithm"
 	"github.com/ToppyMicroServices/agents-secure-binding/v2/agent/algorithm/logging"
 	"github.com/ToppyMicroServices/agents-secure-binding/v2/agent/events/mocks"
 	"github.com/stretchr/testify/assert"
@@ -22,6 +27,53 @@ import (
 )
 
 const runtime = "python3"
+
+func TestStopDuringPreparationPreventsAlgorithmStart(t *testing.T) {
+	dir := t.TempDir()
+	entered := filepath.Join(dir, "entered")
+	started := filepath.Join(dir, "started")
+	runtimePath := filepath.Join(dir, "runtime")
+	runtimeScript := "#!/bin/sh\nsleep 30 &\nchild=$!\n: > " + entered + "\nwait \"$child\"\n"
+	if err := os.WriteFile(runtimePath, []byte(runtimeScript), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	algoPath := filepath.Join(dir, "algo.py")
+	if err := os.WriteFile(algoPath, []byte("from pathlib import Path\nPath("+fmt.Sprintf("%q", started)+").write_text('started')\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	p := NewAlgorithm(logger, nil, runtimePath, "", algoPath, nil, "stop-during-preparation")
+	t.Cleanup(func() { _ = p.Stop() })
+	done := make(chan error, 1)
+	go func() { done <- p.Run() }()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		if _, err := os.Stat(entered); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("preparation command did not start")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if err := p.Stop(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("canceled preparation returned success")
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("canceled preparation left a descendant holding the run open")
+	}
+	if _, err := os.Stat(started); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("algorithm started after Stop: %v", err)
+	}
+	if err := p.Run(); !errors.Is(err, algorithm.ErrStopped) {
+		t.Fatalf("second Run after Stop = %v, want ErrStopped", err)
+	}
+}
 
 func TestPythonRunTimeToContext(t *testing.T) {
 	ctx := context.Background()
@@ -118,13 +170,14 @@ func TestRunWithRequirements(t *testing.T) {
 	}
 	defer os.RemoveAll(tmpDir)
 
-	scriptContent := []byte("import requests\nprint(requests.__version__)")
+	wheelPath := writeTestWheel(t, tmpDir)
+	scriptContent := []byte("import asb_test_dependency\nprint(asb_test_dependency.VERSION)")
 	scriptPath := filepath.Join(tmpDir, "test_script.py")
 	if err := os.WriteFile(scriptPath, scriptContent, 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	requirementsContent := []byte("requests==2.26.0")
+	requirementsContent := []byte(wheelPath + "\n")
 	requirementsPath := filepath.Join(tmpDir, "requirements.txt")
 	if err := os.WriteFile(requirementsPath, requirementsContent, 0o644); err != nil {
 		t.Fatal(err)
@@ -148,9 +201,32 @@ func TestRunWithRequirements(t *testing.T) {
 		t.Fatalf("Unexpected error: %v", err)
 	}
 
-	if !strings.Contains(stdout.String(), "2.26.0") {
-		t.Errorf("Expected output to contain requests version 2.26.0, got %q", stdout.String())
+	if !strings.Contains(stdout.String(), "1.0.0") {
+		t.Errorf("Expected output to contain local dependency version 1.0.0, got %q", stdout.String())
 	}
+}
+
+func writeTestWheel(t *testing.T, dir string) string {
+	t.Helper()
+	wheelPath := filepath.Join(dir, "asb_test_dependency-1.0.0-py3-none-any.whl")
+	file, err := os.Create(wheelPath)
+	require.NoError(t, err)
+	archive := zip.NewWriter(file)
+	files := map[string]string{
+		"asb_test_dependency.py":                       "VERSION = '1.0.0'\n",
+		"asb_test_dependency-1.0.0.dist-info/METADATA": "Metadata-Version: 2.1\nName: asb-test-dependency\nVersion: 1.0.0\n",
+		"asb_test_dependency-1.0.0.dist-info/WHEEL":    "Wheel-Version: 1.0\nGenerator: ASB test\nRoot-Is-Purelib: true\nTag: py3-none-any\n",
+		"asb_test_dependency-1.0.0.dist-info/RECORD":   "asb_test_dependency.py,,\nasb_test_dependency-1.0.0.dist-info/METADATA,,\nasb_test_dependency-1.0.0.dist-info/WHEEL,,\nasb_test_dependency-1.0.0.dist-info/RECORD,,\n",
+	}
+	for name, contents := range files {
+		entry, createErr := archive.Create(name)
+		require.NoError(t, createErr)
+		_, writeErr := entry.Write([]byte(contents))
+		require.NoError(t, writeErr)
+	}
+	require.NoError(t, archive.Close())
+	require.NoError(t, file.Close())
+	return wheelPath
 }
 
 func TestStop(t *testing.T) {
@@ -217,7 +293,7 @@ func TestRun_Errors(t *testing.T) {
 		require.NoError(t, os.WriteFile(scriptPath, []byte("print(1)"), 0o644))
 
 		reqPath := filepath.Join(tmpDir, "requirements.txt")
-		require.NoError(t, os.WriteFile(reqPath, []byte("non-existent-package==9.9.9"), 0o644))
+		require.NoError(t, os.WriteFile(reqPath, []byte("/definitely/missing-package.whl\n"), 0o644))
 
 		algo := &python{
 			algoFile:         scriptPath,

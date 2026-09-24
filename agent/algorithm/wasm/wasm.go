@@ -3,11 +3,9 @@
 package wasm
 
 import (
-	"errors"
 	"fmt"
 	"io"
 	"log/slog"
-	"os"
 	"os/exec"
 	"sync"
 
@@ -30,6 +28,7 @@ type wasm struct {
 	stdout   io.Writer
 	args     []string
 	cmd      *exec.Cmd
+	stopped  bool
 	mu       sync.Mutex
 }
 
@@ -46,17 +45,22 @@ func (w *wasm) Run() error {
 	args := append(mapDirOption, w.algoFile)
 	args = append(args, w.args...)
 	w.mu.Lock()
+	if w.stopped {
+		w.mu.Unlock()
+		return algorithm.ErrStopped
+	}
 	w.cmd = execCommand(wasmRuntime, args...)
+	algorithm.ConfigureCommand(w.cmd)
 	w.cmd.Stderr = w.stderr
 	w.cmd.Stdout = w.stdout
 
-	if err := w.cmd.Start(); err != nil {
+	if err := algorithm.StartCommand(w.cmd); err != nil {
 		w.mu.Unlock()
 		return fmt.Errorf("error starting algorithm: %v", err)
 	}
 	w.mu.Unlock()
 
-	if err := w.cmd.Wait(); err != nil {
+	if err := algorithm.WaitCommand(w.cmd); err != nil {
 		return fmt.Errorf("algorithm execution error: %v", err)
 	}
 
@@ -66,6 +70,7 @@ func (w *wasm) Run() error {
 func (w *wasm) Stop() error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
+	w.stopped = true
 
 	if w.cmd == nil {
 		return nil
@@ -75,7 +80,7 @@ func (w *wasm) Stop() error {
 		return nil
 	}
 
-	if err := w.cmd.Process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
+	if err := algorithm.StopCommand(w.cmd); err != nil {
 		return fmt.Errorf("error stopping algorithm: %v", err)
 	}
 

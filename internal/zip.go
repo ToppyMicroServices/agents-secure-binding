@@ -15,6 +15,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/internal/safearchive"
 )
 
 var errUnsafeZipPath = errors.New("unsafe zip entry path")
@@ -153,9 +155,11 @@ func UnzipFromMemory(zipData []byte, targetDir string) error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(root, 0o755); err != nil {
+	extractionRoot, err := safearchive.OpenRoot(root, 0o755)
+	if err != nil {
 		return err
 	}
+	defer extractionRoot.Close()
 
 	reader := bytes.NewReader(zipData)
 	zipReader, err := zip.NewReader(reader, int64(len(zipData)))
@@ -168,17 +172,14 @@ func UnzipFromMemory(zipData []byte, targetDir string) error {
 		if err != nil {
 			return err
 		}
-		filePath, err := zipEntryTarget(root, cleanName)
-		if err != nil {
-			return err
-		}
+		entryName := filepath.FromSlash(cleanName)
 
 		mode := file.FileInfo().Mode()
 		if mode&os.ModeSymlink != 0 {
 			return fmt.Errorf("%w: symlink %q", errUnsafeZipPath, file.Name)
 		}
 		if file.FileInfo().IsDir() {
-			if err := os.MkdirAll(filePath, 0o755); err != nil {
+			if err := extractionRoot.MkdirAll(entryName, 0o755); err != nil {
 				return err
 			}
 			continue
@@ -186,7 +187,7 @@ func UnzipFromMemory(zipData []byte, targetDir string) error {
 		if mode&os.ModeType != 0 {
 			return fmt.Errorf("%w: unsupported file type %q", errUnsafeZipPath, file.Name)
 		}
-		if err := extractZipFile(file, filePath); err != nil {
+		if err := extractZipFile(file, extractionRoot, entryName); err != nil {
 			return err
 		}
 	}
@@ -207,23 +208,7 @@ func cleanZipEntryName(name string) (string, error) {
 	return cleanName, nil
 }
 
-func zipEntryTarget(root, cleanName string) (string, error) {
-	target := filepath.Join(root, filepath.FromSlash(cleanName))
-	rel, err := filepath.Rel(root, target)
-	if err != nil {
-		return "", err
-	}
-	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return "", fmt.Errorf("%w: %q", errUnsafeZipPath, cleanName)
-	}
-	return target, nil
-}
-
-func extractZipFile(file *zip.File, filePath string) error {
-	if err := os.MkdirAll(filepath.Dir(filePath), 0o755); err != nil {
-		return err
-	}
-
+func extractZipFile(file *zip.File, root *os.Root, filePath string) error {
 	src, err := file.Open()
 	if err != nil {
 		return err
@@ -234,12 +219,5 @@ func extractZipFile(file *zip.File, filePath string) error {
 	if perm == 0 {
 		perm = 0o644
 	}
-	dst, err := os.OpenFile(filePath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, perm)
-	if err != nil {
-		return err
-	}
-	defer dst.Close()
-
-	_, err = io.Copy(dst, src)
-	return err
+	return safearchive.WriteFile(root, filePath, perm, src)
 }

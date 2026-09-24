@@ -231,11 +231,15 @@ func (p *proxyServer) attestedListener(addr string, tlsConfig *tls.Config, ident
 		_ = os.Remove(address)
 	}
 
-	return atls.Listen(network, address, &atls.ServerConfig{
+	serverConfig := &atls.ServerConfig{
 		TLSConfig:           tlsConfig,
 		Identity:            identity,
 		BuildLeafExtensions: p.certProvider.BuildLeafExtensions,
-	})
+	}
+	if provider, ok := p.certProvider.(atls.ContextCertificateProvider); ok {
+		serverConfig.BuildLeafExtensionsContext = provider.BuildLeafExtensionsContext
+	}
+	return atls.Listen(network, address, serverConfig)
 }
 
 // Stop stops the proxy server.

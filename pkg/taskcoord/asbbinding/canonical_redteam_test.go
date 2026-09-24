@@ -100,8 +100,17 @@ func FuzzHumanIngressStrictJSONDifferential(f *testing.F) {
 			`"participant_id":"human:fuzz","event_id":"event:fuzz","task_id":"task:fuzz",` +
 			`"assignment_id":"assignment:fuzz","operation":"ACCEPT","expected_revision":1}}`,
 	)
+	recovery := []byte(
+		`{"operation":"OPERATION_RECOVER","request":{"participant_id":"human:fuzz",` +
+			`"operation_id":"event:fuzz","request_digest":"` + strings.Repeat("a", 64) + `"}}`,
+	)
 	seeds := [][]byte{
 		valid,
+		recovery,
+		bytes.Replace(recovery, []byte("human:fuzz"), []byte(strings.Repeat("é", maxIDBytes/2)), 1),
+		bytes.Replace(recovery, []byte("human:fuzz"), []byte(strings.Repeat("é", maxIDBytes/2+1)), 1),
+		bytes.Replace(recovery, []byte("event:fuzz"), []byte(strings.Repeat("é", maxIDBytes/2+1)), 1),
+		bytes.Replace(recovery, []byte(`"operation_id":"event:fuzz"`), []byte(`"operation_id":"event:fuzz","operation_id":"event:other"`), 1),
 		[]byte(`{"operation":"ASSIGNMENT_TRANSITION","oper\u0061tion":"INTERACTION_APPEND","request":{}}`),
 		[]byte(`{"request":{"participant_id":"human:one","p\u0061rticipant_id":"human:two"}}`),
 		{'{', '"', 'x', '"', ':', '"', 0xff, '"', '}'},
@@ -213,6 +222,11 @@ func knownSchemaSemanticGap(operation operationEnvelope) bool {
 		) || anyUTF8ValueOver(maxReferenceBytes, request.ContentRef, request.EvidenceRef) ||
 			(request.InReplyTo != "" && request.InReplyTo == request.EventID) ||
 			(request.Supersedes != "" && request.Supersedes == request.EventID)
+	case RequestKindOperationRecover:
+		if operation.recovery == nil {
+			return false
+		}
+		return anyUTF8ValueOver(maxIDBytes, operation.recovery.ParticipantID, operation.recovery.OperationID)
 	default:
 		return false
 	}
@@ -237,6 +251,8 @@ func canonicalRedTeamDigest(operation operationEnvelope) (Digest, error) {
 		return DelegationDigest(*operation.delegation)
 	case RequestKindInteractionAppend:
 		return InteractionDigest(*operation.interaction)
+	case RequestKindOperationRecover:
+		return RecoveryDigest(*operation.recovery)
 	default:
 		return Digest{}, ErrUnsupportedOperationKind
 	}
@@ -277,6 +293,7 @@ func TestCanonicalRequestKindsSeparateIdenticalPayloads(t *testing.T) {
 		RequestKindAssignmentTransition,
 		RequestKindAssignmentDelegation,
 		RequestKindInteractionAppend,
+		RequestKindOperationRecover,
 	}
 	seen := make(map[Digest]RequestKind, len(kinds))
 	for _, kind := range kinds {

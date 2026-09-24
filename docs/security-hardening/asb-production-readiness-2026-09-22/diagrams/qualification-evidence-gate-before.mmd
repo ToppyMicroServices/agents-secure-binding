@@ -1,0 +1,5 @@
+flowchart LR
+  Source[Source revision] --> Local[Local tests and cross-builds]
+  Local --> Notes[Human validation notes]
+  Notes --> Preview[Developer Preview]
+  Env[Real deployment properties] -.not fully captured.-> Unknown[Unqualified boundaries]

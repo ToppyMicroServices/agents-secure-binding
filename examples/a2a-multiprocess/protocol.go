@@ -34,8 +34,7 @@ func canonicalRequestContext(request a2aSendMessageRequest) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("canonicalize A2A request: %w", err)
 	}
-	contextValue := make([]byte, 0, len(payload)+32)
-	contextValue = append(contextValue, "A2A/1.0\nPOST\n/message:send\n"...)
+	contextValue := []byte("A2A/1.0\nPOST\n/message:send\n")
 	return append(contextValue, payload...), nil
 }
 

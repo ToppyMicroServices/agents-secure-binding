@@ -12,6 +12,11 @@ Run the same bounded gate used by the dedicated CI job:
 make human-coordination-red-team
 ```
 
+The required `product-security` CI job runs `make human-coordination-gate`.
+That target includes the same red-team package set and the end-to-end example
+in one Go test invocation, plus independent Python checks for Action and Human recovery transcripts. Both targets
+share the red-team package list in the Makefile.
+
 The gate runs with the race detector and a fresh test process. It covers:
 
 - Human-versus-relay profile substitution, wrong audience, operation-kind
@@ -25,6 +30,9 @@ The gate runs with the race detector and a fresh test process. It covers:
   and zero-time exclusion; any other schema/semantic differential fails;
 - TLS 1.3 loopback tests for HTTP/2 concurrent challenge use and challenge reuse
   across a resumed connection;
+- SQLite-backed mTLS recovery for all four Human mutations, multiprocess retries,
+  process termination around commit, shared revoke/start ordering, outbox fencing,
+  write-failure rollback and backup/restore;
 - existing fault tests for replay reservation, operation-journal persistence,
   TaskCoord commit-result uncertainty, relay callback failure, invalid provider
   acknowledgement, revocation races, and at-most-one provider invocation; and
@@ -50,12 +58,12 @@ that were run.
 
 ## Evidence boundary and remaining qualification
 
-The bounded gate uses in-process reference stores, a loopback TLS server, test
-keys, and a synthetic gateway. It does not qualify:
+The bounded gate uses reference stores, actual local SQLite databases, independent
+processes, loopback TLS, test keys and a synthetic gateway. Its local SQLite
+results are described in the [adapter guide](taskcoord-sqlite-store.md). It does not qualify:
 
 - Redis or Valkey persistence, replication, partitions, failover, or host loss;
-- a production TaskCoord or Task–Action database transaction across multiple
-  processes;
+- a selected production deployment, multi-host database failover or host loss;
 - provider reconciliation after an externally successful callback whose local
   acknowledgement commit was lost;
 - deployment TLS termination, certificate rotation, proxies, or load balancers;

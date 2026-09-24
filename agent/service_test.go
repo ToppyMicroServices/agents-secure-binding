@@ -65,7 +65,6 @@ func TestAlgo(t *testing.T) {
 	algo, err := os.ReadFile(algoPath)
 	require.NoError(t, err)
 
-	algoHash := sha3.Sum256(algo)
 	vtpm.ExternalTPM = &vtpm.DummyRWC{}
 
 	reqFile, err := os.ReadFile(reqPath)
@@ -81,7 +80,6 @@ func TestAlgo(t *testing.T) {
 			name: "Test Algo successfully",
 			algo: Algorithm{
 				Algorithm: algo,
-				Hash:      algoHash,
 			},
 			algoType: "python",
 			err:      nil,
@@ -90,7 +88,6 @@ func TestAlgo(t *testing.T) {
 			name: "Test Algo successfully with requirements file",
 			algo: Algorithm{
 				Algorithm:    algo,
-				Hash:         algoHash,
 				Requirements: reqFile,
 			},
 			algoType: "python",
@@ -100,7 +97,6 @@ func TestAlgo(t *testing.T) {
 			name: "Test Algo type binary successfully",
 			algo: Algorithm{
 				Algorithm: algo,
-				Hash:      algoHash,
 			},
 			algoType: "bin",
 			err:      nil,
@@ -109,7 +105,6 @@ func TestAlgo(t *testing.T) {
 			name: "Test Algo type wasm successfully",
 			algo: Algorithm{
 				Algorithm: algo,
-				Hash:      algoHash,
 			},
 			algoType: "wasm",
 			err:      nil,
@@ -118,7 +113,6 @@ func TestAlgo(t *testing.T) {
 			name: "Test Algo type docker successfully",
 			algo: Algorithm{
 				Algorithm: algo,
-				Hash:      algoHash,
 			},
 			algoType: "docker",
 			err:      nil,
@@ -150,7 +144,12 @@ func TestAlgo(t *testing.T) {
 			runnerCli.On("Run", mock.Anything, mock.Anything).Return(&runnerpb.RunResponse{}, nil)
 			svc := New(ctx, mglog.NewMock(), events, client, runnerCli, 0)
 
-			err := svc.InitComputation(ctx, testComputation(t))
+			computation := testComputation(t)
+			computation.Algorithm.AlgoType = tc.algoType
+			if tc.err == nil {
+				computation.Algorithm.Hash = testAlgorithmCommitment(tc.algoType, nil, tc.algo.Algorithm, tc.algo.Requirements)
+			}
+			err := svc.InitComputation(ctx, computation)
 			require.NoError(t, err)
 
 			time.Sleep(300 * time.Millisecond)
@@ -170,11 +169,9 @@ func TestData(t *testing.T) {
 	algo, err := os.ReadFile(algoPath)
 	require.NoError(t, err)
 
-	algoHash := sha3.Sum256(algo)
 	vtpm.ExternalTPM = &vtpm.DummyRWC{}
 
 	alg := Algorithm{
-		Hash:      algoHash,
 		Algorithm: algo,
 	}
 
@@ -246,7 +243,10 @@ func TestData(t *testing.T) {
 			runnerCli.On("Run", mock.Anything, mock.Anything).Return(&runnerpb.RunResponse{}, nil)
 			svc := New(ctx, mglog.NewMock(), events, client, runnerCli, 0)
 
-			err := svc.InitComputation(ctx, testComputation(t))
+			computation := testComputation(t)
+			computation.Algorithm.AlgoType = "python"
+			computation.Algorithm.Hash = ExecutionBundleHash("python", nil, algo, nil)
+			err := svc.InitComputation(ctx, computation)
 			require.NoError(t, err)
 
 			time.Sleep(300 * time.Millisecond)
@@ -296,6 +296,23 @@ func TestDataRejectsUnsafeFilenameBeforeMutatingState(t *testing.T) {
 	require.NoError(t, readErr)
 	assert.Equal(t, []byte("original"), algoContent)
 	assert.Len(t, svc.computation.Datasets, 1)
+}
+
+func TestPrivateComputationFilesUseRestrictiveModes(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "datasets")
+	require.NoError(t, ensurePrivateDirectory(root))
+	dirInfo, err := os.Stat(root)
+	require.NoError(t, err)
+	require.Equal(t, os.FileMode(0o700), dirInfo.Mode().Perm())
+
+	path := filepath.Join(root, "input.csv")
+	require.NoError(t, writePrivateFile(path, []byte("private"), datasetFilePermission))
+	fileInfo, err := os.Stat(path)
+	require.NoError(t, err)
+	require.Equal(t, os.FileMode(0o600), fileInfo.Mode().Perm())
+	temps, err := filepath.Glob(filepath.Join(root, ".input.csv.tmp-*"))
+	require.NoError(t, err)
+	require.Empty(t, temps)
 }
 
 func TestResult(t *testing.T) {
@@ -536,6 +553,10 @@ func testComputation(t *testing.T) Computation {
 		Algorithm:       Algorithm{Hash: algoHash, UserKey: []byte("key"), Algorithm: algo},
 		ResultConsumers: []ResultConsumer{{UserKey: []byte("key")}},
 	}
+}
+
+func testAlgorithmCommitment(algoType string, args []string, program, requirements []byte) [32]byte {
+	return AlgorithmCommitment(algoType, args, program, requirements)
 }
 
 func TestStopComputation(t *testing.T) {
@@ -794,6 +815,53 @@ func TestDownloadAndDecryptResource(t *testing.T) {
 		_, err := svc.downloadAndDecryptResource(ctx, source, "dataset")
 		require.Error(t, err)
 	})
+}
+
+func TestDecryptedOCIResourceOwnsPrivateWorkspace(t *testing.T) {
+	mockOCI := new(MockOCIClient)
+	mockOCI.On("PullAndDecrypt", mock.Anything, mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+		setupMinimalOCI(t, args.String(2), "main.py", []byte("print('ok')"))
+	}).Return(nil)
+	svc := newTestAgentService(&smmocks.StateMachine{}, new(mocks.Service))
+	svc.ociClient = mockOCI
+	svc.computation.Algorithm.AlgoType = "python"
+
+	resource, err := svc.downloadAndDecryptResource(context.Background(), &ResourceSource{Type: "oci-image", URL: "docker://test/private"}, "algorithm")
+	if err != nil {
+		t.Fatal(err)
+	}
+	workspace := resource.workspace
+	info, err := os.Stat(workspace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := info.Mode().Perm(); got != 0o700 {
+		t.Fatalf("workspace mode = %o, want 700", got)
+	}
+	if err := resource.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(workspace); !os.IsNotExist(err) {
+		t.Fatalf("plaintext workspace remains after Close: %v", err)
+	}
+	if err := resource.Close(); err != nil {
+		t.Fatalf("second Close = %v", err)
+	}
+}
+
+func TestValidateSingleFileAlgorithmPackageRejectsSiblingRuntimeFile(t *testing.T) {
+	root := t.TempDir()
+	mainPath := filepath.Join(root, "main.py")
+	requirementsPath := filepath.Join(root, "requirements.txt")
+	for path, content := range map[string][]byte{
+		mainPath:                         []byte("print('ok')"),
+		requirementsPath:                 []byte("pkg==1"),
+		filepath.Join(root, "helper.py"): []byte("value = 1"),
+	} {
+		require.NoError(t, os.WriteFile(path, content, 0o600))
+	}
+	err := validateSingleFileAlgorithmPackage(root, mainPath, requirementsPath)
+	require.ErrorContains(t, err, "unsupported runtime file")
 }
 
 func TestDownloadAlgorithmIfRemote(t *testing.T) {
@@ -1141,7 +1209,7 @@ func TestDownloadAlgorithmIfRemote_Success(t *testing.T) {
 	svc.ociClient = mockOCI
 
 	algoContent = []byte("print('hello')")
-	algoHash := sha3.Sum256(algoContent)
+	algoHash := ExecutionBundleHash("python", nil, algoContent, nil)
 
 	svc.computation = Computation{
 		Algorithm: Algorithm{
@@ -1187,7 +1255,7 @@ func TestDownloadAlgorithmIfRemote_Docker_Success(t *testing.T) {
 	mockOCI.On("PullAndDecrypt", mock.Anything, mock.Anything, mock.Anything).Return(nil)
 
 	dummyContent := []byte("dummy docker tar")
-	dummyHash := sha3.Sum256(dummyContent)
+	dummyHash := ExecutionBundleHash("docker", nil, dummyContent, nil)
 
 	mockOCI.On("ToDockerArchive", mock.Anything, mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
 		destFile := args.String(2)
@@ -1428,7 +1496,7 @@ func TestDownloadAlgorithmIfRemote_ErrorPathsInternal(t *testing.T) {
 
 		svc.downloadAlgorithmIfRemote(ReceivingAlgorithm)
 		assert.Error(t, svc.runError)
-		assert.Contains(t, svc.runError.Error(), "algorithm hash mismatch")
+		assert.Contains(t, svc.runError.Error(), "algorithm execution-bundle hash mismatch")
 		sm.AssertExpectations(t)
 	})
 
@@ -1452,7 +1520,7 @@ func TestDownloadAlgorithmIfRemote_ErrorPathsInternal(t *testing.T) {
 
 		svc.computation = Computation{
 			Algorithm: Algorithm{
-				Hash:     sha3.Sum256([]byte(algoContent)),
+				Hash:     ExecutionBundleHash("python", nil, []byte(algoContent), nil),
 				AlgoType: "python",
 				Source: &ResourceSource{
 					Type: "oci-image",
@@ -1660,7 +1728,7 @@ func TestAlgo_RemoteSource(t *testing.T) {
 
 	mockOCI := new(MockOCIClient)
 	algoContent := []byte("print('remote algo')")
-	algoHash := sha3.Sum256(algoContent)
+	algoHash := ExecutionBundleHash("python", nil, algoContent, nil)
 
 	mockOCI.On("PullAndDecrypt", mock.Anything, mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
 		destDir := args.String(2)

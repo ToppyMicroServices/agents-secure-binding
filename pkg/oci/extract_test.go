@@ -209,6 +209,69 @@ func TestExtractDatasetWithPathTraversal(t *testing.T) {
 	})
 }
 
+func TestOCIExtractionRejectsPreexistingSymlinks(t *testing.T) {
+	t.Run("dataset parent symlink", func(t *testing.T) {
+		ociDir, destDir := setupTestOCIImage(t, "link/escape.csv", "secret")
+		outside := t.TempDir()
+		if err := os.Symlink(outside, filepath.Join(destDir, "link")); err != nil {
+			t.Skipf("symlink unavailable: %v", err)
+		}
+
+		_, err := ExtractDataset(ociDir, destDir)
+		require.Error(t, err)
+		_, statErr := os.Stat(filepath.Join(outside, "escape.csv"))
+		assert.ErrorIs(t, statErr, os.ErrNotExist)
+	})
+
+	t.Run("algorithm final symlink", func(t *testing.T) {
+		ociDir, destDir := setupTestOCIImage(t, "algorithm.py", testPythonScript)
+		outside := filepath.Join(t.TempDir(), "outside.py")
+		require.NoError(t, os.WriteFile(outside, []byte("original"), 0o600))
+		if err := os.Symlink(outside, filepath.Join(destDir, "algorithm.py")); err != nil {
+			t.Skipf("symlink unavailable: %v", err)
+		}
+
+		_, _, err := ExtractAlgorithm(context.Background(), slog.Default(), ociDir, destDir, "python")
+		require.Error(t, err)
+		content, readErr := os.ReadFile(outside)
+		require.NoError(t, readErr)
+		assert.Equal(t, "original", string(content))
+	})
+
+	t.Run("destination symlink", func(t *testing.T) {
+		ociDir, _ := setupTestOCIImage(t, "escape.csv", "secret")
+		parent := t.TempDir()
+		outside := t.TempDir()
+		destDir := filepath.Join(parent, "target")
+		if err := os.Symlink(outside, destDir); err != nil {
+			t.Skipf("symlink unavailable: %v", err)
+		}
+
+		_, err := ExtractDataset(ociDir, destDir)
+		require.Error(t, err)
+		_, statErr := os.Stat(filepath.Join(outside, "escape.csv"))
+		assert.ErrorIs(t, statErr, os.ErrNotExist)
+	})
+
+	t.Run("dataset hardlink", func(t *testing.T) {
+		ociDir, destDir := setupTestOCIImage(t, "escape.csv", "archive content")
+		outside := filepath.Join(t.TempDir(), "outside.csv")
+		require.NoError(t, os.WriteFile(outside, []byte("original"), 0o600))
+		if err := os.Link(outside, filepath.Join(destDir, "escape.csv")); err != nil {
+			t.Skipf("hardlink unavailable: %v", err)
+		}
+
+		_, err := ExtractDataset(ociDir, destDir)
+		require.NoError(t, err)
+		outsideContent, err := os.ReadFile(outside)
+		require.NoError(t, err)
+		assert.Equal(t, "original", string(outsideContent))
+		extractedContent, err := os.ReadFile(filepath.Join(destDir, "escape.csv"))
+		require.NoError(t, err)
+		assert.Equal(t, "archive content", string(extractedContent))
+	})
+}
+
 func TestExtractDatasetInvalidManifest(t *testing.T) {
 	t.Run("invalid manifest JSON", func(t *testing.T) {
 		ociDir := t.TempDir()

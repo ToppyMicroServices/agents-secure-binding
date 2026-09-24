@@ -236,3 +236,9 @@ multi-user isolation, independent Human-held-key evidence, browser coverage on
 every OS, disk-loss recovery, credential renewal, high availability, or
 external-effect reconciliation. Credential lifetime and storage limits are
 listed in [the usage guide](local-human-approval.md).
+
+The later source tree adds offline credential/token rotation, verified SQLite
+snapshot export, dedicated-user systemd units, and a qualification-bundle
+harness. Those additions are outside the runs recorded above. They remain
+unqualified here until the final candidate is rerun on each selected target and
+produces a passing, independently verified bundle.

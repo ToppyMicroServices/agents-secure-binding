@@ -163,15 +163,19 @@ func loadCredentials(dir string) (*credentials, error) {
 	if err != nil || string(marker) != credentialsVersion {
 		return nil, fmt.Errorf("initialize a complete local deployment first")
 	}
-	roots, err := loadRoots(dir)
+	credentialDir, _, err := activeCredentialDirectory(dir)
 	if err != nil {
 		return nil, err
 	}
-	server, err := loadPair(dir, "server")
+	roots, err := loadRoots(credentialDir)
 	if err != nil {
 		return nil, err
 	}
-	raw, err := os.ReadFile(filepath.Join(dir, "authority-key.pem"))
+	server, err := loadPair(credentialDir, "server")
+	if err != nil {
+		return nil, err
+	}
+	raw, err := os.ReadFile(filepath.Join(credentialDir, "authority-key.pem"))
 	if err != nil {
 		return nil, err
 	}
@@ -189,7 +193,7 @@ func loadCredentials(dir string) (*credentials, error) {
 	}
 	peers := make(map[string]*x509.Certificate)
 	for actor, name := range map[string]string{ActorAgent: "agent", ActorGateway: "gateway"} {
-		pair, err := loadPair(dir, name)
+		pair, err := loadPair(credentialDir, name)
 		if err != nil {
 			return nil, err
 		}

@@ -101,6 +101,25 @@ func TestProfileVerifyRejectsReplay(t *testing.T) {
 	}
 }
 
+func TestProfileReplaySurvivesAttestationRefresh(t *testing.T) {
+	fixture := newProfileFixture(t)
+	now := fixture.now
+	fixture.profile.Now = func() time.Time { return now }
+	fixture.profile.ReplayCache = identitypolicy.NewMemoryReplayCacheWithClock(func() time.Time { return now })
+
+	if _, err := fixture.profile.Verify(context.Background(), fixture.request); err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(100 * time.Second)
+	fixture.request.Attestation.ResultID = "renewed-attestation-same-authorization"
+	fixture.request.Attestation.IssuedAt = now
+	fixture.request.Attestation.ExpiresAt = now.Add(90 * time.Second)
+	signAttestation(t, &fixture.request.Attestation, fixture.attesterPrivate)
+	if _, err := fixture.profile.Verify(context.Background(), fixture.request); !errors.Is(err, identitypolicy.ErrReplayDetected) {
+		t.Fatalf("same grant, binding and nonce reopened after attestation refresh: %v", err)
+	}
+}
+
 func TestProfileRejectsTypedNilReplayCache(t *testing.T) {
 	t.Parallel()
 	fixture := newProfileFixture(t)

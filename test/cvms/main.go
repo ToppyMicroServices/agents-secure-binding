@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 
+	agentcore "github.com/ToppyMicroServices/agents-secure-binding/v2/agent"
 	"github.com/ToppyMicroServices/agents-secure-binding/v2/agent/cvms"
 	cvmsgrpc "github.com/ToppyMicroServices/agents-secure-binding/v2/agent/cvms/api/grpc"
 	"github.com/ToppyMicroServices/agents-secure-binding/v2/internal"
@@ -35,13 +36,14 @@ const (
 )
 
 var (
-	algoPath          string
-	dataPathString    string
-	dataPaths         []string
-	attestedTLSString string
-	attestedTLS       bool
-	pubKeyFile        string
-	clientCAFile      string
+	algoPath             string
+	algoRequirementsPath string
+	dataPathString       string
+	dataPaths            []string
+	attestedTLSString    string
+	attestedTLS          bool
+	pubKeyFile           string
+	clientCAFile         string
 	// Remote resource configuration.
 	kbsURL              string
 	algoSourceURL       string
@@ -102,7 +104,7 @@ func (s *svc) Run(ctx context.Context, ipAddress string, sendMessage cvmsgrpc.Se
 			return
 		}
 		if len(dataHashBytes) != 32 {
-			s.logger.Error(fmt.Sprintf("dataset hash must be 32 bytes (SHA256), got %d", len(dataHashBytes)))
+			s.logger.Error(fmt.Sprintf("dataset hash must be 32 bytes (SHA3-256), got %d", len(dataHashBytes)))
 			return
 		}
 	} else {
@@ -165,7 +167,7 @@ func (s *svc) Run(ctx context.Context, ipAddress string, sendMessage cvmsgrpc.Se
 				return
 			}
 			if len(algoHashBytes) != 32 {
-				s.logger.Error(fmt.Sprintf("algo hash must be 32 bytes (SHA256), got %d", len(algoHashBytes)))
+				s.logger.Error(fmt.Sprintf("algorithm commitment must be 32 bytes, got %d", len(algoHashBytes)))
 				return
 			}
 		} else {
@@ -191,21 +193,29 @@ func (s *svc) Run(ctx context.Context, ipAddress string, sendMessage cvmsgrpc.Se
 		}
 	} else {
 		// Direct upload mode - use local file
-		fileHash, err := internal.ChecksumHex(algoPath)
+		program, err := os.ReadFile(algoPath)
 		if err != nil {
-			s.logger.Error(fmt.Sprintf("failed to calculate checksum: %s", err))
+			s.logger.Error(fmt.Sprintf("failed to read algorithm: %s", err))
 			return
 		}
-		s.logger.Info("local algorithm checksum", "path", algoPath, "hash", fileHash)
 
 		var algoArgs []string
 		if algoArgsString != "" {
 			algoArgs = strings.Split(algoArgsString, ",")
 		}
 
-		hashBytes, _ := hex.DecodeString(fileHash)
+		var requirements []byte
+		if algoRequirementsPath != "" {
+			requirements, err = os.ReadFile(algoRequirementsPath)
+			if err != nil {
+				s.logger.Error(fmt.Sprintf("failed to read algorithm requirements: %s", err))
+				return
+			}
+		}
+		commitment := agentcore.AlgorithmCommitment(algoType, algoArgs, program, requirements)
+		s.logger.Info("local algorithm commitment", "path", algoPath, "hash", hex.EncodeToString(commitment[:]))
 		algorithm = &cvms.Algorithm{
-			Hash:     hashBytes,
+			Hash:     commitment[:],
 			UserKey:  pubPem.Bytes,
 			AlgoType: algoType,
 			AlgoArgs: algoArgs,
@@ -253,6 +263,7 @@ func (s *svc) Run(ctx context.Context, ipAddress string, sendMessage cvmsgrpc.Se
 func main() {
 	flagSet := flag.NewFlagSet("tests/cvms/main.go", flag.ContinueOnError)
 	flagSet.StringVar(&algoPath, "algo-path", "", "Path to the algorithm (for direct upload mode)")
+	flagSet.StringVar(&algoRequirementsPath, "algo-requirements-path", "", "Path to requirements.txt included in the algorithm commitment")
 	flagSet.StringVar(&pubKeyFile, "public-key-path", "", "Path to the public key file")
 	flagSet.StringVar(&attestedTLSString, "attested-tls-bool", "", "Should aTLS be used, must be 'true' or 'false'")
 	flagSet.StringVar(&dataPathString, "data-paths", "", "Paths to data sources, list of string separated with commas (for direct upload mode)")
@@ -263,9 +274,9 @@ func main() {
 	flagSet.StringVar(&algoKBSResourcePath, "algo-kbs-path", "", "Algorithm KBS resource path (e.g., 'default/key/algo-key')")
 	flagSet.StringVar(&datasetSourceURLs, "dataset-source-urls", "", "Dataset source URLs, comma-separated")
 	flagSet.StringVar(&datasetKBSPaths, "dataset-kbs-paths", "", "Dataset KBS resource paths, comma-separated")
-	flagSet.StringVar(&algoType, "algo-type", "", "Algorithm execution type (e.g. binary, python)")
+	flagSet.StringVar(&algoType, "algo-type", "", "Algorithm execution type (bin, python, wasm, or docker)")
 	flagSet.StringVar(&algoArgsString, "algo-args", "", "Algorithm arguments, comma-separated")
-	flagSet.StringVar(&algoHash, "algo-hash", "", "Algorithm SHA256 hash (hex string)")
+	flagSet.StringVar(&algoHash, "algo-hash", "", "Algorithm execution commitment (hex string)")
 	flagSet.StringVar(&datasetTypeString, "dataset-type", "", "Dataset source type, comma-separated (deprecated, always oci-image)")
 	flagSet.StringVar(&datasetHash, "dataset-hash", "", "Dataset SHA256 hash (hex string)")
 	flagSet.StringVar(&datasetDecompress, "dataset-decompress", "", "Dataset decompression bools, comma-separated (e.g. true,false)")

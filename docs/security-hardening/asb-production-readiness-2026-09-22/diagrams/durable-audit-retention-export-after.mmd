@@ -1,0 +1,6 @@
+flowchart LR
+  DB[(SQLite online state)] --> Snap[Consistent backup/export]
+  Snap --> Manifest[Manifest and SHA-256]
+  Manifest --> Archive[Operator archive]
+  Verify[Independent restore verification] --> Archive
+  DB --> Full[Online caps remain]

@@ -57,6 +57,15 @@ type ServerConfig struct {
 	Session             *ea.Session
 	Identity            tls.Certificate
 	BuildLeafExtensions func(*tls.ConnectionState, *ea.AuthenticatorRequest, *x509.Certificate) ([]ea.Extension, error)
+	// BuildLeafExtensionsContext is required by Listener when attestation
+	// extensions are enabled so the handshake timeout also cancels evidence work.
+	BuildLeafExtensionsContext func(context.Context, *tls.ConnectionState, *ea.AuthenticatorRequest, *x509.Certificate) ([]ea.Extension, error)
+	// HandshakeTimeout bounds the complete TLS and aTLS authentication exchange
+	// performed by Listener. Zero selects a conservative default.
+	HandshakeTimeout time.Duration
+	// MaxPendingHandshakes bounds unauthenticated connections being processed by
+	// Listener. Zero selects a conservative default.
+	MaxPendingHandshakes int
 }
 
 func Dial(network, address string, cfg *ClientConfig) (*Conn, error) {
@@ -282,11 +291,18 @@ func logIdentityPolicyDebug(logger *slog.Logger, reason string, err error) {
 }
 
 func Server(tlsConn *tls.Conn, cfg *ServerConfig) (*Conn, error) {
+	return ServerContext(context.Background(), tlsConn, cfg)
+}
+
+func ServerContext(ctx context.Context, tlsConn *tls.Conn, cfg *ServerConfig) (*Conn, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("atls: missing server config")
 	}
+	if ctx == nil {
+		return nil, fmt.Errorf("atls: missing server context")
+	}
 
-	if err := tlsConn.Handshake(); err != nil {
+	if err := tlsConn.HandshakeContext(ctx); err != nil {
 		return nil, err
 	}
 
@@ -304,7 +320,7 @@ func Server(tlsConn *tls.Conn, cfg *ServerConfig) (*Conn, error) {
 	if len(rest) != 0 {
 		return nil, fmt.Errorf("atls: trailing request bytes")
 	}
-	if cfg.BuildLeafExtensions != nil && !ea.RequestPermitsCertificateExtension(&req, ea.CMWAttestationExtensionType) {
+	if (cfg.BuildLeafExtensions != nil || cfg.BuildLeafExtensionsContext != nil) && !ea.RequestPermitsCertificateExtension(&req, ea.CMWAttestationExtensionType) {
 		return nil, fmt.Errorf("atls: cmw_attestation extension not offered")
 	}
 
@@ -313,7 +329,7 @@ func Server(tlsConn *tls.Conn, cfg *ServerConfig) (*Conn, error) {
 	if err != nil {
 		return nil, err
 	}
-	exts, err := buildServerExtensions(cfg, &st, &req, identity)
+	exts, err := buildServerExtensions(ctx, cfg, &st, &req, identity)
 	if err != nil {
 		return nil, err
 	}
@@ -370,8 +386,8 @@ func resolveIdentity(cfg *ServerConfig) (tls.Certificate, error) {
 	return tls.Certificate{}, fmt.Errorf("atls: missing server identity")
 }
 
-func buildServerExtensions(cfg *ServerConfig, st *tls.ConnectionState, req *ea.AuthenticatorRequest, identity tls.Certificate) ([]ea.Extension, error) {
-	if cfg.BuildLeafExtensions == nil {
+func buildServerExtensions(ctx context.Context, cfg *ServerConfig, st *tls.ConnectionState, req *ea.AuthenticatorRequest, identity tls.Certificate) ([]ea.Extension, error) {
+	if cfg.BuildLeafExtensions == nil && cfg.BuildLeafExtensionsContext == nil {
 		return nil, nil
 	}
 	if len(identity.Certificate) == 0 {
@@ -380,6 +396,9 @@ func buildServerExtensions(cfg *ServerConfig, st *tls.ConnectionState, req *ea.A
 	leaf, err := x509.ParseCertificate(identity.Certificate[0])
 	if err != nil {
 		return nil, err
+	}
+	if cfg.BuildLeafExtensionsContext != nil {
+		return cfg.BuildLeafExtensionsContext(ctx, st, req, leaf)
 	}
 	return cfg.BuildLeafExtensions(st, req, leaf)
 }

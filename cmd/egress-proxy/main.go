@@ -6,6 +6,8 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net"
+	"net/netip"
 	"os"
 	"os/signal"
 	"strings"
@@ -28,6 +30,7 @@ const (
 
 type config struct {
 	Level        string `env:"ASB_LOG_LEVEL"          envAlternate:"AGENT_LOG_LEVEL" envDefault:"info"`
+	Host         string `env:"ASB_EGRESS_PROXY_HOST"  envDefault:"127.0.0.1"`
 	Port         string `env:"ASB_EGRESS_PROXY_PORT"  envDefault:"3128"`
 	LogForwarder string `env:"LOG_FORWARDER_SOCKET"   envDefault:"/run/agents-secure-binding/log.sock"`
 	Allowlist    string `env:"EGRESS_PROXY_ALLOWLIST"          envDefault:""`
@@ -49,6 +52,7 @@ func main() {
 	}
 
 	pflag.StringVar(&cfg.Level, "log-level", cfg.Level, "Log level")
+	pflag.StringVar(&cfg.Host, "host", cfg.Host, "Loopback address on which to listen")
 	pflag.StringVar(&cfg.Port, "port", cfg.Port, "Proxy port")
 	pflag.StringVar(&cfg.Allowlist, "allowlist", cfg.Allowlist, "Comma-separated egress destination allowlist")
 
@@ -105,7 +109,11 @@ func run(cfg config) error {
 		}
 	})
 
-	proxy := egress.NewProxyWithAllowedDestinations(logger, ":"+cfg.Port, splitAllowlist(cfg.Allowlist))
+	addr, err := loopbackProxyAddress(cfg.Host, cfg.Port)
+	if err != nil {
+		return err
+	}
+	proxy := egress.NewProxyWithAllowedDestinations(logger, addr, splitAllowlist(cfg.Allowlist))
 
 	g.Go(func() error {
 		return proxy.Start()
@@ -129,6 +137,14 @@ func run(cfg config) error {
 	}
 
 	return nil
+}
+
+func loopbackProxyAddress(host, port string) (string, error) {
+	addr, err := netip.ParseAddr(strings.TrimSpace(host))
+	if err != nil || !addr.IsLoopback() || addr.Zone() != "" {
+		return "", fmt.Errorf("egress proxy host must be a loopback IP address")
+	}
+	return net.JoinHostPort(addr.String(), strings.TrimSpace(port)), nil
 }
 
 func splitAllowlist(raw string) []string {
