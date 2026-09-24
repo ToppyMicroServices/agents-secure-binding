@@ -11,7 +11,7 @@ import (
 )
 
 func TestListenRunnerSocketIsOwnerOnly(t *testing.T) {
-	dir, err := os.MkdirTemp("/private/tmp", "asb-runner-test-")
+	dir, err := os.MkdirTemp(os.TempDir(), "asb-runner-test-")
 	if err != nil {
 		t.Fatal(err)
 	}
