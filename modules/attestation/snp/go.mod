@@ -2,6 +2,8 @@ module github.com/ToppyMicroServices/agents-secure-binding/modules/attestation/s
 
 go 1.26.0
 
+toolchain go1.26.6
+
 require (
 	github.com/google/go-sev-guest v0.14.1
 	google.golang.org/protobuf v1.36.11

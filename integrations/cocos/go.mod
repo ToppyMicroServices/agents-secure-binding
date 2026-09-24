@@ -2,6 +2,8 @@ module github.com/ToppyMicroServices/agents-secure-binding/integrations/cocos
 
 go 1.26.0
 
+toolchain go1.26.6
+
 require (
 	github.com/ToppyMicroServices/agents-secure-binding/modules/attestation/snp v0.1.1
 	github.com/ToppyMicroServices/agents-secure-binding/modules/attestation/tdx v0.1.2
