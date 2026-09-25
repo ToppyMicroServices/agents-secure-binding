@@ -35,6 +35,7 @@ import (
 const (
 	testManagerIssuer = "https://manager.discovery.test"
 	testManagerKeyID  = "manager-ed25519-1"
+	testLoopbackName  = "localhost"
 )
 
 type nodeMaterial struct {
@@ -59,6 +60,8 @@ type testCluster struct {
 	nodes          []*Node
 	infos          []discovery.NodeInfo
 	interval       time.Duration
+	networkAddress string
+	networkPolicy  *NetworkPolicy
 }
 
 func TestThreeNodeProductGatePartitionRestartAndNoResurrection(t *testing.T) {
@@ -201,7 +204,7 @@ func TestPeerServiceRejectsUnknownTamperedReplayFakeAndHugeDelta(t *testing.T) {
 
 	unknownCertificate, _, _ := cluster.issueTLSCertificate(t, 99)
 	unknownClient := &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{
-		Certificates: []tls.Certificate{unknownCertificate}, RootCAs: cluster.roots, ServerName: "localhost", MinVersion: tls.VersionTLS13,
+		Certificates: []tls.Certificate{unknownCertificate}, RootCAs: cluster.roots, ServerName: testLoopbackName, MinVersion: tls.VersionTLS13,
 	}}}
 	request, _ := http.NewRequest(http.MethodPost, "https://"+cluster.nodes[0].Info().Endpoint+NoncePath, http.NoBody)
 	response, err := unknownClient.Do(request)
@@ -213,7 +216,7 @@ func TestPeerServiceRejectsUnknownTamperedReplayFakeAndHugeDelta(t *testing.T) {
 		t.Fatalf("unknown peer status = %d", response.StatusCode)
 	}
 	authorizedClient := &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{
-		Certificates: []tls.Certificate{cluster.materials[0].tlsCert}, RootCAs: cluster.roots, ServerName: "localhost", MinVersion: tls.VersionTLS13,
+		Certificates: []tls.Certificate{cluster.materials[0].tlsCert}, RootCAs: cluster.roots, ServerName: testLoopbackName, MinVersion: tls.VersionTLS13,
 	}}}
 	request, err = http.NewRequest(http.MethodPost, "https://"+cluster.nodes[1].Info().Endpoint+NoncePath, strings.NewReader("not-empty"))
 	if err != nil {
@@ -326,6 +329,11 @@ func TestPeerServiceSoak(t *testing.T) {
 
 func newTestCluster(t *testing.T, interval time.Duration) *testCluster {
 	t.Helper()
+	return newTestClusterWithNetwork(t, interval, "", nil)
+}
+
+func newTestClusterWithNetwork(t *testing.T, interval time.Duration, address string, policy *NetworkPolicy) *testCluster {
+	t.Helper()
 	managerPublic, managerPrivate, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatal(err)
@@ -336,6 +344,12 @@ func newTestCluster(t *testing.T, interval time.Duration) *testCluster {
 	cluster := &testCluster{
 		t: t, directory: t.TempDir(), managerPublic: managerPublic, managerPrivate: managerPrivate,
 		ca: ca, caPrivate: caPrivate, roots: roots, interval: interval,
+		networkAddress: address, networkPolicy: policy,
+	}
+	t.Cleanup(cluster.stop)
+	endpoints := []string{"127.0.0.1:0", "127.0.0.1:0", "127.0.0.1:0"}
+	if policy != nil {
+		endpoints = reserveNetworkEndpoints(t, address, len(endpoints))
 	}
 	for i, prefix := range []string{"01", "40", "fe"} {
 		public, private, err := ed25519.GenerateKey(rand.Reader)
@@ -347,7 +361,7 @@ func newTestCluster(t *testing.T, interval time.Duration) *testCluster {
 			id: testNodeID(prefix), issuer: fmt.Sprintf("https://peer-%d.discovery.test", i), keyID: fmt.Sprintf("peer-ed25519-%d", i),
 			public: public, private: private, tlsCert: tlsCertificate, leaf: leaf,
 		})
-		cluster.infos = append(cluster.infos, discovery.NodeInfo{ID: testNodeID(prefix), Endpoint: "127.0.0.1:0"})
+		cluster.infos = append(cluster.infos, discovery.NodeInfo{ID: testNodeID(prefix), Endpoint: endpoints[i]})
 	}
 	cluster.nodes = make([]*Node, 3)
 	directories := make([]*PeerDirectory, 3)
@@ -368,6 +382,9 @@ func newTestCluster(t *testing.T, interval time.Duration) *testCluster {
 		if err := node.Start(); err != nil {
 			t.Fatal(err)
 		}
+		if policy != nil && node.Info() != cluster.infos[i] {
+			t.Fatalf("LAN start changed configured endpoint: got %+v, want %+v", node.Info(), cluster.infos[i])
+		}
 		cluster.infos[i] = node.Info()
 	}
 	for i := range cluster.nodes {
@@ -379,7 +396,7 @@ func newTestCluster(t *testing.T, interval time.Duration) *testCluster {
 
 func (c *testCluster) nodeConfig(index int, info discovery.NodeInfo, directory *PeerDirectory, client *Client) Config {
 	return Config{
-		Info: info, ListenAddress: info.Endpoint,
+		Info: info, ListenAddress: info.Endpoint, NetworkPolicy: c.networkPolicy,
 		TLSConfig: &tls.Config{
 			Certificates: []tls.Certificate{c.materials[index].tlsCert}, ClientCAs: c.roots, MinVersion: tls.VersionTLS13,
 		},
@@ -415,8 +432,12 @@ func (c *testCluster) configureTrust(receiver int, directory *PeerDirectory, cli
 		if remote == receiver {
 			continue
 		}
+		serverName := testLoopbackName
+		if c.networkAddress != "" {
+			serverName = c.networkAddress
+		}
 		client.Remotes[c.infos[remote].ID] = RemoteAuthorization{
-			Audience: c.audience(remote), ServerName: "localhost", ServerCertificateSHA256: certificateKey(c.materials[remote].leaf),
+			Audience: c.audience(remote), ServerName: serverName, ServerCertificateSHA256: certificateKey(c.materials[remote].leaf),
 			Grants: map[Action]string{
 				ActionReplicate: c.issueGrant(receiver, remote, ActionReplicate),
 				ActionFindNode:  c.issueGrant(receiver, remote, ActionFindNode),
@@ -536,7 +557,7 @@ func (c *testCluster) partition(index int, blocked bool) {
 
 func (c *testCluster) readMetrics(index int) string {
 	client := &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{
-		Certificates: []tls.Certificate{c.materials[index].tlsCert}, RootCAs: c.roots, ServerName: "localhost", MinVersion: tls.VersionTLS13,
+		Certificates: []tls.Certificate{c.materials[index].tlsCert}, RootCAs: c.roots, ServerName: testLoopbackName, MinVersion: tls.VersionTLS13,
 	}}}
 	response, err := client.Get("https://" + c.nodes[index].Info().Endpoint + MetricsPath)
 	if err != nil {
@@ -610,7 +631,10 @@ func (c *testCluster) issueTLSCertificate(t *testing.T, serial int) (tls.Certifi
 		SerialNumber: big.NewInt(int64(serial + 100)), Subject: pkix.Name{CommonName: fmt.Sprintf("node-%d", serial)},
 		NotBefore: now.Add(-time.Hour), NotAfter: now.Add(24 * time.Hour),
 		KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth},
-		DNSNames: []string{"localhost"}, IPAddresses: []net.IP{net.ParseIP("127.0.0.1")},
+		DNSNames: []string{testLoopbackName}, IPAddresses: []net.IP{net.ParseIP("127.0.0.1")},
+	}
+	if c.networkAddress != "" && c.networkAddress != "127.0.0.1" {
+		template.IPAddresses = append(template.IPAddresses, net.ParseIP(c.networkAddress))
 	}
 	der, err := x509.CreateCertificate(rand.Reader, template, c.ca, public, c.caPrivate)
 	if err != nil {

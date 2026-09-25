@@ -4,6 +4,7 @@
 package discovery
 
 import (
+	"slices"
 	"sort"
 	"sync"
 	"time"
@@ -57,6 +58,7 @@ func (s *NameService) Register(binding NameBinding) (bool, error) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.pruneLocked()
 	if current, ok := s.byName[binding.Name]; ok {
 		if current.AgentID != binding.AgentID {
 			return false, ErrNameConflict
@@ -71,16 +73,29 @@ func (s *NameService) Register(binding NameBinding) (bool, error) {
 		binding.RegisteredAt = now
 	}
 	binding.RefreshedAt = now
-	changed, err := s.presence.Announce(Record{
+	record := Record{
 		AgentID:      binding.AgentID,
 		Name:         binding.Name,
 		Capabilities: copyStrings(binding.Capabilities),
 		Visibility:   binding.Visibility,
 		Version:      binding.Version,
 		ExpiresAt:    binding.ExpiresAt,
-	})
-	if err != nil || !changed {
-		return changed, err
+	}
+	changed, err := s.presence.Announce(record)
+	if err != nil {
+		return false, err
+	}
+	if !changed {
+		current, ok := s.presence.Probe(binding.AgentID)
+		if !ok || current.Version != binding.Version {
+			return false, nil
+		}
+		// Presence and ANS can arrive separately. An identical Presence
+		// revision permits filling in its missing binding, but never permits
+		// changing the contents of that revision.
+		if !bindingMatchesRecord(binding, current) {
+			return false, ErrInvalidRecord
+		}
 	}
 	if previousName, ok := s.byAgent[binding.AgentID]; ok && previousName != binding.Name {
 		delete(s.byName, previousName)
@@ -97,6 +112,7 @@ func (s *NameService) Resolve(name string) (NameBinding, bool) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.pruneLocked()
 	binding, ok := s.byName[name]
 	if !ok || !s.bindingIsLive(binding) {
 		return NameBinding{}, false
@@ -111,6 +127,7 @@ func (s *NameService) ResolveAgent(agentID string) (NameBinding, bool) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.pruneLocked()
 	name, ok := s.byAgent[agentID]
 	if !ok {
 		return NameBinding{}, false
@@ -126,6 +143,7 @@ func (s *NameService) ResolveAgent(agentID string) (NameBinding, bool) {
 func (s *NameService) Bindings() []NameBinding {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.pruneLocked()
 	bindings := make([]NameBinding, 0, len(s.byName))
 	for _, binding := range s.byName {
 		if s.bindingIsLive(binding) {
@@ -180,6 +198,7 @@ func (s *NameService) Deregister(name string, version uint64) (bool, error) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.pruneLocked()
 	binding, ok := s.byName[name]
 	if !ok || binding.Version > version {
 		return false, nil
@@ -197,8 +216,41 @@ func (s *NameService) bindingIsLive(binding NameBinding) bool {
 	if !binding.ExpiresAt.IsZero() && !binding.ExpiresAt.After(s.now().UTC()) {
 		return false
 	}
-	_, ok := s.presence.Probe(binding.AgentID)
-	return ok
+	record, ok := s.presence.Probe(binding.AgentID)
+	return ok && bindingMatchesRecord(binding, record)
+}
+
+// pruneLocked releases expired or withdrawn bindings and bindings superseded
+// by Presence. Keeping them would prevent name reuse and retain every name
+// ever observed, even when the Presence store has a live-record limit.
+func (s *NameService) pruneLocked() {
+	for name, binding := range s.byName {
+		if s.bindingIsLive(binding) {
+			continue
+		}
+		delete(s.byName, name)
+		if s.byAgent[binding.AgentID] == name {
+			delete(s.byAgent, binding.AgentID)
+		}
+	}
+}
+
+func bindingMatchesRecord(binding NameBinding, record Record) bool {
+	return binding.AgentID == record.AgentID &&
+		binding.Name == record.Name &&
+		binding.Version == record.Version &&
+		binding.ExpiresAt.Equal(record.ExpiresAt) &&
+		slices.Equal(binding.Capabilities, record.Capabilities) &&
+		visibilityMode(binding.Visibility.Mode) == visibilityMode(record.Visibility.Mode) &&
+		binding.Visibility.OwnerDomain == record.Visibility.OwnerDomain &&
+		slices.Equal(binding.Visibility.AllowedAgents, record.Visibility.AllowedAgents)
+}
+
+func visibilityMode(mode VisibilityMode) VisibilityMode {
+	if mode == "" {
+		return VisibilityPublic
+	}
+	return mode
 }
 
 func validateBinding(binding NameBinding) error {

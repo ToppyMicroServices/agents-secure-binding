@@ -26,7 +26,8 @@ type Digest struct {
 	Tombstones map[string]uint64 `json:"tombstones"`
 }
 
-// Delta contains states that are newer than a peer's digest.
+// Delta contains newer records and retained tombstones with suppression floors
+// that cannot be compared using a version-only digest.
 type Delta struct {
 	Records    []Record    `json:"records"`
 	Tombstones []Tombstone `json:"tombstones"`
@@ -127,12 +128,11 @@ func (s *PresenceStore) Withdraw(agentID string, version uint64) (bool, error) {
 		return false, ErrLimitExceeded
 	}
 	tombstone := Tombstone{AgentID: agentID, Version: version}
+	if current, ok := s.tombstones[agentID]; ok {
+		mergeSuppressionFloor(&tombstone, current)
+	}
 	if current, ok := s.records[agentID]; ok {
-		if current.ExpiresAt.IsZero() {
-			tombstone.Indefinite = true
-		} else {
-			tombstone.SuppressUntil = current.ExpiresAt
-		}
+		extendTombstoneForRecord(&tombstone, current)
 	}
 	s.installTombstoneLocked(tombstone, now)
 	delete(s.records, agentID)
@@ -172,12 +172,23 @@ func (s *PresenceStore) mergeTombstone(tombstone Tombstone) (bool, error) {
 		extendTombstoneForRecord(&tombstone, current)
 	}
 	if current, ok := s.tombstones[tombstone.AgentID]; ok {
-		if current.Version > tombstone.Version {
-			return false, nil
+		if current.Version >= tombstone.Version {
+			merged := current
+			mergeSuppressionFloor(&merged, tombstone)
+			if current.Indefinite == merged.Indefinite && current.SuppressUntil.Equal(merged.SuppressUntil) {
+				return false, nil
+			}
+			// A stronger lease floor is useful even at an older revision, but
+			// repeated gossip must not restart receiver-local retention.
+			if merged.Indefinite {
+				merged.expiresAt = time.Time{}
+			} else if !merged.expiresAt.IsZero() && merged.expiresAt.Before(merged.SuppressUntil) {
+				merged.expiresAt = merged.SuppressUntil
+			}
+			s.tombstones[tombstone.AgentID] = merged
+			return true, nil
 		}
-		if current.Version == tombstone.Version {
-			mergeSuppressionFloor(&tombstone, current)
-		}
+		mergeSuppressionFloor(&tombstone, current)
 	}
 	if _, exists := s.tombstones[tombstone.AgentID]; !exists && s.maxTombstones > 0 && len(s.tombstones) >= s.maxTombstones {
 		return false, ErrLimitExceeded
@@ -260,16 +271,17 @@ func (s *PresenceStore) Counts() (records, tombstones int) {
 	return len(s.records), len(s.tombstones)
 }
 
-// Delta returns states that are newer than the supplied peer digest.
+// Delta returns newer records and all retained tombstones. Digest carries only
+// versions, so it cannot establish whether a peer knows a suppression floor.
+// Resending tombstones adds traffic proportional to retained withdrawals while
+// preserving convergence without changing the digest format.
 func (s *PresenceStore) Delta(peer Digest) Delta {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.sweepLocked(s.now().UTC())
 	delta := Delta{}
-	for agentID, tombstone := range s.tombstones {
-		if peer.Tombstones[agentID] < tombstone.Version {
-			delta.Tombstones = append(delta.Tombstones, publicTombstone(tombstone))
-		}
+	for _, tombstone := range s.tombstones {
+		delta.Tombstones = append(delta.Tombstones, publicTombstone(tombstone))
 	}
 	for agentID, record := range s.records {
 		if peer.Records[agentID] < record.Version && peer.Tombstones[agentID] < record.Version {
@@ -402,7 +414,7 @@ func extendTombstoneForRecord(tombstone *Tombstone, record Record) {
 	}
 	if !tombstone.Indefinite && tombstone.SuppressUntil.Before(record.ExpiresAt) {
 		tombstone.SuppressUntil = record.ExpiresAt
-		if tombstone.expiresAt.Before(record.ExpiresAt) {
+		if !tombstone.expiresAt.IsZero() && tombstone.expiresAt.Before(record.ExpiresAt) {
 			tombstone.expiresAt = record.ExpiresAt
 		}
 	}

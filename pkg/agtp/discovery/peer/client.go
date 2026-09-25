@@ -30,8 +30,9 @@ import (
 // Identity Grants are issued out of band by the Manager and may be reused
 // until expiry; each request receives a fresh verifier nonce and binding proof.
 type RemoteAuthorization struct {
-	Audience                string
-	ServerName              string
+	Audience   string
+	ServerName string
+	// ServerCertificateSHA256 pins SHA-256 of the leaf's DER SubjectPublicKeyInfo.
 	ServerCertificateSHA256 string
 	Grants                  map[Action]string
 }
@@ -43,6 +44,7 @@ type Client struct {
 	KeyID            string
 	PrivateKey       ed25519.PrivateKey
 	TLSConfig        *tls.Config
+	NetworkPolicy    *NetworkPolicy // nil restricts standalone clients to loopback
 	Remotes          map[string]RemoteAuthorization
 	Timeout          time.Duration
 	MaxResponseBytes int64
@@ -91,6 +93,19 @@ func (c *Client) do(ctx context.Context, peer discovery.NodeInfo, action Action,
 	if c == nil || ctx == nil || c.TLSConfig == nil || len(c.PrivateKey) != ed25519.PrivateKeySize {
 		return ErrUnauthorized
 	}
+	// Raw HTTP exchanges below do not observe Request.Context themselves.
+	// Bound the whole operation and interrupt reads when shutdown cancels it.
+	ctx, cancel := context.WithTimeout(ctx, c.timeout())
+	defer cancel()
+	if err := c.NetworkPolicy.validate(); err != nil {
+		return err
+	}
+	if err := c.NetworkPolicy.validateEndpoint(peer.Endpoint, false); err != nil {
+		return err
+	}
+	if c.NetworkPolicy != nil && c.TLSConfig.InsecureSkipVerify {
+		return ErrUnauthorized
+	}
 	authorization, ok := c.Remotes[peer.ID]
 	if !ok || authorization.Audience == "" || authorization.ServerName == "" || authorization.ServerCertificateSHA256 == "" || authorization.Grants[action] == "" {
 		return ErrUnauthorized
@@ -113,11 +128,10 @@ func (c *Client) do(ctx context.Context, peer discovery.NodeInfo, action Action,
 		return ErrUnauthorized
 	}
 	defer tlsConnection.Close()
-	if deadline, ok := ctx.Deadline(); ok {
-		_ = tlsConnection.SetDeadline(deadline)
-	} else {
-		_ = tlsConnection.SetDeadline(time.Now().Add(c.timeout()))
-	}
+	stopCancel := context.AfterFunc(ctx, func() { _ = tlsConnection.Close() })
+	defer stopCancel()
+	deadline, _ := ctx.Deadline()
+	_ = tlsConnection.SetDeadline(deadline)
 	reader := bufio.NewReader(tlsConnection)
 	state := tlsConnection.ConnectionState()
 	if len(state.PeerCertificates) == 0 || certificateKey(state.PeerCertificates[0]) != authorization.ServerCertificateSHA256 {

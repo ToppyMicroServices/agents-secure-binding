@@ -14,7 +14,7 @@ general AGTP deployment.
 | --- | --- | --- | --- |
 | DISCOVER | Query the live Presence population by capability and visibility | Exact canonical capability match, stable ordering, limit, AGTP-shaped result | Natural-language matching, trust/governance ranking, cross-scope query, signed AGTP response envelope |
 | Presence | Announce, update, expire, withdraw, and filter live records | Monotonic versions, finite leases, public/owner/explicit/invisible visibility, tombstones, digest/delta anti-entropy, persistent three-node gossip | General AGTP wire messages and individual Agent Certificate verification |
-| DHT | Locate discovery peers with Kademlia-style XOR routing | 256 k-buckets, nearest-peer selection, real-port authenticated multi-peer `FIND_NODE`, persistent bounded routing | S/Kademlia disjoint paths and cross-host routing |
+| DHT | Locate discovery peers with Kademlia-style XOR routing | 256 k-buckets, nearest-peer selection, real-port authenticated multi-peer `FIND_NODE`, persistent bounded routing, opt-in LAN/VPC CIDRs | S/Kademlia disjoint paths, automatic enrollment, and cross-administrator routing |
 | ANS | Register and resolve name-to-Agent-ID bindings using Presence as live state | Register, refresh, resolve by name or Agent-ID, deregister with Presence withdrawal, persistent delta replication | Cross-authority federation, governance signatures, and full Agent Manifest Documents |
 
 ## Security boundary
@@ -33,7 +33,9 @@ Withdrawal retention is receiver policy. A tombstone is retained for at least
 24 hours by default and at least through the known live-record lease. A record
 without a finite lease produces an indefinite suppression marker. Since the
 reference store is in memory, “indefinite” disables time-based GC but does not
-survive process restart.
+survive process restart on its own. The peer service persists these markers.
+Its receiver-local retention and cluster-wide reclamation limits are described
+in the [product profile](agtp-discovery-product-profile.md).
 
 ## Files
 
@@ -47,3 +49,5 @@ survive process restart.
 
 The fixed product scope and release gate are documented in
 [`agtp-discovery-product-profile.md`](agtp-discovery-product-profile.md).
+For fixed-address peers across hosts managed by one administrator, see
+[`agtp-discovery-lan.md`](agtp-discovery-lan.md).
