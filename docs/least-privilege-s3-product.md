@@ -215,6 +215,12 @@ cover concurrent admission, process interruption, namespace rotation, more than
 Its artifact includes the commit, Linux identification, JSON test results and
 binary checksum. This is bounded automated coverage, not a long-duration soak.
 
+The [2026-09-25 Linux conformance run](https://github.com/ToppyMicroServices/agents-secure-binding/actions/runs/36086892025)
+passed at source commit `80f1e3adeaf822fd1099bc5244537b9742749a3f`: 278 test cases
+including subtests, vet, lint, live-gate compilation and binary recovery commands.
+The downloaded binary matched the artifact's SHA-256; systemd verification had
+no diagnostics. This recorded result does not include a real AWS invocation.
+
 For real AWS, fill
 [live-fixture.example.json](../packaging/s3/live-fixture.example.json) using two
 existing objects you are authorized to test, in the same bucket. Supply the
