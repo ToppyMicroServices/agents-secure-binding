@@ -65,13 +65,14 @@ func (p *Profile) SessionPolicy(ctx context.Context, s lp.Solution, budget uint6
 	return raw, nil
 }
 
-// CLIConfig is local operator configuration. Only explicit static-credential
-// profiles are supported. SSO, credential_process, metadata and ambient sources
-// are not used. The credential file is read only when execution is invoked.
+// CLIConfig selects exactly one explicit credential source. A web identity
+// token is read afresh for every execution, allowing projected-token rotation.
+// Neither source enables ambient profiles, metadata or credential_process.
 type CLIConfig struct {
-	Path            string
-	CredentialsFile string
-	MaxEvaluations  uint64
+	Path                 string
+	CredentialsFile      string
+	WebIdentityTokenFile string
+	MaxEvaluations       uint64
 }
 
 type Executor struct {
@@ -82,7 +83,10 @@ type Executor struct {
 }
 
 func NewExecutor(profile *Profile, config CLIConfig) (*Executor, error) {
-	if profile == nil || !filepath.IsAbs(config.Path) || !filepath.IsAbs(config.CredentialsFile) || config.MaxEvaluations == 0 {
+	if profile == nil || !filepath.IsAbs(config.Path) || config.MaxEvaluations == 0 ||
+		(config.CredentialsFile == "") == (config.WebIdentityTokenFile == "") ||
+		(config.CredentialsFile != "" && !filepath.IsAbs(config.CredentialsFile)) ||
+		(config.WebIdentityTokenFile != "" && !filepath.IsAbs(config.WebIdentityTokenFile)) {
 		return nil, ErrProfile
 	}
 	info, err := os.Stat(config.Path)

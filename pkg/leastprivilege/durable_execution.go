@@ -29,6 +29,10 @@ type Effect func(context.Context, string, Request) (EffectResult, error)
 // Hold the trusted policy guard across this call to prevent policy replacement
 // between validation and dispatch. The storage layer does not authenticate peers.
 func (s *DurableStore) Run(ctx context.Context, operationID string, cap Capability, key ed25519.PublicKey, current Mandate, request Request, now time.Time, effect Effect) (ExecutionRecord, error) {
+	return runExecution(ctx, s, operationID, cap, key, current, request, now, effect)
+}
+
+func runExecution(ctx context.Context, s executionRunner, operationID string, cap Capability, key ed25519.PublicKey, current Mandate, request Request, now time.Time, effect Effect) (ExecutionRecord, error) {
 	if ctx == nil || effect == nil {
 		return ExecutionRecord{}, ErrBinding
 	}
@@ -59,10 +63,10 @@ func (s *DurableStore) Run(ctx context.Context, operationID string, cap Capabili
 	}
 	// Durable commit may block past expiry. Recheck before calling the adapter.
 	if err := CheckCapability(cap, key, current, request, now.Add(time.Since(wallStart))); err != nil {
-		return s.recordNoEffect(ctx, r, err)
+		return recordNoEffect(ctx, s, r, err)
 	}
 	if err := ctx.Err(); err != nil {
-		return s.recordNoEffect(ctx, r, err)
+		return recordNoEffect(ctx, s, r, err)
 	}
 	result, effectErr := effect(ctx, operationID, request)
 	if effectErr != nil || ctx.Err() != nil || (result.State != ExecutionSucceeded && result.State != ExecutionFailed) || !canonicalDigest(result.EvidenceDigest) {
@@ -81,7 +85,7 @@ func (s *DurableStore) Run(ctx context.Context, operationID string, cap Capabili
 	return complete, nil
 }
 
-func (s *DurableStore) recordNoEffect(ctx context.Context, r ExecutionRecord, cause error) (ExecutionRecord, error) {
+func recordNoEffect(ctx context.Context, s executionRunner, r ExecutionRecord, cause error) (ExecutionRecord, error) {
 	// A failure observed before invocation is an authoritative local no-effect
 	// decision. It is distinct from an adapter timeout after invocation.
 	evidence, err := digestValue("asb.least-privilege.not-dispatched/v1", struct{ OperationID, RequestDigest, Reason string }{r.OperationID, r.RequestDigest, cause.Error()})

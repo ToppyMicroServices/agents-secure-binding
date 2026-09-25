@@ -43,12 +43,13 @@ func TestLiveS3Profile(t *testing.T) {
 		t.Fatal("cannot read live fixture")
 	}
 	var fixture struct {
-		Specification   json.RawMessage `json:"specification"`
-		Resource        string          `json:"resource"`
-		DeniedResource  string          `json:"denied_resource"`
-		Arguments       Arguments       `json:"arguments"`
-		CLIPath         string          `json:"cli_path"`
-		CredentialsFile string          `json:"credentials_file"`
+		Specification        json.RawMessage `json:"specification"`
+		Resource             string          `json:"resource"`
+		DeniedResource       string          `json:"denied_resource"`
+		Arguments            Arguments       `json:"arguments"`
+		CLIPath              string          `json:"cli_path"`
+		CredentialsFile      string          `json:"credentials_file"`
+		WebIdentityTokenFile string          `json:"web_identity_token_file,omitempty"`
 	}
 	if err := strictJSON(raw, &fixture, MaxInputBytes); err != nil {
 		t.Fatal("invalid live fixture")
@@ -78,7 +79,7 @@ func TestLiveS3Profile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	executor, err := NewExecutor(p, CLIConfig{Path: fixture.CLIPath, CredentialsFile: fixture.CredentialsFile, MaxEvaluations: 1 << lp.MaxGrants})
+	executor, err := NewExecutor(p, CLIConfig{Path: fixture.CLIPath, CredentialsFile: fixture.CredentialsFile, WebIdentityTokenFile: fixture.WebIdentityTokenFile, MaxEvaluations: 1 << lp.MaxGrants})
 	if err != nil {
 		t.Fatal("invalid local CLI configuration")
 	}

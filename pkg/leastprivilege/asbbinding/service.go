@@ -143,7 +143,7 @@ type Reconciler func(context.Context, lp.ExecutionRecord, lp.Request) (lp.Effect
 
 type Config struct {
 	Policies       *Policies
-	Store          *lp.DurableStore
+	Store          lp.ExecutionStore
 	Issuer         string
 	Audience       string
 	GrantKeys      map[string]ed25519.PublicKey
@@ -157,7 +157,7 @@ type Config struct {
 
 type Service struct {
 	policies             *Policies
-	store                *lp.DurableStore
+	store                lp.ExecutionStore
 	issuer, audience     string
 	grantKeys, actorKeys []clients.LocalKey
 	key                  ed25519.PrivateKey
@@ -477,7 +477,7 @@ func boundedCapability(cap lp.Capability) bool {
 }
 
 type durableReplay struct {
-	store *lp.DurableStore
+	store lp.UseStore
 	clock func() time.Time
 	ctx   context.Context
 }

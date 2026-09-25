@@ -28,6 +28,8 @@ type credentials struct {
 
 var keyPatternAWS = regexp.MustCompile(`^[A-Z0-9]{16,128}$`)
 
+var webIdentityPattern = regexp.MustCompile(`^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$`)
+
 func safeCredential(value string, max int) bool {
 	if value == "" || len(value) > max {
 		return false
@@ -101,27 +103,26 @@ func (b *boundedOutput) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-func (e *Executor) assume(ctx context.Context, id string, policy []byte) (credentials, error) {
-	f, err := os.Open(e.config.CredentialsFile)
+func readPrivateSource(path string, limit int64) ([]byte, error) {
+	f, err := os.Open(path)
 	if err != nil {
-		return credentials{}, ErrProvider
+		return nil, ErrProvider
 	}
 	info, statErr := f.Stat()
 	if statErr != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0o077 != 0 {
 		f.Close()
-		return credentials{}, ErrProvider
+		return nil, ErrProvider
 	}
-	raw, err := io.ReadAll(io.LimitReader(f, (64<<10)+1))
+	raw, err := io.ReadAll(io.LimitReader(f, limit+1))
 	f.Close()
-	if err != nil {
-		return credentials{}, ErrProvider
+	if err != nil || int64(len(raw)) > limit {
+		clear(raw)
+		return nil, ErrProvider
 	}
-	defer clear(raw)
-	static, err := staticProfile(raw, e.profile.spec.CredentialProfile)
-	if err != nil {
-		return credentials{}, err
-	}
-	defer clear(static)
+	return raw, nil
+}
+
+func (e *Executor) assume(ctx context.Context, id string, policy []byte) (credentials, error) {
 	dir, err := os.MkdirTemp("", "asb-aws-session-")
 	if err != nil {
 		return credentials{}, ErrProvider
@@ -129,7 +130,7 @@ func (e *Executor) assume(ctx context.Context, id string, policy []byte) (creden
 	defer os.RemoveAll(dir)
 	credentialFile := filepath.Join(dir, "credentials")
 	configFile := filepath.Join(dir, "config")
-	if err := os.WriteFile(credentialFile, static, 0o600); err != nil {
+	if err := os.WriteFile(credentialFile, nil, 0o600); err != nil {
 		return credentials{}, ErrProvider
 	}
 	if err := os.WriteFile(configFile, []byte{}, 0o600); err != nil {
@@ -137,7 +138,39 @@ func (e *Executor) assume(ctx context.Context, id string, policy []byte) (creden
 	}
 	hash := sha256.Sum256([]byte(id))
 	name := "asb-" + hex.EncodeToString(hash[:16])
-	args := []string{"--profile", e.profile.spec.CredentialProfile, "--region", e.profile.spec.Region, "--endpoint-url", "https://sts." + e.profile.spec.Region + ".amazonaws.com", "--output", "json", "--no-cli-pager", "--no-cli-auto-prompt", "sts", "assume-role", "--role-arn", e.profile.spec.RoleARN, "--role-session-name", name, "--duration-seconds", "900", "--policy", string(policy), "--query", "Credentials"}
+	args := []string{"--region", e.profile.spec.Region, "--endpoint-url", "https://sts." + e.profile.spec.Region + ".amazonaws.com", "--output", "json", "--no-cli-pager", "--no-cli-auto-prompt"}
+	if e.config.WebIdentityTokenFile != "" {
+		raw, readErr := readPrivateSource(e.config.WebIdentityTokenFile, 20001)
+		if readErr != nil {
+			return credentials{}, readErr
+		}
+		defer clear(raw)
+		token := bytes.TrimSpace(raw)
+		if len(token) < 4 || len(token) > 20000 || !webIdentityPattern.Match(token) {
+			return credentials{}, ErrProvider
+		}
+		tokenFile := filepath.Join(dir, "web-identity-token")
+		if err := os.WriteFile(tokenFile, token, 0o600); err != nil {
+			return credentials{}, ErrProvider
+		}
+		args = append(args, "--no-sign-request", "sts", "assume-role-with-web-identity", "--web-identity-token", "file://"+tokenFile)
+	} else {
+		raw, readErr := readPrivateSource(e.config.CredentialsFile, 64<<10)
+		if readErr != nil {
+			return credentials{}, readErr
+		}
+		defer clear(raw)
+		static, profileErr := staticProfile(raw, e.profile.spec.CredentialProfile)
+		if profileErr != nil {
+			return credentials{}, profileErr
+		}
+		defer clear(static)
+		if err := os.WriteFile(credentialFile, static, 0o600); err != nil {
+			return credentials{}, ErrProvider
+		}
+		args = append(args, "--profile", e.profile.spec.CredentialProfile, "sts", "assume-role")
+	}
+	args = append(args, "--role-arn", e.profile.spec.RoleARN, "--role-session-name", name, "--duration-seconds", "900", "--policy", string(policy), "--query", "Credentials")
 	cmd := exec.CommandContext(ctx, e.config.Path, args...)
 	cmd.Env = []string{"PATH=/usr/bin:/bin", "LANG=C", "AWS_CONFIG_FILE=" + configFile, "AWS_SHARED_CREDENTIALS_FILE=" + credentialFile, "AWS_EC2_METADATA_DISABLED=true", "AWS_STS_REGIONAL_ENDPOINTS=regional", "AWS_MAX_ATTEMPTS=1", "AWS_PAGER=", "AWS_CLI_AUTO_PROMPT=off"}
 	cmd.Dir = dir
