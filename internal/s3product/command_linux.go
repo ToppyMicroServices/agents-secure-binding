@@ -17,17 +17,22 @@ import (
 // to bypass ASB authorization, reset a live journal, or repeat uncertain reads.
 func Run(ctx context.Context, args []string, out io.Writer) error {
 	if len(args) == 0 {
-		return errors.New("usage: asb-s3 serve|init-store|status|backup|restore [flags]")
+		return errors.New("usage: asb-s3 serve|init-store|status|inspect|backup|restore [flags]")
 	}
 	command := args[0]
 	flags := flag.NewFlagSet(command, flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	var directory, config, output, input, hash *string
+	var operation, digest *string
 	switch command {
 	case "serve":
 		config = flags.String("config", "", "private product configuration")
 	case "init-store", "status":
 		directory = flags.String("directory", "", "private journal directory")
+	case "inspect":
+		directory = flags.String("directory", "", "private journal directory")
+		operation = flags.String("operation", "", "exact operation ID")
+		digest = flags.String("request-digest", "", "exact request digest")
 	case "backup":
 		directory = flags.String("directory", "", "private journal directory")
 		output = flags.String("output", "", "new backup file in a private directory")
@@ -61,6 +66,8 @@ func Run(ctx context.Context, args []string, out io.Writer) error {
 	var result any
 	if command == "backup" {
 		result, err = store.Backup(ctx, *output)
+	} else if command == "inspect" {
+		result, err = store.Lookup(ctx, *operation, *digest)
 	} else {
 		result, err = store.Status(ctx)
 	}

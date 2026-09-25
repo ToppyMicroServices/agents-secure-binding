@@ -15,8 +15,9 @@ import (
 
 func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer cancel()
-	if err := s3product.Run(ctx, os.Args[1:], os.Stdout); err != nil {
+	err := s3product.Run(ctx, os.Args[1:], os.Stdout)
+	cancel()
+	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}

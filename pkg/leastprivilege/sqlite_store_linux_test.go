@@ -90,6 +90,36 @@ func TestSQLiteConcurrentAdmissionAndRestart(t *testing.T) {
 	}
 }
 
+func TestSQLiteCompletionWriteFailurePreservesUncertainty(t *testing.T) {
+	s := newSQLiteFixture(t)
+	f := sqliteFixture(t, s, "write-failure")
+	id := s.Namespace() + "/write-failure"
+	var calls int
+	_, err := s.Run(t.Context(), id, f.cap, f.key, f.mandate, f.request, f.now, func(context.Context, string, Request) (EffectResult, error) {
+		calls++
+		// Simulate the storage handle becoming unavailable after the effect.
+		if err := s.Close(); err != nil {
+			t.Fatal(err)
+		}
+		return EffectResult{State: ExecutionSucceeded, EvidenceDigest: f.mandate.ActionDigest}, nil
+	})
+	if !errors.Is(err, ErrOutcomeUnknown) {
+		t.Fatalf("uncommitted success reported: %v", err)
+	}
+	reopened, err := OpenSQLiteStore(t.Context(), s.directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	r, err := reopened.Run(t.Context(), id, f.cap, f.key, f.mandate, f.request, f.now, func(context.Context, string, Request) (EffectResult, error) {
+		calls++
+		return EffectResult{}, nil
+	})
+	if !errors.Is(err, ErrOutcomeUnknown) || r.State != ExecutionRunning || calls != 1 {
+		t.Fatalf("restart lost uncertainty: %+v %v calls=%d", r, err, calls)
+	}
+}
+
 func TestSQLiteBackupRestoreRotatesAuthority(t *testing.T) {
 	s := newSQLiteFixture(t)
 	f := sqliteFixture(t, s, "unknown")
@@ -157,7 +187,7 @@ func TestSQLiteBeyondSnapshotCapacityAndRetainedIdentities(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	for i := range 10001 {
 		id := fmt.Sprintf("%s/old-%d", s.Namespace(), i)
 		if _, err = tx.ExecContext(t.Context(), `INSERT INTO operations VALUES(?,?,?,?,?,?,?)`, id, f.mandate.ActionDigest, id, f.mandate.ActionDigest, f.now.UnixNano(), string(ExecutionSucceeded), f.mandate.ActionDigest); err != nil {

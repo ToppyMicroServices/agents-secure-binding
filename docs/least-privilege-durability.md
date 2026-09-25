@@ -1,5 +1,10 @@
 # Durable least-privilege execution
 
+This page describes the original bounded file-snapshot store. The Linux S3
+product uses a separate indexed `SQLiteStore` with persistent revocation and
+namespace-rotating restoration; see the
+[S3 operations runbook](least-privilege-s3-product.md#long-term-retention-and-backup).
+
 `leastprivilege.DurableStore` extends the finite-model authorizer with a shared
 single-host admission journal. It implements `UseStore` and records operation
 progress. Linux and macOS processes using the same private directory coordinate

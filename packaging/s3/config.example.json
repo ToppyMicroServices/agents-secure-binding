@@ -1,0 +1,18 @@
+{
+  "schema": "asb.s3-product/v1",
+  "namespace": "REPLACE_WITH_INIT_STORE_NAMESPACE",
+  "listen": "127.0.0.1:8443",
+  "store_directory": "/var/lib/asb-s3/journal",
+  "profile_file": "/etc/asb-s3/profile.json",
+  "mandates_file": "/etc/asb-s3/mandates.json",
+  "signing_key_file": "/etc/asb-s3/capability-key.pem",
+  "certificate_file": "/etc/asb-s3/server.pem",
+  "tls_key_file": "/etc/asb-s3/server-key.pem",
+  "client_ca_file": "/etc/asb-s3/client-ca.pem",
+  "aws_cli": "/usr/local/bin/aws",
+  "web_identity_token_file": "/run/asb-identity/token.jwt",
+  "issuer": "https://identity.example.invalid",
+  "audience": "asb-s3-reader",
+  "grant_keys": {"authority-1": "REPLACE_WITH_BASE64_32_BYTE_ED25519_PUBLIC_KEY"},
+  "actor_keys": {"agent-1": "REPLACE_WITH_DIFFERENT_BASE64_32_BYTE_ED25519_PUBLIC_KEY"}
+}

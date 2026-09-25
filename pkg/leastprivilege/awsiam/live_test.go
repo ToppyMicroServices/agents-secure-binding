@@ -35,8 +35,8 @@ func TestLiveS3Profile(t *testing.T) {
 	}
 	defer f.Close()
 	info, err := f.Stat()
-	if err != nil || !info.Mode().IsRegular() {
-		t.Fatal("live fixture must be a regular file")
+	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0o077 != 0 {
+		t.Fatal("live fixture must be an owner-only regular file")
 	}
 	raw, err := io.ReadAll(io.LimitReader(f, MaxInputBytes+1))
 	if err != nil {

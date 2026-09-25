@@ -1,0 +1,87 @@
+name: ASB S3 AWS qualification
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: Type read-explicit-fixture to read the two authorized fixture objects
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  live:
+    if: github.repository == 'ToppyMicroServices/agents-secure-binding' && inputs.confirmation == 'read-explicit-fixture'
+    runs-on: ubuntu-24.04
+    environment: aws-s3-live
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      GOWORK: 'off'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version: 1.26.6
+      - name: Build the opt-in gate before issuing a short-lived identity
+        run: |
+          go mod verify
+          go test -c -tags awsiam_live -o "$RUNNER_TEMP/asb-s3-live.test" ./pkg/leastprivilege/awsiam
+          mkdir -p evidence
+          git rev-parse HEAD > evidence/source-commit.txt
+          uname -s > evidence/operating-system.txt
+          aws --version > evidence/aws-cli-version.txt
+      - name: Load the private fixture and project a fresh GitHub OIDC token
+        uses: actions/github-script@v8
+        env:
+          ASB_FIXTURE: ${{ secrets.ASB_AWS_LIVE_FIXTURE_JSON }}
+        with:
+          script: |
+            const fs = require('node:fs');
+            const path = require('node:path');
+            let fixture;
+            try {
+              if (!process.env.ASB_FIXTURE || Buffer.byteLength(process.env.ASB_FIXTURE) > 65536) throw new Error();
+              fixture = JSON.parse(process.env.ASB_FIXTURE);
+              if (!fixture.specification || !fixture.resource || !fixture.denied_resource || fixture.credentials_file) throw new Error();
+            } catch {
+              core.setFailed('An explicit private OIDC fixture is required in environment aws-s3-live.');
+              return;
+            }
+            const directory = path.join(process.env.RUNNER_TEMP, 'asb-aws-private');
+            fs.mkdirSync(directory, {mode: 0o700});
+            const token = await core.getIDToken('sts.amazonaws.com');
+            core.setSecret(token);
+            fixture.web_identity_token_file = path.join(directory, 'oidc.jwt');
+            fs.writeFileSync(fixture.web_identity_token_file, token, {mode: 0o600, flag: 'wx'});
+            fixture.credentials_file = '';
+            fixture.cli_path = await io.which('aws', true);
+            const fixturePath = path.join(directory, 'fixture.json');
+            fs.writeFileSync(fixturePath, JSON.stringify(fixture), {mode: 0o600, flag: 'wx'});
+            core.exportVariable('ASB_AWS_LIVE_FIXTURE', fixturePath);
+      - name: Verify the allowed read and the explicit outside-object denial
+        env:
+          ASB_AWS_LIVE_CONFIRM: read-explicit-fixture
+        run: |
+          set -o pipefail
+          "$RUNNER_TEMP/asb-s3-live.test" -test.run '^TestLiveS3Profile$' -test.v -test.timeout=90s | tee evidence/aws-gate.txt
+          rg --fixed-strings -- '--- PASS: TestLiveS3Profile' evidence/aws-gate.txt
+          jq -n --arg commit "$GITHUB_SHA" --arg run "$GITHUB_RUN_ID" \
+            '{schema:"asb.s3-live-evidence/v1",commit:$commit,run_id:$run,os:"Linux",source:"github-oidc",allowed_read:true,outside_object_403:true}' > evidence/result.json
+      - name: Remove projected identity and private fixture
+        if: always()
+        run: rm -rf -- "$RUNNER_TEMP/asb-aws-private"
+      - name: Save qualification evidence without credentials or object contents
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: asb-s3-aws-${{ github.run_id }}
+          path: evidence/
+          if-no-files-found: error
+          retention-days: 7

@@ -43,6 +43,8 @@ jobs:
           uname -s > evidence/operating-system.txt
           go test -race -count=1 -timeout=12m -json ./pkg/leastprivilege/... ./internal/s3product ./cmd/asb-s3 > evidence/tests.jsonl
           go vet ./pkg/leastprivilege/... ./internal/s3product ./cmd/asb-s3
+          # Compile the opt-in AWS gate without calling AWS or treating a skip as qualification.
+          go test -c -tags awsiam_live -o "$RUNNER_TEMP/asb-s3-live.test" ./pkg/leastprivilege/awsiam
       - name: Build and exercise the Linux product binary
         run: |
           go build -trimpath -o evidence/asb-s3 ./cmd/asb-s3
@@ -61,7 +63,7 @@ jobs:
         uses: golangci/golangci-lint-action@v8
         with:
           version: v2.11.1
-          args: ./pkg/leastprivilege/... ./internal/s3product/... ./cmd/asb-s3/...
+          args: --build-tags awsiam_live ./pkg/leastprivilege/... ./internal/s3product/... ./cmd/asb-s3/...
       - name: Save non-secret conformance evidence
         if: always()
         uses: actions/upload-artifact@v4
