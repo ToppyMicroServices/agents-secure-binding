@@ -115,6 +115,7 @@ func CreateSQLiteStore(ctx context.Context, directory string) (*SQLiteStore, err
 		`CREATE TABLE metadata (id INTEGER PRIMARY KEY CHECK(id=1), namespace TEXT NOT NULL, floor INTEGER NOT NULL, backup INTEGER NOT NULL CHECK(backup IN (0,1)))`,
 		`CREATE TABLE operations (id TEXT PRIMARY KEY, digest TEXT NOT NULL, mandate TEXT NOT NULL UNIQUE, mandate_digest TEXT NOT NULL, expiry INTEGER NOT NULL, state TEXT NOT NULL CHECK(state IN ('ACCEPTED','RUNNING','UNKNOWN','SUCCEEDED','FAILED')), evidence TEXT NOT NULL)`,
 		`CREATE TABLE uses (id TEXT PRIMARY KEY, expiry INTEGER NOT NULL, operation TEXT UNIQUE REFERENCES operations(id))`,
+		`CREATE TABLE mandates (id TEXT PRIMARY KEY, digest TEXT NOT NULL, revoked INTEGER NOT NULL CHECK(revoked IN (0,1)))`,
 		`CREATE INDEX expired_nonces ON uses(expiry) WHERE operation IS NULL`,
 		`CREATE INDEX operation_states ON operations(state)`,
 		fmt.Sprintf(`PRAGMA application_id=%d`, sqliteApplicationID),
@@ -201,6 +202,7 @@ func (s *SQLiteStore) Close() error {
 	}
 	return s.db.Close()
 }
+
 func (s *SQLiteStore) Namespace() string {
 	if s == nil {
 		return ""

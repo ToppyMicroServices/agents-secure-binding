@@ -100,7 +100,10 @@ func TestSQLiteBackupRestoreRotatesAuthority(t *testing.T) {
 	if !errors.Is(err, ErrOutcomeUnknown) || r.State != ExecutionUnknown {
 		t.Fatalf("uncertain: %+v %v", r, err)
 	}
-	backupDir := t.TempDir()
+	backupDir := filepath.Join(t.TempDir(), "backups")
+	if err := os.Mkdir(backupDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
 	path := filepath.Join(backupDir, "journal.sqlite")
 	manifest, err := s.Backup(t.Context(), path)
 	if err != nil {
@@ -229,5 +232,32 @@ func TestSQLiteCrashNeverRedispatches(t *testing.T) {
 	})
 	if !errors.Is(err, ErrOutcomeUnknown) || r.State != ExecutionRunning || called {
 		t.Fatalf("crash retry: %+v %v called=%v", r, err, called)
+	}
+}
+
+func TestSQLiteMandateRevocationSurvivesRestartAndBundleRollback(t *testing.T) {
+	s := newSQLiteFixture(t)
+	f := sqliteFixture(t, s, "active")
+	if err := s.SyncMandates(t.Context(), []Mandate{f.mandate}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SyncMandates(t.Context(), nil); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := OpenSQLiteStore(t.Context(), s.directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	if err = reopened.SyncMandates(t.Context(), []Mandate{f.mandate}); !errors.Is(err, ErrInvalidMandate) {
+		t.Fatalf("revoked mandate revived: %v", err)
+	}
+	fresh := sqliteFixture(t, s, "fresh")
+	if err = reopened.SyncMandates(t.Context(), []Mandate{fresh.mandate}); err != nil {
+		t.Fatal(err)
+	}
+	fresh.mandate.ExpiresAt = fresh.mandate.ExpiresAt.Add(time.Hour)
+	if err = reopened.SyncMandates(t.Context(), []Mandate{fresh.mandate}); !errors.Is(err, ErrInvalidMandate) {
+		t.Fatalf("existing authority altered: %v", err)
 	}
 }

@@ -8,6 +8,7 @@ on:
       - 'pkg/leastprivilege/**'
       - 'internal/s3product/**'
       - 'cmd/asb-s3/**'
+      - 'packaging/s3/**'
       - 'go.mod'
       - 'go.sum'
   pull_request:
@@ -16,6 +17,7 @@ on:
       - 'pkg/leastprivilege/**'
       - 'internal/s3product/**'
       - 'cmd/asb-s3/**'
+      - 'packaging/s3/**'
   workflow_dispatch:
 
 permissions:
@@ -39,8 +41,27 @@ jobs:
           mkdir -p evidence
           git rev-parse HEAD > evidence/source-commit.txt
           uname -s > evidence/operating-system.txt
-          go test -race -count=1 -timeout=12m -json ./pkg/leastprivilege/... > evidence/tests.jsonl
-          go vet ./pkg/leastprivilege/...
+          go test -race -count=1 -timeout=12m -json ./pkg/leastprivilege/... ./internal/s3product ./cmd/asb-s3 > evidence/tests.jsonl
+          go vet ./pkg/leastprivilege/... ./internal/s3product ./cmd/asb-s3
+      - name: Build and exercise the Linux product binary
+        run: |
+          go build -trimpath -o evidence/asb-s3 ./cmd/asb-s3
+          ./evidence/asb-s3 init-store --directory "$RUNNER_TEMP/asb-s3-journal" > evidence/initialized.json
+          mkdir -m 700 "$RUNNER_TEMP/asb-s3-backups"
+          ./evidence/asb-s3 backup --directory "$RUNNER_TEMP/asb-s3-journal" --output "$RUNNER_TEMP/asb-s3-backups/snapshot.sqlite" > evidence/backup.json
+          ./evidence/asb-s3 restore --directory "$RUNNER_TEMP/asb-s3-restored" --input "$RUNNER_TEMP/asb-s3-backups/snapshot.sqlite" --sha256 "$(jq -r .sha256 evidence/backup.json)" > evidence/restored.json
+          test "$(jq -r .namespace evidence/initialized.json)" != "$(jq -r .namespace evidence/restored.json)"
+          sha256sum evidence/asb-s3 > evidence/binary.sha256
+          sudo install -m 0755 evidence/asb-s3 /usr/local/bin/asb-s3
+          systemd-analyze verify packaging/s3/asb-s3.service 2> evidence/systemd-verify.txt || {
+            cat evidence/systemd-verify.txt
+            exit 1
+          }
+      - name: Lint the Linux product paths
+        uses: golangci/golangci-lint-action@v8
+        with:
+          version: v2.11.1
+          args: ./pkg/leastprivilege/... ./internal/s3product/... ./cmd/asb-s3/...
       - name: Save non-secret conformance evidence
         if: always()
         uses: actions/upload-artifact@v4
