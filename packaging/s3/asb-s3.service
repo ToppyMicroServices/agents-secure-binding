@@ -1,0 +1,32 @@
+[Unit]
+Description=ASB restricted S3 reader
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=asb-s3
+Group=asb-s3
+ExecStart=/usr/local/bin/asb-s3 serve --config /etc/asb-s3/config.json
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=60
+KillMode=control-group
+StateDirectory=asb-s3
+StateDirectoryMode=0700
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+ReadWritePaths=/var/lib/asb-s3
+
+[Install]
+WantedBy=multi-user.target

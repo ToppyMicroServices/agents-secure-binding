@@ -1,0 +1,33 @@
+{
+  "specification": {
+    "schema": "asb.least-privilege.aws-s3/v1",
+    "role_arn": "arn:aws:iam::111122223333:role/asb-reader",
+    "region": "eu-west-1",
+    "credential_profile": "oidc",
+    "objects": [
+      {"arn": "arn:aws:s3:::asb-example-bucket/allowed.txt", "cost": 1, "owner_account": "111122223333"}
+    ],
+    "grants": [{
+      "id": "read-allowed",
+      "policy": {
+        "Version": "2012-10-17",
+        "Statement": [{"Effect": "Allow", "Action": "s3:GetObject", "Resource": ["arn:aws:s3:::asb-example-bucket/allowed.txt"]}]
+      }
+    }],
+    "required": ["arn:aws:s3:::asb-example-bucket/allowed.txt"],
+    "allowed": ["arn:aws:s3:::asb-example-bucket/allowed.txt"],
+    "max_response_bytes": 1024
+  },
+  "resource": "arn:aws:s3:::asb-example-bucket/allowed.txt",
+  "denied_resource": "arn:aws:s3:::asb-example-bucket/outside.txt",
+  "arguments": {
+    "profile_digest": "",
+    "expected_bucket_owner": "111122223333",
+    "if_match": "\"REPLACE_WITH_ACTUAL_ALLOWED_OBJECT_ETAG\"",
+    "range_start": 0,
+    "range_end": 3
+  },
+  "cli_path": "/usr/local/bin/aws",
+  "credentials_file": "",
+  "web_identity_token_file": "/run/asb-identity/token.jwt"
+}

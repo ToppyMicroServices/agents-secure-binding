@@ -35,20 +35,21 @@ func TestLiveS3Profile(t *testing.T) {
 	}
 	defer f.Close()
 	info, err := f.Stat()
-	if err != nil || !info.Mode().IsRegular() {
-		t.Fatal("live fixture must be a regular file")
+	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0o077 != 0 {
+		t.Fatal("live fixture must be an owner-only regular file")
 	}
 	raw, err := io.ReadAll(io.LimitReader(f, MaxInputBytes+1))
 	if err != nil {
 		t.Fatal("cannot read live fixture")
 	}
 	var fixture struct {
-		Specification   json.RawMessage `json:"specification"`
-		Resource        string          `json:"resource"`
-		DeniedResource  string          `json:"denied_resource"`
-		Arguments       Arguments       `json:"arguments"`
-		CLIPath         string          `json:"cli_path"`
-		CredentialsFile string          `json:"credentials_file"`
+		Specification        json.RawMessage `json:"specification"`
+		Resource             string          `json:"resource"`
+		DeniedResource       string          `json:"denied_resource"`
+		Arguments            Arguments       `json:"arguments"`
+		CLIPath              string          `json:"cli_path"`
+		CredentialsFile      string          `json:"credentials_file"`
+		WebIdentityTokenFile string          `json:"web_identity_token_file,omitempty"`
 	}
 	if err := strictJSON(raw, &fixture, MaxInputBytes); err != nil {
 		t.Fatal("invalid live fixture")
@@ -78,14 +79,14 @@ func TestLiveS3Profile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	executor, err := NewExecutor(p, CLIConfig{Path: fixture.CLIPath, CredentialsFile: fixture.CredentialsFile, MaxEvaluations: 1 << lp.MaxGrants})
+	executor, err := NewExecutor(p, CLIConfig{Path: fixture.CLIPath, CredentialsFile: fixture.CredentialsFile, WebIdentityTokenFile: fixture.WebIdentityTokenFile, MaxEvaluations: 1 << lp.MaxGrants})
 	if err != nil {
 		t.Fatal("invalid local CLI configuration")
 	}
 	request := lp.Request{ActorID: "live-gate:operator", TaskID: "live-gate:read", Action: lp.Action{Operation: Operation, Resource: fixture.Resource, Arguments: arguments}}
 	result, err := executor.Execute(ctx, "live-gate:read", request, solution)
 	if err != nil || result.State != lp.ExecutionSucceeded {
-		t.Fatalf("allowed live read failed: %v", err)
+		t.Fatalf("allowed live read failed: state=%s error=%v", result.State, err)
 	}
 	// Use the same verified envelope to observe denial of the explicitly supplied
 	// outside object. This does not establish the cause of every AWS policy result.

@@ -388,6 +388,7 @@ may need a less restricted environment.
 | --- | --- |
 | How can I try an Agent request and approve it myself? | [Local approval guide](docs/local-human-approval.md) · [Local validation record](docs/local-human-approval-validation.md) |
 | Can a delegated action run automatically with verified minimum permissions? | [Finite model and demo](docs/least-privilege-v1.md) · [Authenticated execution](docs/least-privilege-execution.md) · [Portable proofs](docs/least-privilege-certificates.md) |
+| How do I deploy the Linux S3 read profile? | [OIDC, storage, backup and AWS qualification](docs/least-privilege-s3-product.md) (preview until deployment qualification) |
 | What behavior is authoritative in this repository? | [SSOT](docs/SSOT.md) |
 | What attacks and trust boundaries are in scope? | [Threat model](docs/threat-model.md) |
 | Which v1 APIs and deployment choices are supported? | [API compatibility](docs/API_COMPATIBILITY.md) · [Production profile](docs/production-deployment-profile.md) |

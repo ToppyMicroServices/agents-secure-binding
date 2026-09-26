@@ -6,6 +6,9 @@ with an explicit session-policy boundary, then performs one conditional, ranged
 GetObject request. It returns a receipt digest, not object contents or temporary
 credentials. This is a narrow adapter, not a full AWS IAM interpreter.
 
+For the assembled Linux service, workload identity, persistent policy history
+and backup/restore, use the [S3 product runbook](least-privilege-s3-product.md).
+
 ## Trusted specification
 
 `Compile` accepts JSON with schema `asb.least-privilege.aws-s3/v1`:
@@ -107,11 +110,12 @@ executors := map[string]asbbinding.Executor{
 ```
 
 The constructor accepts no network endpoint, proxy, HTTP client, or peer-provided
-credential override. CLI and credential-file paths are local trusted
-configuration; the credential file is read only when `Execute` runs. The opened
+credential override. Configure exactly one of `CredentialsFile` or
+`WebIdentityTokenFile`, using an absolute path. CLI and source-file paths are local
+trusted configuration; the source is read only when `Execute` runs. The opened
 file must be regular with no group/other permission bits, such as mode `0600`
 or `0400`. This checks POSIX mode bits; operators still control the trusted
-path, ACLs and host access. Only the
+path, ACLs and host access. In static mode, only the
 explicit named static-credential profile is copied into a private temporary
 directory. Unknown credential fields, `credential_process`, role chaining,
 SSO and metadata discovery are refused. Unrelated profiles stay out of the
@@ -119,6 +123,16 @@ child process. No ambient access keys, proxies, endpoint overrides, or AWS confi
 are inherited. Temporary files are removed after AssumeRole. Provider diagnostics
 are discarded; stdout credentials are size-limited and kept inside the adapter.
 Go-managed memory is not a secure-erasure boundary.
+
+In OIDC mode, a fresh projected JWT is read for each execution and supplied to
+`AssumeRoleWithWebIdentity` through a private temporary file. It is not placed
+in argv or inherited from an ambient AWS provider. The CLI uses
+`--no-sign-request`; no static source credential is needed. The trusted
+`credential_profile` remains part of the specification digest but is not used
+to select a credential in this mode. The workload issuer rotates the source
+file, and AWS validates its token against the role trust policy. There is no
+fallback if the token is invalid or expired. See
+[AWS WebIdentity STS](https://docs.aws.amazon.com/STS/latest/APIReference/API_AssumeRoleWithWebIdentity.html).
 
 The trusted AWS CLI receives structured arguments for AssumeRole at the fixed
 regional STS endpoint. It requests 900-second credentials, AWS's minimum session
@@ -195,7 +209,8 @@ GOFLAGS=-p=2 GOWORK=off go test -tags awsiam_live \
 The fixture fields are `specification` (the full JSON above), `resource` (selected
 object ARN), `denied_resource` (an explicitly authorized test object outside the
 selected set in the same bucket), `arguments` (the exact read arguments),
-`cli_path`, and `credentials_file` (both absolute). An empty argument
+`cli_path`, and exactly one of `credentials_file` or `web_identity_token_file`
+(absolute paths). The fixture itself must be an owner-only regular file. An empty argument
 `profile_digest` is filled from the trusted fixture during setup. The gate
 requires an allowed ranged read and an AWS 403 for the outside object. It logs
 only the receipt digest. A denied result alone does not identify which AWS

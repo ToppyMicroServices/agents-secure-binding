@@ -238,6 +238,51 @@ func TestStaticProfileAndCredentialResponseBounds(t *testing.T) {
 	}
 }
 
+func TestSTSDiagnosticsAreBoundedAndRedacted(t *testing.T) {
+	for _, tc := range []struct {
+		name, diagnostic, want string
+	}{
+		{"web_identity", "\nAn error occurred (InvalidIdentityToken) when calling the AssumeRoleWithWebIdentity operation: private-token-and-account", "InvalidIdentityToken"},
+		{"enhanced", "\naws: [ERROR]: An error occurred (InvalidIdentityToken) when calling the AssumeRoleWithWebIdentity operation: private-token-and-account\nAdditional error details: private-details", "InvalidIdentityToken"},
+		{"json", `{"Code":"InvalidIdentityToken","Message":"private-token-and-account","Details":{"Secret":"private-details"}}`, "InvalidIdentityToken"},
+		{"missing_provider", `{"Code":"InvalidIdentityToken","Message":"No OpenIDConnect provider found in your account for https://private-issuer.invalid"}`, "InvalidIdentityToken (oidc_provider_not_found)"},
+		{"audience", `{"Code":"InvalidIdentityToken","Message":"Incorrect token audience: private-audience"}`, "InvalidIdentityToken (audience_mismatch)"},
+		{"verification_key", `{"Code":"InvalidIdentityToken","Message":"Couldn't retrieve verification key from your identity provider: private-key-info"}`, "InvalidIdentityToken (verification_key_unavailable)"},
+		{"certificate", `{"Code":"InvalidIdentityToken","Message":"OpenIDConnect provider's HTTPS certificate doesn't match configured thumbprint: private-thumbprint"}`, "InvalidIdentityToken (provider_certificate_mismatch)"},
+		{"expiry", `{"Code":"InvalidIdentityToken","Message":"Token is expired: private-token-info"}`, "InvalidIdentityToken (token_expired)"},
+		{"malformed", `{"Code":"InvalidIdentityToken","Message":"The ID Token provided is not a valid JWT: private-token"}`, "InvalidIdentityToken (malformed_token)"},
+		{"wrong_code_for_reason", `{"Code":"AccessDenied","Message":"Incorrect token audience: private-details"}`, "AccessDenied"},
+		{"json_unknown", `{"Code":"PrivateSecret","Message":"private-diagnostic"}`, "unclassified failure"},
+		{"json_wrong_type", `{"Code":{"Secret":"private-diagnostic"}}`, "unclassified failure"},
+		{"json_trailing", `{"Code":"InvalidIdentityToken"} private-diagnostic`, "unclassified failure"},
+		{"role", "An error occurred (AccessDenied) when calling the AssumeRole operation: private-role-arn", "AccessDenied"},
+		{"unknown_code", "An error occurred (PrivateSecret) when calling the AssumeRoleWithWebIdentity operation: private-diagnostic", "unclassified failure"},
+		{"unstructured", "private-diagnostic: InvalidIdentityToken", "unclassified failure"},
+		{"oversized", strings.Repeat("private-diagnostic", 4096), "unclassified failure"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e, s, r, cli := fakeExecutor(t)
+			script := "#!/bin/sh\n/usr/bin/printf '%s' 'private-stdout'\n/bin/cat \"$0.stderr\" >&2\nexit 1\n"
+			if err := os.WriteFile(cli+".stderr", []byte(tc.diagnostic), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(cli, []byte(script), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			e.client.Transport = roundTripFunc(func(*http.Request) (*http.Response, error) {
+				t.Fatal("S3 called after STS failure")
+				return nil, ErrProvider
+			})
+			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+			defer cancel()
+			_, err := e.Execute(ctx, "operation", r, s)
+			if !errors.Is(err, ErrProvider) || err.Error() != ErrProvider.Error()+": STS CLI exit 1: "+tc.want {
+				t.Fatalf("unexpected sanitized failure: %v", err)
+			}
+		})
+	}
+}
+
 func TestPublishedS3SignatureVector(t *testing.T) {
 	// AWS's public test vector, not usable credentials:
 	// https://docs.aws.amazon.com/AmazonS3/latest/developerguide/sig-v4-header-based-auth.html
