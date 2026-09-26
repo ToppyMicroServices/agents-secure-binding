@@ -9,6 +9,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -30,7 +31,7 @@ var keyPatternAWS = regexp.MustCompile(`^[A-Z0-9]{16,128}$`)
 
 var webIdentityPattern = regexp.MustCompile(`^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$`)
 
-var stsErrorPattern = regexp.MustCompile(`(?m)^An error occurred \(([A-Za-z]+)\) when calling the (?:AssumeRole|AssumeRoleWithWebIdentity) operation:`)
+var stsErrorPattern = regexp.MustCompile(`(?m)^(?:aws: \[ERROR\]: )?An error occurred \(([A-Za-z]+)\) when calling the (?:AssumeRole|AssumeRoleWithWebIdentity) operation:`)
 
 // Only known service codes may leave the CLI boundary. Never include its raw
 // diagnostics, which can contain identity details or credential material.
@@ -200,7 +201,11 @@ func (e *Executor) assume(ctx context.Context, id string, policy []byte) (creden
 		if ctx.Err() != nil {
 			return credentials{}, ctx.Err()
 		}
-		return credentials{}, fmt.Errorf("%w: STS CLI: %s", ErrProvider, stsErrorCode(diagnostic.data))
+		var exit *exec.ExitError
+		if errors.As(err, &exit) {
+			return credentials{}, fmt.Errorf("%w: STS CLI exit %d: %s", ErrProvider, exit.ExitCode(), stsErrorCode(diagnostic.data))
+		}
+		return credentials{}, fmt.Errorf("%w: STS CLI could not complete", ErrProvider)
 	}
 	defer clear(output.data)
 	var response struct {

@@ -243,6 +243,7 @@ func TestSTSDiagnosticsAreBoundedAndRedacted(t *testing.T) {
 		name, diagnostic, want string
 	}{
 		{"web_identity", "\nAn error occurred (InvalidIdentityToken) when calling the AssumeRoleWithWebIdentity operation: private-token-and-account", "InvalidIdentityToken"},
+		{"enhanced", "\naws: [ERROR]: An error occurred (InvalidIdentityToken) when calling the AssumeRoleWithWebIdentity operation: private-token-and-account\nAdditional error details: private-details", "InvalidIdentityToken"},
 		{"role", "An error occurred (AccessDenied) when calling the AssumeRole operation: private-role-arn", "AccessDenied"},
 		{"unknown_code", "An error occurred (PrivateSecret) when calling the AssumeRoleWithWebIdentity operation: private-diagnostic", "unclassified failure"},
 		{"unstructured", "private-diagnostic: InvalidIdentityToken", "unclassified failure"},
@@ -261,7 +262,7 @@ func TestSTSDiagnosticsAreBoundedAndRedacted(t *testing.T) {
 			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 			defer cancel()
 			_, err := e.Execute(ctx, "operation", r, s)
-			if !errors.Is(err, ErrProvider) || err.Error() != ErrProvider.Error()+": STS CLI: "+tc.want {
+			if !errors.Is(err, ErrProvider) || err.Error() != ErrProvider.Error()+": STS CLI exit 1: "+tc.want {
 				t.Fatalf("unexpected sanitized failure: %v", err)
 			}
 		})
