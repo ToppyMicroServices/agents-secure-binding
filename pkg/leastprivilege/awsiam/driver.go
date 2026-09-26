@@ -34,11 +34,12 @@ var webIdentityPattern = regexp.MustCompile(`^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A
 
 var stsErrorPattern = regexp.MustCompile(`(?m)^(?:aws: \[ERROR\]: )?An error occurred \(([A-Za-z]+)\) when calling the (?:AssumeRole|AssumeRoleWithWebIdentity) operation:`)
 
-// Only known service codes may leave the CLI boundary. Never include its raw
-// diagnostics, which can contain identity details or credential material.
+// Only known codes and fixed reason labels may leave the CLI boundary. Never
+// include raw diagnostics, which can contain identities or credential material.
 func stsErrorCode(raw []byte) string {
 	var response struct {
-		Code string
+		Code    string
+		Message string
 	}
 	if err := json.Unmarshal(raw, &response); err != nil {
 		// Older CLI versions ignore AWS_CLI_ERROR_FORMAT; retain their format.
@@ -47,7 +48,22 @@ func stsErrorCode(raw []byte) string {
 		}
 	}
 	switch response.Code {
-	case "AccessDenied", "ExpiredToken", "IDPCommunicationError", "IDPRejectedClaim", "InvalidIdentityToken", "MalformedPolicyDocument", "PackedPolicyTooLarge", "RegionDisabled", "Throttling", "ValidationError":
+	case "InvalidIdentityToken":
+		// Match documented AWS reasons, but discard all URLs and identity details.
+		for _, reason := range []struct{ prefix, label string }{
+			{"No OpenIDConnect provider found in your account", "oidc_provider_not_found"},
+			{"Incorrect token audience", "audience_mismatch"},
+			{"Couldn't retrieve verification key from your identity provider", "verification_key_unavailable"},
+			{"OpenIDConnect provider's HTTPS certificate doesn't match configured thumbprint", "provider_certificate_mismatch"},
+			{"Token is expired", "token_expired"},
+			{"The ID Token provided is not a valid JWT", "malformed_token"},
+		} {
+			if strings.HasPrefix(response.Message, reason.prefix) {
+				return response.Code + " (" + reason.label + ")"
+			}
+		}
+		return response.Code
+	case "AccessDenied", "ExpiredToken", "IDPCommunicationError", "IDPRejectedClaim", "MalformedPolicyDocument", "PackedPolicyTooLarge", "RegionDisabled", "Throttling", "ValidationError":
 		return response.Code
 	}
 	return "unclassified failure"

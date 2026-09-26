@@ -245,6 +245,13 @@ func TestSTSDiagnosticsAreBoundedAndRedacted(t *testing.T) {
 		{"web_identity", "\nAn error occurred (InvalidIdentityToken) when calling the AssumeRoleWithWebIdentity operation: private-token-and-account", "InvalidIdentityToken"},
 		{"enhanced", "\naws: [ERROR]: An error occurred (InvalidIdentityToken) when calling the AssumeRoleWithWebIdentity operation: private-token-and-account\nAdditional error details: private-details", "InvalidIdentityToken"},
 		{"json", `{"Code":"InvalidIdentityToken","Message":"private-token-and-account","Details":{"Secret":"private-details"}}`, "InvalidIdentityToken"},
+		{"missing_provider", `{"Code":"InvalidIdentityToken","Message":"No OpenIDConnect provider found in your account for https://private-issuer.invalid"}`, "InvalidIdentityToken (oidc_provider_not_found)"},
+		{"audience", `{"Code":"InvalidIdentityToken","Message":"Incorrect token audience: private-audience"}`, "InvalidIdentityToken (audience_mismatch)"},
+		{"verification_key", `{"Code":"InvalidIdentityToken","Message":"Couldn't retrieve verification key from your identity provider: private-key-info"}`, "InvalidIdentityToken (verification_key_unavailable)"},
+		{"certificate", `{"Code":"InvalidIdentityToken","Message":"OpenIDConnect provider's HTTPS certificate doesn't match configured thumbprint: private-thumbprint"}`, "InvalidIdentityToken (provider_certificate_mismatch)"},
+		{"expiry", `{"Code":"InvalidIdentityToken","Message":"Token is expired: private-token-info"}`, "InvalidIdentityToken (token_expired)"},
+		{"malformed", `{"Code":"InvalidIdentityToken","Message":"The ID Token provided is not a valid JWT: private-token"}`, "InvalidIdentityToken (malformed_token)"},
+		{"wrong_code_for_reason", `{"Code":"AccessDenied","Message":"Incorrect token audience: private-details"}`, "AccessDenied"},
 		{"json_unknown", `{"Code":"PrivateSecret","Message":"private-diagnostic"}`, "unclassified failure"},
 		{"json_wrong_type", `{"Code":{"Secret":"private-diagnostic"}}`, "unclassified failure"},
 		{"json_trailing", `{"Code":"InvalidIdentityToken"} private-diagnostic`, "unclassified failure"},
@@ -255,7 +262,10 @@ func TestSTSDiagnosticsAreBoundedAndRedacted(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			e, s, r, cli := fakeExecutor(t)
-			script := "#!/bin/sh\n/usr/bin/printf '%s' 'private-stdout'\n/usr/bin/printf '%s' '" + tc.diagnostic + "' >&2\nexit 1\n"
+			script := "#!/bin/sh\n/usr/bin/printf '%s' 'private-stdout'\n/bin/cat \"$0.stderr\" >&2\nexit 1\n"
+			if err := os.WriteFile(cli+".stderr", []byte(tc.diagnostic), 0o600); err != nil {
+				t.Fatal(err)
+			}
 			if err := os.WriteFile(cli, []byte(script), 0o700); err != nil {
 				t.Fatal(err)
 			}
