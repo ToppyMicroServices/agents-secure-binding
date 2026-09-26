@@ -30,6 +30,21 @@ var keyPatternAWS = regexp.MustCompile(`^[A-Z0-9]{16,128}$`)
 
 var webIdentityPattern = regexp.MustCompile(`^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$`)
 
+var stsErrorPattern = regexp.MustCompile(`(?m)^An error occurred \(([A-Za-z]+)\) when calling the (?:AssumeRole|AssumeRoleWithWebIdentity) operation:`)
+
+// Only known service codes may leave the CLI boundary. Never include its raw
+// diagnostics, which can contain identity details or credential material.
+func stsErrorCode(raw []byte) string {
+	match := stsErrorPattern.FindSubmatch(raw)
+	if len(match) == 2 {
+		switch code := string(match[1]); code {
+		case "AccessDenied", "ExpiredToken", "IDPCommunicationError", "IDPRejectedClaim", "InvalidIdentityToken", "MalformedPolicyDocument", "PackedPolicyTooLarge", "RegionDisabled", "Throttling", "ValidationError":
+			return code
+		}
+	}
+	return "unclassified failure"
+}
+
 func safeCredential(value string, max int) bool {
 	if value == "" || len(value) > max {
 		return false
@@ -176,14 +191,16 @@ func (e *Executor) assume(ctx context.Context, id string, policy []byte) (creden
 	cmd.Dir = dir
 	cmd.WaitDelay = time.Second
 	output := &boundedOutput{limit: 64 << 10}
+	diagnostic := &boundedOutput{limit: 16 << 10}
+	defer func() { clear(diagnostic.data) }()
 	cmd.Stdout = output
-	cmd.Stderr = io.Discard
+	cmd.Stderr = diagnostic
 	if err := cmd.Run(); err != nil {
 		clear(output.data)
 		if ctx.Err() != nil {
 			return credentials{}, ctx.Err()
 		}
-		return credentials{}, ErrProvider
+		return credentials{}, fmt.Errorf("%w: STS CLI: %s", ErrProvider, stsErrorCode(diagnostic.data))
 	}
 	defer clear(output.data)
 	var response struct {
@@ -193,11 +210,11 @@ func (e *Executor) assume(ctx context.Context, id string, policy []byte) (creden
 		Expiration      string `json:"Expiration"`
 	}
 	if err := strictJSON(output.data, &response, 64<<10); err != nil {
-		return credentials{}, ErrProvider
+		return credentials{}, fmt.Errorf("%w: invalid STS credential response", ErrProvider)
 	}
 	expiry, err := time.Parse(time.RFC3339, response.Expiration)
 	if err != nil || !e.clock().Before(expiry) || expiry.After(e.clock().Add(17*time.Minute)) || !strings.HasPrefix(response.AccessKeyID, "ASIA") || !keyPatternAWS.MatchString(response.AccessKeyID) || !safeCredential(response.SecretAccessKey, 128) || !safeCredential(response.SessionToken, 16384) {
-		return credentials{}, ErrProvider
+		return credentials{}, fmt.Errorf("%w: invalid STS credential values or expiry", ErrProvider)
 	}
 	return credentials{response.AccessKeyID, response.SecretAccessKey, response.SessionToken, expiry}, nil
 }

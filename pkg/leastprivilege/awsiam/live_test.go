@@ -86,7 +86,7 @@ func TestLiveS3Profile(t *testing.T) {
 	request := lp.Request{ActorID: "live-gate:operator", TaskID: "live-gate:read", Action: lp.Action{Operation: Operation, Resource: fixture.Resource, Arguments: arguments}}
 	result, err := executor.Execute(ctx, "live-gate:read", request, solution)
 	if err != nil || result.State != lp.ExecutionSucceeded {
-		t.Fatalf("allowed live read failed: %v", err)
+		t.Fatalf("allowed live read failed: state=%s error=%v", result.State, err)
 	}
 	// Use the same verified envelope to observe denial of the explicitly supplied
 	// outside object. This does not establish the cause of every AWS policy result.
