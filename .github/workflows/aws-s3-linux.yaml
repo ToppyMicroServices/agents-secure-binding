@@ -153,7 +153,7 @@ jobs:
         run: |
           set -o pipefail
           "$RUNNER_TEMP/asb-s3-live.test" -test.run '^TestLiveS3Profile$' -test.v -test.timeout=90s | tee evidence/aws-gate.txt
-          rg --fixed-strings -- '--- PASS: TestLiveS3Profile' evidence/aws-gate.txt
+          grep -F -- '--- PASS: TestLiveS3Profile' evidence/aws-gate.txt
           jq -n --arg commit "$GITHUB_SHA" --arg run "$GITHUB_RUN_ID" \
             '{schema:"asb.s3-live-evidence/v1",commit:$commit,run_id:$run,os:"Linux",source:"github-oidc",allowed_read:true,outside_object_403:true}' > evidence/result.json
       - name: Diagnose an unsuccessful OIDC gate without private error text
