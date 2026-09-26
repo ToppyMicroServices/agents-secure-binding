@@ -236,11 +236,11 @@ workflow supplies CLI/token paths; leave `credentials_file` empty. Configure the
 OIDC role trust before running. No account, bucket, object or IAM permission is
 created by this gate.
 
-Manually dispatch `ASB S3 AWS qualification` with confirmation
-`read-explicit-fixture` on reviewed code. Before that workflow is registered on
-the default branch, dispatch `ASB S3 Linux` on the reviewed branch with
-`aws_confirmation=read-explicit-fixture`; it calls the same AWS gate after Linux
-conformance succeeds. Push and pull-request runs never invoke this live job.
+Manually dispatch `ASB S3 Linux` on the reviewed branch with
+`aws_confirmation=read-explicit-fixture`. After Linux conformance succeeds, its
+AWS job uses environment `aws-s3-live` directly and checks that the private
+fixture is available before building the gate or requesting an OIDC token.
+Push and pull-request runs never invoke this live job.
 It must show an allowed ranged GET and
 an AWS 403 for the explicitly supplied excluded object. A skipped, failed or
 unconfigured run is not qualification. The evidence contains the source commit,
