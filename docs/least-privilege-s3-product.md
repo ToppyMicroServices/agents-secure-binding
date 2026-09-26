@@ -90,6 +90,12 @@ enabled. No wildcard repository trust is needed. The workflow requests the OIDC
 token directly; it does not install ambient AWS credentials. See
 [GitHub's AWS OIDC guide](https://docs.github.com/en/actions/how-tos/secure-your-work/security-harden-deployments/oidc-in-aws).
 
+Read `GET /repos/{owner}/{repo}/actions/oidc/customization/sub` before preparing
+trust. With the default template and `use_immutable_subject: true`, append
+`:environment:aws-s3-live` to the returned `sub_claim_prefix`; the prefix contains
+both owner and repository IDs. A name-only subject will not match that format.
+Keep custom-template subjects aligned with their actual configured claims.
+
 To rotate server TLS, client trust, actor/grant keys or capability signing keys,
 stop the service, atomically install the reviewed complete configuration, and
 restart. There is no hot reload. Restart drops outstanding TLS challenges; agents
@@ -231,7 +237,11 @@ OIDC role trust before running. No account, bucket, object or IAM permission is
 created by this gate.
 
 Manually dispatch `ASB S3 AWS qualification` with confirmation
-`read-explicit-fixture` on reviewed code. It must show an allowed ranged GET and
+`read-explicit-fixture` on reviewed code. Before that workflow is registered on
+the default branch, dispatch `ASB S3 Linux` on the reviewed branch with
+`aws_confirmation=read-explicit-fixture`; it calls the same AWS gate after Linux
+conformance succeeds. Push and pull-request runs never invoke this live job.
+It must show an allowed ranged GET and
 an AWS 403 for the explicitly supplied excluded object. A skipped, failed or
 unconfigured run is not qualification. The evidence contains the source commit,
 AWS CLI version, receipt digest and result, without the fixture or tokens. The

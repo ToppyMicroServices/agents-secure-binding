@@ -21,6 +21,12 @@ on:
       - 'cmd/asb-s3/**'
       - 'packaging/s3/**'
   workflow_dispatch:
+    inputs:
+      aws_confirmation:
+        description: Optional; type read-explicit-fixture to run the authorized AWS fixture after Linux checks
+        type: string
+        required: false
+        default: ''
 
 permissions:
   contents: read
@@ -74,3 +80,12 @@ jobs:
           path: evidence/
           if-no-files-found: error
           retention-days: 7
+  aws-qualification:
+    if: github.event_name == 'workflow_dispatch' && inputs.aws_confirmation == 'read-explicit-fixture'
+    needs: conformance
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/aws-s3-live.yaml
+    with:
+      confirmation: ${{ inputs.aws_confirmation }}

@@ -7,13 +7,18 @@ on:
         description: Type read-explicit-fixture to read the two authorized fixture objects
         type: string
         required: true
+  workflow_call:
+    inputs:
+      confirmation:
+        type: string
+        required: true
 
 permissions:
   contents: read
 
 jobs:
   live:
-    if: github.repository == 'ToppyMicroServices/agents-secure-binding' && inputs.confirmation == 'read-explicit-fixture'
+    if: github.event_name == 'workflow_dispatch' && github.repository == 'ToppyMicroServices/agents-secure-binding' && inputs.confirmation == 'read-explicit-fixture'
     runs-on: ubuntu-24.04
     environment: aws-s3-live
     timeout-minutes: 15
@@ -58,6 +63,13 @@ jobs:
             fs.mkdirSync(directory, {mode: 0o700});
             const token = await core.getIDToken('sts.amazonaws.com');
             core.setSecret(token);
+            // Record only public identity claims; AWS verifies the signed token.
+            const claims = JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString('utf8'));
+            const publicClaims = {};
+            for (const name of ['iss', 'aud', 'sub', 'repository_id', 'repository_owner_id', 'ref', 'environment', 'sha']) {
+              if (claims[name] !== undefined) publicClaims[name] = claims[name];
+            }
+            fs.writeFileSync('evidence/oidc-claims.json', JSON.stringify(publicClaims, null, 2));
             fixture.web_identity_token_file = path.join(directory, 'oidc.jwt');
             fs.writeFileSync(fixture.web_identity_token_file, token, {mode: 0o600, flag: 'wx'});
             fixture.credentials_file = '';
