@@ -156,6 +156,77 @@ jobs:
           rg --fixed-strings -- '--- PASS: TestLiveS3Profile' evidence/aws-gate.txt
           jq -n --arg commit "$GITHUB_SHA" --arg run "$GITHUB_RUN_ID" \
             '{schema:"asb.s3-live-evidence/v1",commit:$commit,run_id:$run,os:"Linux",source:"github-oidc",allowed_read:true,outside_object_403:true}' > evidence/result.json
+      - name: Diagnose an unsuccessful OIDC gate without private error text
+        if: failure()
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const fs = require('node:fs');
+            const path = require('node:path');
+            const crypto = require('node:crypto');
+            const {spawnSync} = require('node:child_process');
+            const directory = path.join(process.env.RUNNER_TEMP, 'asb-aws-private');
+            const fixturePath = path.join(directory, 'fixture.json');
+            if (!fs.existsSync(fixturePath)) return;
+            if (!fs.existsSync('evidence/aws-gate.txt') || !fs.readFileSync('evidence/aws-gate.txt', 'utf8').includes('InvalidIdentityToken')) return;
+            const fixture = JSON.parse(fs.readFileSync(fixturePath, 'utf8'));
+            const token = fs.readFileSync(fixture.web_identity_token_file, 'utf8').trim();
+            const parts = token.split('.');
+            const header = JSON.parse(Buffer.from(parts[0], 'base64url'));
+            const claims = JSON.parse(Buffer.from(parts[1], 'base64url'));
+            const now = Math.floor(Date.now() / 1000);
+            const diagnostic = {
+              schema: 'asb.oidc-diagnostic/v1',
+              algorithm_supported: header.alg === 'RS256',
+              time_valid: Number.isInteger(claims.iat) && Number.isInteger(claims.exp) && claims.iat <= now && now < claims.exp && (claims.nbf === undefined || (Number.isInteger(claims.nbf) && claims.nbf <= now)),
+              issuer_matches: claims.iss === 'https://token.actions.githubusercontent.com',
+              audience_matches: claims.aud === 'sts.amazonaws.com',
+            };
+            try {
+              const response = await fetch('https://token.actions.githubusercontent.com/.well-known/jwks', {signal: AbortSignal.timeout(10000)});
+              if (!response.ok) throw new Error();
+              const jwks = await response.json();
+              const key = jwks.keys.find(key => key.kid === header.kid);
+              diagnostic.signing_key_found = Boolean(key);
+              diagnostic.signature_verified = header.alg === 'RS256' && Boolean(key) && crypto.verify('RSA-SHA256', Buffer.from(parts[0] + '.' + parts[1]), crypto.createPublicKey({key, format: 'jwk'}), Buffer.from(parts[2], 'base64url'));
+            } catch {
+              diagnostic.public_key_check_unavailable = true;
+            }
+            // Repeat only STS with the same single-object bound; never retry S3.
+            const policy = JSON.stringify({Version: '2012-10-17', Statement: [
+              {Effect: 'Deny', NotAction: 's3:GetObject', Resource: '*'},
+              {Effect: 'Deny', Action: 's3:GetObject', NotResource: [fixture.resource]},
+              {Effect: 'Allow', Action: 's3:GetObject', Resource: [fixture.resource]},
+            ]});
+            const emptyConfig = path.join(directory, 'diagnostic-empty-config');
+            fs.writeFileSync(emptyConfig, '', {mode: 0o600, flag: 'wx'});
+            const result = spawnSync(fixture.cli_path, [
+              '--region', fixture.specification.region, '--endpoint-url', 'https://sts.' + fixture.specification.region + '.amazonaws.com',
+              '--output', 'json', '--no-cli-pager', '--no-cli-auto-prompt', '--no-sign-request',
+              'sts', 'assume-role-with-web-identity', '--web-identity-token', 'file://' + fixture.web_identity_token_file,
+              '--role-arn', fixture.specification.role_arn, '--role-session-name', 'asb-oidc-diagnostic',
+              '--duration-seconds', '900', '--policy', policy, '--query', 'PackedPolicySize',
+            ], {encoding: 'utf8', timeout: 20000, maxBuffer: 65536, cwd: directory, env: {
+              PATH: '/usr/bin:/bin', LANG: 'C', AWS_CONFIG_FILE: emptyConfig, AWS_SHARED_CREDENTIALS_FILE: emptyConfig,
+              AWS_EC2_METADATA_DISABLED: 'true', AWS_STS_REGIONAL_ENDPOINTS: 'regional', AWS_MAX_ATTEMPTS: '1',
+              AWS_PAGER: '', AWS_CLI_AUTO_PROMPT: 'off', AWS_CLI_ERROR_FORMAT: 'json',
+            }});
+            diagnostic.sts_exit_code = result.status;
+            diagnostic.sts_probe_succeeded = result.status === 0;
+            // Only words from this fixed vocabulary may appear in the artifact.
+            // Unknown words, URLs, identifiers and token material are discarded.
+            const vocabulary = new Set("a an and are as at be been by can cannot could couldn't did does doesn't failed failure for from has have id in invalid is it jwt key keys missing must no not of oidc on only openidconnect or parse provided provider required retrieve signature signed signer signing supported that the their this to token tokens too unable unknown unsupported url valid validation verify was were which with your audience account certificate configured expires expired expiry issuer claim claims found algorithm incorrect requested request response subject authentication format identity limit length size disabled thumbprint mismatch verification decode decoded byte character malformed unexpected".split(' '));
+            try {
+              const failure = JSON.parse(result.stderr);
+              const codes = new Set(['InvalidIdentityToken', 'AccessDenied', 'ExpiredToken', 'IDPCommunicationError', 'IDPRejectedClaim', 'MalformedPolicyDocument', 'PackedPolicyTooLarge', 'RegionDisabled', 'Throttling', 'ValidationError']);
+              diagnostic.sts_error_code = codes.has(failure.Code) ? failure.Code : 'unclassified';
+              if (typeof failure.Message === 'string') {
+                diagnostic.reason_words = (failure.Message.match(/[A-Za-z]+(?:'[A-Za-z]+)?/g) || []).slice(0, 96).map(word => vocabulary.has(word.toLowerCase()) ? word.toLowerCase() : '[omitted]');
+              }
+            } catch {
+              diagnostic.sts_error_code = 'unclassified';
+            }
+            fs.writeFileSync('evidence/oidc-diagnostic.json', JSON.stringify(diagnostic, null, 2));
       - name: Remove projected identity and private fixture
         if: always()
         run: rm -rf -- "$RUNNER_TEMP/asb-aws-private"
