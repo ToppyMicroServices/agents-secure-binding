@@ -9,6 +9,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -36,12 +37,18 @@ var stsErrorPattern = regexp.MustCompile(`(?m)^(?:aws: \[ERROR\]: )?An error occ
 // Only known service codes may leave the CLI boundary. Never include its raw
 // diagnostics, which can contain identity details or credential material.
 func stsErrorCode(raw []byte) string {
-	match := stsErrorPattern.FindSubmatch(raw)
-	if len(match) == 2 {
-		switch code := string(match[1]); code {
-		case "AccessDenied", "ExpiredToken", "IDPCommunicationError", "IDPRejectedClaim", "InvalidIdentityToken", "MalformedPolicyDocument", "PackedPolicyTooLarge", "RegionDisabled", "Throttling", "ValidationError":
-			return code
+	var response struct {
+		Code string
+	}
+	if err := json.Unmarshal(raw, &response); err != nil {
+		// Older CLI versions ignore AWS_CLI_ERROR_FORMAT; retain their format.
+		if match := stsErrorPattern.FindSubmatch(raw); len(match) == 2 {
+			response.Code = string(match[1])
 		}
+	}
+	switch response.Code {
+	case "AccessDenied", "ExpiredToken", "IDPCommunicationError", "IDPRejectedClaim", "InvalidIdentityToken", "MalformedPolicyDocument", "PackedPolicyTooLarge", "RegionDisabled", "Throttling", "ValidationError":
+		return response.Code
 	}
 	return "unclassified failure"
 }
@@ -188,7 +195,7 @@ func (e *Executor) assume(ctx context.Context, id string, policy []byte) (creden
 	}
 	args = append(args, "--role-arn", e.profile.spec.RoleARN, "--role-session-name", name, "--duration-seconds", "900", "--policy", string(policy), "--query", "Credentials")
 	cmd := exec.CommandContext(ctx, e.config.Path, args...)
-	cmd.Env = []string{"PATH=/usr/bin:/bin", "LANG=C", "AWS_CONFIG_FILE=" + configFile, "AWS_SHARED_CREDENTIALS_FILE=" + credentialFile, "AWS_EC2_METADATA_DISABLED=true", "AWS_STS_REGIONAL_ENDPOINTS=regional", "AWS_MAX_ATTEMPTS=1", "AWS_PAGER=", "AWS_CLI_AUTO_PROMPT=off"}
+	cmd.Env = []string{"PATH=/usr/bin:/bin", "LANG=C", "AWS_CONFIG_FILE=" + configFile, "AWS_SHARED_CREDENTIALS_FILE=" + credentialFile, "AWS_EC2_METADATA_DISABLED=true", "AWS_STS_REGIONAL_ENDPOINTS=regional", "AWS_MAX_ATTEMPTS=1", "AWS_PAGER=", "AWS_CLI_AUTO_PROMPT=off", "AWS_CLI_ERROR_FORMAT=json"}
 	cmd.Dir = dir
 	cmd.WaitDelay = time.Second
 	output := &boundedOutput{limit: 64 << 10}

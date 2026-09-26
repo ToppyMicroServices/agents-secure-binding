@@ -244,6 +244,10 @@ func TestSTSDiagnosticsAreBoundedAndRedacted(t *testing.T) {
 	}{
 		{"web_identity", "\nAn error occurred (InvalidIdentityToken) when calling the AssumeRoleWithWebIdentity operation: private-token-and-account", "InvalidIdentityToken"},
 		{"enhanced", "\naws: [ERROR]: An error occurred (InvalidIdentityToken) when calling the AssumeRoleWithWebIdentity operation: private-token-and-account\nAdditional error details: private-details", "InvalidIdentityToken"},
+		{"json", `{"Code":"InvalidIdentityToken","Message":"private-token-and-account","Details":{"Secret":"private-details"}}`, "InvalidIdentityToken"},
+		{"json_unknown", `{"Code":"PrivateSecret","Message":"private-diagnostic"}`, "unclassified failure"},
+		{"json_wrong_type", `{"Code":{"Secret":"private-diagnostic"}}`, "unclassified failure"},
+		{"json_trailing", `{"Code":"InvalidIdentityToken"} private-diagnostic`, "unclassified failure"},
 		{"role", "An error occurred (AccessDenied) when calling the AssumeRole operation: private-role-arn", "AccessDenied"},
 		{"unknown_code", "An error occurred (PrivateSecret) when calling the AssumeRoleWithWebIdentity operation: private-diagnostic", "unclassified failure"},
 		{"unstructured", "private-diagnostic: InvalidIdentityToken", "unclassified failure"},
