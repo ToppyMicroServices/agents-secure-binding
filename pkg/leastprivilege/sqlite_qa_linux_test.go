@@ -92,9 +92,18 @@ func TestSQLiteLockCancellationRecovers(t *testing.T) {
 	t.Logf("lock_cancel_and_recovery_ms=%d", time.Since(start).Milliseconds())
 }
 
+func privateBackupDirectory(t *testing.T) string {
+	t.Helper()
+	directory := filepath.Join(t.TempDir(), "backups")
+	if err := os.Mkdir(directory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	return directory
+}
+
 func TestSQLiteBackupRecoveryPreservesPublishedAndActiveFiles(t *testing.T) {
 	s := newSQLiteFixture(t)
-	directory := t.TempDir()
+	directory := privateBackupDirectory(t)
 	published := filepath.Join(directory, "snapshot.sqlite")
 	manifest, err := s.Backup(t.Context(), published)
 	if err != nil {
@@ -188,7 +197,7 @@ func TestSQLiteCopyCancellationDoesNotPublishOutput(t *testing.T) {
 	}
 	t.Logf("copy_cancel_ms=%d", time.Since(start).Milliseconds())
 	s := newSQLiteFixture(t)
-	path := filepath.Join(t.TempDir(), "snapshot.sqlite")
+	path := filepath.Join(privateBackupDirectory(t), "snapshot.sqlite")
 	if _, err = s.Backup(ctx, path); err == nil {
 		t.Fatal("canceled backup succeeded")
 	}
@@ -228,7 +237,7 @@ func TestSQLiteBackupCrashBoundaries(t *testing.T) {
 	for _, stage := range []string{"created", "snapshot", "sealed", "published"} {
 		t.Run(stage, func(t *testing.T) {
 			s := newSQLiteFixture(t)
-			directory := t.TempDir()
+			directory := privateBackupDirectory(t)
 			good := filepath.Join(directory, "existing.sqlite")
 			manifest, err := s.Backup(t.Context(), good)
 			if err != nil {

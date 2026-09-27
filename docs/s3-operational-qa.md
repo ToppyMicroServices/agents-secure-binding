@@ -25,8 +25,9 @@ The workflow uses Ubuntu 24.04, Go 1.26.6, a disposable local journal, and a
 separate 32 MiB tmpfs for exhaustion. These are lab acceptance thresholds, not
 an organization's service-level agreement.
 
-- With 100,000 retained records, measure 100 fresh executions per monitoring
-  condition. Report p95/p99/max; require p99 <= 1 second and max <= 5 seconds.
+- With 100,000 retained records, measure 100 fresh executions without monitoring, with
+  monitoring, and with monitoring plus a concurrent backup on a separate
+  connection. Report p95/p99/max; require p99 <= 1 second and max <= 5 seconds.
   A sealed backup must finish within 60 seconds. Report journal, WAL and free
   bytes; a pinned reader must release WAL for checkpoint without losing IDs.
 - Load 4,096 mandates, 256 permissions and 20 grants within the existing input

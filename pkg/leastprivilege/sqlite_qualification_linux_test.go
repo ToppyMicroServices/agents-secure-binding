@@ -153,7 +153,14 @@ func TestSQLiteHistoryMonitoringAndBackupQualification(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, monitoring := range []bool{false, true} {
+	backupStore, err := OpenSQLiteStore(t.Context(), s.directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer backupStore.Close()
+	backupDirectory := privateBackupDirectory(t)
+	for _, condition := range []struct{ monitoring, backup bool }{{}, {monitoring: true}, {monitoring: true, backup: true}} {
+		monitoring := condition.monitoring
 		ctx, cancel := context.WithCancel(t.Context())
 		var wg sync.WaitGroup
 		var monitorErr error
@@ -167,22 +174,54 @@ func TestSQLiteHistoryMonitoringAndBackupQualification(t *testing.T) {
 				}
 			})
 		}
+		var backupErr error
+		var backupElapsed time.Duration
+		var backupWG sync.WaitGroup
+		if condition.backup {
+			ready := make(chan struct{})
+			backupWG.Go(func() {
+				start := time.Now()
+				_, backupErr = backupStore.backup(ctx, filepath.Join(backupDirectory, "concurrent.sqlite"), func(stage string) {
+					if stage == "created" {
+						close(ready)
+					}
+				})
+				backupElapsed = time.Since(start)
+			})
+			select {
+			case <-ready:
+			case <-time.After(5 * time.Second):
+				cancel()
+				backupWG.Wait()
+				wg.Wait()
+				t.Fatal("concurrent backup did not start", backupErr)
+			}
+		}
+		var peakWAL int64
 		latency := make([]int64, 0, 100)
 		for i := range 100 {
-			fresh := sqliteFixture(t, s, fmt.Sprintf("%t-%d", monitoring, i))
+			fresh := sqliteFixture(t, s, fmt.Sprintf("%t-%t-%d", monitoring, condition.backup, i))
 			start := time.Now()
-			_, err = s.Run(t.Context(), s.Namespace()+fmt.Sprintf("/measure-%t-%d", monitoring, i), fresh.cap, fresh.key, fresh.mandate, fresh.request, fresh.now, func(context.Context, string, Request) (EffectResult, error) {
+			_, err = s.Run(t.Context(), s.Namespace()+fmt.Sprintf("/measure-%t-%t-%d", monitoring, condition.backup, i), fresh.cap, fresh.key, fresh.mandate, fresh.request, fresh.now, func(context.Context, string, Request) (EffectResult, error) {
 				return EffectResult{State: ExecutionSucceeded, EvidenceDigest: fresh.mandate.ActionDigest}, nil
 			})
 			latency = append(latency, time.Since(start).Microseconds())
+			if info, statErr := os.Stat(filepath.Join(s.directory, "journal.sqlite-wal")); statErr == nil {
+				peakWAL = max(peakWAL, info.Size())
+			}
 			if err != nil {
 				cancel()
+				backupWG.Wait()
 				wg.Wait()
 				t.Fatal(err)
 			}
 		}
+		backupWG.Wait()
 		cancel()
 		wg.Wait()
+		if backupErr != nil || backupElapsed > time.Minute {
+			t.Fatal("concurrent backup failed or exceeded lab 60s budget", backupErr)
+		}
 		if monitorErr != nil {
 			t.Fatal(monitorErr)
 		}
@@ -190,15 +229,15 @@ func TestSQLiteHistoryMonitoringAndBackupQualification(t *testing.T) {
 		if latency[98] > 1_000_000 || latency[99] > 5_000_000 {
 			t.Fatal("p99 >1s or maximum >5s on the lab workload")
 		}
-		t.Logf("history=100000 monitoring=%t samples=100 p95_us=%d p99_us=%d max_us=%d", monitoring, latency[94], latency[98], latency[99])
+		t.Logf("history=100000 monitoring=%t concurrent_backup=%t samples=100 p95_us=%d p99_us=%d max_us=%d sampled_wal_peak_bytes=%d backup_ms=%d", monitoring, condition.backup, latency[94], latency[98], latency[99], peakWAL, backupElapsed.Milliseconds())
 	}
 	start := time.Now()
-	_, err = s.Backup(t.Context(), filepath.Join(t.TempDir(), "snapshot.sqlite"))
+	_, err = s.Backup(t.Context(), filepath.Join(backupDirectory, "snapshot.sqlite"))
 	if err != nil || time.Since(start) > time.Minute {
 		t.Fatal("backup failed or exceeded lab 60s budget", err)
 	}
 	status, err := s.Status(t.Context())
-	if err != nil || status.Operations != 100200 || status.Uncertain != 0 {
+	if err != nil || status.Operations != 100300 || status.Uncertain != 0 {
 		t.Fatalf("retention/counts %+v %v", status, err)
 	}
 	var walBytes int64
