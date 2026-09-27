@@ -51,6 +51,7 @@ jobs:
           go vet ./pkg/leastprivilege/... ./internal/s3product ./cmd/asb-s3
           # Compile the opt-in AWS gate without calling AWS or treating a skip as qualification.
           go test -c -tags awsiam_live -o "$RUNNER_TEMP/asb-s3-live.test" ./pkg/leastprivilege/awsiam
+          go test -c -tags awsiam_live -o "$RUNNER_TEMP/asb-s3-product-live.test" ./internal/s3product
       - name: Build and exercise the Linux product binary
         run: |
           go build -trimpath -o evidence/asb-s3 ./cmd/asb-s3
@@ -108,6 +109,8 @@ jobs:
         run: |
           go mod verify
           go test -c -tags awsiam_live -o "$RUNNER_TEMP/asb-s3-live.test" ./pkg/leastprivilege/awsiam
+          go test -c -tags awsiam_live -o "$RUNNER_TEMP/asb-s3-product-live.test" ./internal/s3product
+          go build -trimpath -o "$RUNNER_TEMP/asb-s3-live" ./cmd/asb-s3
           mkdir -p evidence
           git rev-parse HEAD > evidence/source-commit.txt
           uname -s > evidence/operating-system.txt
@@ -156,6 +159,17 @@ jobs:
           grep -F -- '--- PASS: TestLiveS3Profile' evidence/aws-gate.txt
           jq -n --arg commit "$GITHUB_SHA" --arg run "$GITHUB_RUN_ID" \
             '{schema:"asb.s3-live-evidence/v1",commit:$commit,run_id:$run,os:"Linux",source:"github-oidc",allowed_read:true,outside_object_403:true}' > evidence/result.json
+      - name: Verify the product process and recovery with real AWS
+        env:
+          ASB_AWS_LIVE_CONFIRM: read-explicit-fixture
+          ASB_S3_LIVE_BINARY: ${{ runner.temp }}/asb-s3-live
+        run: |
+          set -o pipefail
+          "$RUNNER_TEMP/asb-s3-product-live.test" -test.run '^TestLiveProductReadAndRestore$' -test.v -test.timeout=240s | tee evidence/product-gate.txt
+          grep -F -- '--- PASS: TestLiveProductReadAndRestore' evidence/product-gate.txt
+          binary_sha256=$(sha256sum "$ASB_S3_LIVE_BINARY" | cut -d ' ' -f 1)
+          jq -n --arg commit "$GITHUB_SHA" --arg run "$GITHUB_RUN_ID" --arg binary "$binary_sha256" \
+            '{schema:"asb.s3-product-live-evidence/v1",commit:$commit,run_id:$run,os:"Linux",source:"github-oidc",binary_sha256:$binary,mtls_asb_read:true,restart_receipt_without_sts:true,sealed_backup_restore:true,old_authority_denied:true,restored_authorized_read:true,loopback_lab:true,organization_deployment_qualified:false}' > evidence/product-result.json
       - name: Diagnose an unsuccessful OIDC gate without private error text
         if: failure()
         uses: actions/github-script@v8
