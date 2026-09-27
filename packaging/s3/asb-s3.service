@@ -11,7 +11,7 @@ ExecStart=/usr/local/bin/asb-s3 serve --config /etc/asb-s3/config.json
 Restart=on-failure
 RestartSec=5
 TimeoutStopSec=60
-KillMode=control-group
+KillMode=mixed
 StateDirectory=asb-s3
 StateDirectoryMode=0700
 UMask=0077
@@ -27,6 +27,9 @@ LockPersonality=true
 CapabilityBoundingSet=
 AmbientCapabilities=
 ReadWritePaths=/var/lib/asb-s3
+LogNamespace=asb-s3
+LogRateLimitIntervalSec=30s
+LogRateLimitBurst=120
 
 [Install]
 WantedBy=multi-user.target

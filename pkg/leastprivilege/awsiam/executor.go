@@ -160,22 +160,22 @@ func (e *Executor) Execute(ctx context.Context, id string, request lp.Request, s
 	signRequest(req, creds, e.profile.spec.Region, e.clock())
 	response, err := e.client.Do(req)
 	if err != nil {
-		return lp.EffectResult{}, ErrProvider
+		return lp.EffectResult{}, providerFailure("s3", "response_unavailable", ErrProvider)
 	}
 	defer response.Body.Close()
 	if response.StatusCode == http.StatusForbidden || response.StatusCode == http.StatusNotFound || response.StatusCode == http.StatusPreconditionFailed || response.StatusCode == http.StatusRequestedRangeNotSatisfiable {
 		return evidence(id, request, solution, e.profile.digest, response.StatusCode, "", 0), nil
 	}
 	if response.StatusCode != http.StatusPartialContent || response.Header.Get("ETag") != args.IfMatch {
-		return lp.EffectResult{}, ErrProvider
+		return lp.EffectResult{}, providerFailure("s3", "response_unavailable", ErrProvider)
 	}
 	length := args.RangeEnd - args.RangeStart + 1
 	if response.ContentLength != length || !validContentRange(response.Header.Get("Content-Range"), args.RangeStart, args.RangeEnd) {
-		return lp.EffectResult{}, ErrProvider
+		return lp.EffectResult{}, providerFailure("s3", "response_unavailable", ErrProvider)
 	}
 	content, err := io.ReadAll(io.LimitReader(response.Body, length+1))
 	if err != nil || int64(len(content)) != length {
-		return lp.EffectResult{}, ErrProvider
+		return lp.EffectResult{}, providerFailure("s3", "response_unavailable", ErrProvider)
 	}
 	hash := sha256.Sum256(content)
 	clear(content)

@@ -2,13 +2,14 @@ name: ASB S3 Linux
 
 on:
   push:
-    branches: [main, feat/aws-s3-product]
+    branches: [main, feat/aws-s3-product, fix/s3-operational-qa]
     paths:
       - '.github/workflows/aws-s3-linux.yaml'
       - 'pkg/leastprivilege/**'
       - 'internal/s3product/**'
       - 'cmd/asb-s3/**'
       - 'scripts/run-s3-operations.cjs'
+      - 'scripts/s3-qa-evidence.py'
       - 'packaging/s3/**'
       - 'go.mod'
       - 'go.sum'
@@ -19,6 +20,7 @@ on:
       - 'internal/s3product/**'
       - 'cmd/asb-s3/**'
       - 'scripts/run-s3-operations.cjs'
+      - 'scripts/s3-qa-evidence.py'
       - 'packaging/s3/**'
   workflow_dispatch:
     inputs:
@@ -73,11 +75,54 @@ jobs:
             cat evidence/systemd-verify.txt
             exit 1
           }
+      - name: Measure bounded operational QA on Linux
+        env:
+          ASB_QA_CAPACITY: '1'
+        run: |
+          set -o pipefail
+          export ASB_QA_BINARY="$PWD/evidence/asb-s3"
+          go test -count=1 -timeout=6m -v ./pkg/leastprivilege -run '^TestSQLiteHistoryMonitoringAndBackupQualification$' | tee evidence/qa-capacity.txt
+          go test -count=1 -tags awsiam_live -timeout=6m -v ./internal/s3product -run '^TestOfflineProduct' | tee evidence/qa-product.txt
+      - name: Verify real storage exhaustion and the installed systemd unit
+        run: |
+          set -o pipefail
+          fixture="$RUNNER_TEMP/asb-qa-full"
+          mkdir -p "$fixture"
+          sudo mount -t tmpfs -o size=32m,mode=0700 tmpfs "$fixture"
+          trap 'sudo umount "$fixture"' EXIT
+          sudo chown "$(id -u):$(id -g)" "$fixture"
+          ASB_QA_FULL_DIRECTORY="$fixture" go test -count=1 -timeout=60s -v ./pkg/leastprivilege -run '^TestSQLiteFilesystemFullRecovery$' | tee evidence/qa-full.txt
+          sudo useradd --system --home-dir /var/lib/asb-s3 --shell /usr/sbin/nologin asb-s3
+          sudo install -d -o asb-s3 -g asb-s3 -m 0700 /var/lib/asb-s3 /etc/asb-s3
+          sudo install -m 0644 packaging/s3/asb-s3.service /etc/systemd/system/asb-s3.service
+          sudo install -D -m 0644 packaging/s3/journald-asb-s3.conf /etc/systemd/journald@asb-s3.conf.d/retention.conf
+          go test -c -tags awsiam_live -o "$RUNNER_TEMP/asb-qa-product.test" ./internal/s3product
+          sudo env TMPDIR=/var/lib/asb-s3 ASB_QA_SYSTEMD=1 ASB_QA_BINARY=/usr/local/bin/asb-s3 "$RUNNER_TEMP/asb-qa-product.test" -test.run '^TestOfflineSystemdLifecycle$' -test.v -test.timeout=180s | tee evidence/qa-systemd.txt
+      - name: Boot the installed unit twice in a disposable Linux container
+        run: |
+          set -o pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends systemd-container debootstrap
+          rootfs="$RUNNER_TEMP/asb-qa-rootfs"
+          sudo debootstrap --variant=minbase --include=systemd-sysv,dbus noble "$rootfs" http://archive.ubuntu.com/ubuntu/ > evidence/qa-rootfs-build.txt 2>&1
+          sudo chroot "$rootfs" useradd --system --uid "$(id -u asb-s3)" --home-dir /var/lib/asb-s3 --shell /usr/sbin/nologin asb-s3
+          sudo install -D -m 0755 evidence/asb-s3 "$rootfs/usr/local/bin/asb-s3"
+          sudo install -D -m 0644 packaging/s3/asb-s3.service "$rootfs/etc/systemd/system/asb-s3.service"
+          sudo install -D -m 0644 packaging/s3/journald-asb-s3.conf "$rootfs/etc/systemd/journald@asb-s3.conf.d/retention.conf"
+          sudo mkdir -p "$rootfs/etc/asb-s3" "$rootfs/var/lib/asb-s3"
+          sudo systemctl --root="$rootfs" enable asb-s3.service
+          sudo systemctl --root="$rootfs" set-default multi-user.target
+          sudo env TMPDIR=/var/lib/asb-s3 ASB_QA_ROOTFS="$rootfs" ASB_QA_BINARY=/usr/local/bin/asb-s3 "$RUNNER_TEMP/asb-qa-product.test" -test.run '^TestOfflineSystemdBoot$' -test.v -test.timeout=240s | tee evidence/qa-boot.txt
       - name: Lint the Linux product paths
         uses: golangci/golangci-lint-action@v8
         with:
           version: v2.11.1
           args: --build-tags awsiam_live ./pkg/leastprivilege/... ./internal/s3product/... ./cmd/asb-s3/...
+      - name: Record complete offline QA evidence
+        if: always()
+        env:
+          ASB_QA_PRIOR_STATUS: ${{ job.status }}
+        run: python3 scripts/s3-qa-evidence.py evidence
       - name: Save non-secret conformance evidence
         if: always()
         uses: actions/upload-artifact@v4

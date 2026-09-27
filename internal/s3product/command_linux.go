@@ -9,6 +9,7 @@ import (
 	"errors"
 	"flag"
 	"io"
+	"time"
 
 	lp "github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/leastprivilege"
 )
@@ -17,7 +18,7 @@ import (
 // to bypass ASB authorization, reset a live journal, or repeat uncertain reads.
 func Run(ctx context.Context, args []string, out io.Writer) error {
 	if len(args) == 0 {
-		return errors.New("usage: asb-s3 serve|init-store|status|inspect|backup|restore [flags]")
+		return errors.New("usage: asb-s3 serve|init-store|health|status|check|inspect|backup|cleanup-backups|restore [flags]")
 	}
 	command := args[0]
 	flags := flag.NewFlagSet(command, flag.ContinueOnError)
@@ -27,7 +28,7 @@ func Run(ctx context.Context, args []string, out io.Writer) error {
 	switch command {
 	case "serve":
 		config = flags.String("config", "", "private product configuration")
-	case "init-store", "status":
+	case "init-store", "status", "health", "check", "cleanup-backups":
 		directory = flags.String("directory", "", "private journal directory")
 	case "inspect":
 		directory = flags.String("directory", "", "private journal directory")
@@ -43,11 +44,37 @@ func Run(ctx context.Context, args []string, out io.Writer) error {
 	default:
 		return errors.New("unknown S3 product command")
 	}
+	var timeout *time.Duration
+	if command != "serve" {
+		timeout = flags.Duration("timeout", 5*time.Minute, "administrative deadline (at most 1h)")
+	}
 	if err := flags.Parse(args[1:]); err != nil || flags.NArg() != 0 {
 		return errors.New("invalid S3 product command arguments")
 	}
 	if command == "serve" {
 		return Serve(ctx, *config)
+	}
+	if ctx == nil || *timeout <= 0 || *timeout > time.Hour {
+		return errors.New("invalid administrative deadline")
+	}
+	ctx, cancel := context.WithTimeout(ctx, *timeout)
+	defer cancel()
+	// Monitoring does not open a writer or perform an O(N) integrity scan.
+	var value any
+	var readErr error
+	switch command {
+	case "status":
+		value, readErr = lp.ReadSQLiteStatus(ctx, *directory)
+	case "health":
+		value, readErr = lp.ReadSQLiteHealth(ctx, *directory)
+	case "cleanup-backups":
+		value, readErr = lp.RecoverSQLiteBackups(ctx, *directory)
+	}
+	if command == "status" || command == "health" || command == "cleanup-backups" {
+		if readErr != nil {
+			return readErr
+		}
+		return json.NewEncoder(out).Encode(value)
 	}
 	var store *lp.SQLiteStore
 	var err error

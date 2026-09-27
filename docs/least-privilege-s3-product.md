@@ -53,18 +53,66 @@ to the intended clients with host/VPC controls.
 
 ```sh
 sudo install -m 0644 packaging/s3/asb-s3.service /etc/systemd/system/asb-s3.service
+sudo install -d -m 0755 /etc/systemd/journald@asb-s3.conf.d
+sudo install -m 0644 packaging/s3/journald-asb-s3.conf /etc/systemd/journald@asb-s3.conf.d/retention.conf
 sudo systemctl daemon-reload
-sudo systemctl start asb-s3
+# Production hosts that must return after boot:
+sudo systemctl enable --now asb-s3
+sudo systemctl is-enabled asb-s3
 sudo systemctl status asb-s3
+# For a deliberately temporary trial, use start instead of enable --now.
 ```
 
-The unit uses the dedicated account, a private temporary directory and a writable
+The unit requires systemd 245 or later for its isolated journal namespace. It uses the dedicated account, a private temporary directory and a writable
 state directory, with no Linux capabilities. Startup loads the complete policy
 bundle and durably records removed mandates before admitting traffic. An
 exclusive authority lock prevents a second service from using another policy
 bundle against the same journal. Keep the journal on local storage that honors
 fsync and SQLite locking; network filesystems and copied concurrent instances
 are unsupported.
+
+Before enabling the reader, configure the site's token projection service to
+start at boot and produce a fresh owner-only token. Add a drop-in with `Requires=`
+and `After=` naming that **actual** projector unit; no universal issuer-specific
+unit name is assumed. Ordering alone is not readiness: the projector must report
+ready only after atomically publishing a token, and must continue renewing it.
+A listener accepting TLS is not proof of identity readiness. After a real boot,
+check both enabled/active states and a newly authorized mTLS/ASB read. Preserve
+old operation IDs. Test expired-token denial followed by renewal and a separately
+authorized new operation. A syntax check or service restart is not a boot test.
+
+## Maintenance and emergency stop
+
+`SIGTERM`/`SIGINT` stop admission and drain already accepted handlers for up to
+45 seconds. The runtime context is independent of the maintenance signal;
+ASB proof, certificate, capability and the adapter's 30-second deadline still
+expire normally. `KillMode=mixed` sends the initial systemd stop signal only to
+the main process so the STS child can finish. If draining times out, the service
+cancels active work and closes connections. It retains its authority lock until
+the handlers return. At `TimeoutStopSec=60` the supervisor sends a final cgroup
+SIGKILL if needed. This bounds the kill request, not completion of uninterruptible
+kernel I/O: a task in that state can retain its locks until the kernel returns.
+Direct unsupervised execution has no external kill deadline. Storage/host failure
+still requires the deployment's fencing and recovery procedure.
+
+For immediate emergency fencing, first submit a manual stop with
+`systemctl stop --no-block asb-s3`, then use
+`systemctl kill --kill-whom=all --signal=SIGKILL asb-s3` and verify the unit is
+inactive. The pending manual stop prevents the failure restart policy from
+reactivating it. If it must stay off across a host reboot, disable its automatic
+start as well. Deliberately start (and, if needed, re-enable) the reviewed
+configuration only after replacing revoked trust/configuration. A remote S3 request already sent cannot be undone.
+Record any `RUNNING`/`UNKNOWN` outcomes; do not retry those operation IDs.
+
+The listener admits at most **64 TCP connections before TLS**, independently of
+the **8 active HTTP handlers**. Excess connections wait in the kernel listen
+queue; no application TLS/goroutine is allocated to them. Clients need bounded
+connect/request deadlines and capped exponential backoff with jitter, starting
+at one second and capped at 30 seconds. Retry authorization/challenge exchanges
+with fresh proofs; never automatically redispatch an uncertain operation.
+HTTP header/read/write/idle limits are 5/10/40/30 seconds. Host memory/task limits
+must be chosen from the deployment's measured workload; they are not substitutes
+for admission limits.
 
 ## Authentication and rotation
 
@@ -76,6 +124,13 @@ fails without falling back to static credentials, SSO, environment variables or
 instance metadata. AWS validates the token's issuer, audience, subject and expiry
 against the role trust policy. This service does not enroll an issuer or refresh
 a token by itself.
+
+On Linux, request cancellation kills the CLI's process group. The direct child
+also receives a parent-death signal. The supported service still requires its
+systemd cgroup: a deliberately detached descendant and private token files after
+SIGKILL need that outer lifecycle. Operator-installed wrappers must not detach
+work. `PrivateTmp` removes the service's temporary credential copies on unit
+stop; unsupervised process SIGKILL does not provide that cleanup.
 
 The adapter calls `AssumeRoleWithWebIdentity` with the exact configured role,
 the verified explicit-deny session policy, and a 900-second duration. It confines
@@ -148,7 +203,12 @@ contents, action argument bytes or credential material. Retain the exact origina
 requests separately in the application's protected audit record.
 
 ```sh
+# Frequent lightweight monitoring; no history scan:
+sudo -u asb-s3 asb-s3 health --directory /var/lib/asb-s3/journal
+# Occasional snapshot counts (five-second read budget):
 sudo -u asb-s3 asb-s3 status --directory /var/lib/asb-s3/journal
+# Scheduled full integrity scan, preferably off peak:
+sudo -u asb-s3 asb-s3 check --directory /var/lib/asb-s3/journal
 sudo install -d -o asb-s3 -g asb-s3 -m 0700 /var/lib/asb-s3/backups
 sudo -u asb-s3 sh -c 'umask 077; asb-s3 backup \
   --directory /var/lib/asb-s3/journal \
@@ -163,6 +223,31 @@ opened as an execution journal. Do not copy only the live `journal.sqlite` file.
 The JSON contains the snapshot SHA-256 and namespace. Keep it and the snapshot
 in access-controlled off-host backup storage; the hash detects corruption, not
 malicious replacement. The product's AWS role does not gain backup write access.
+
+Backup and cleanup share an exclusive `.asb-s3-backup.lock` in the destination
+directory. Backup automatically recovers reserved temporary files left by a
+previous interrupted run. Stop any **older** backup binary that predates this
+lock before upgrading or using `cleanup-backups --directory <backup-directory>`.
+The cleanup command only processes private `.asb-s3-backup-work-<digits>`
+directories with the exact durable ownership marker and expected regular files.
+It refuses a live backup lock, unexpected contents or symlink/ownership, and
+preserves every published snapshot. Legacy flat temporary filenames and unmarked
+directories are left untouched: inspect those with the producing process stopped,
+verify any published snapshot/manifest first, and remove only artifacts that the
+operator has positively identified as incomplete work. Do not infer garbage from
+a filename. Do not use the reserved prefix for outputs or remove the lock file.
+A hard-link alias left after publication is counted separately from allocated
+payload bytes reclaimed; marker/directory overhead is excluded from that count.
+
+Administrative commands have a five-minute default deadline, configurable with
+`--timeout` up to one hour. Copy/hash loops check cancellation every 64 KiB.
+For an outer stop bound use a supervisor, or `timeout --signal=TERM --kill-after=10s
+300s asb-s3 ...` with the appropriate full command. Context cancellation cannot
+interrupt an I/O syscall stuck in the kernel. An interrupted restore keeps its
+pending marker and is not executable; preserve it for inspection and restore
+into a new directory. A backup publication can precede loss of its JSON response:
+inspect the snapshot instead of overwriting it. No rollback of a published file
+or removal of permanent execution history is performed.
 
 Choose a backup schedule from the acceptable loss of audit history. Choose
 off-host retention from audit obligations and recovery needs; the service does
@@ -212,6 +297,36 @@ appropriate. A restored backup does not recover lost audit outcomes.
 Run a recovery drill on a separate Linux journal before production: verify the
 snapshot checksum, changed namespace, retained records, denial of old IDs, and
 a newly approved read. Never use a drill to reactivate the retired authority.
+
+## Operator diagnostics and state classification
+
+The service writes bounded JSON events to stderr: UTC time, fixed stage/reason,
+and a truncated SHA-256 correlation of the operation ID where available.
+`identity`, `sts`, `s3`, and `journal` distinguish token/source acquisition, STS,
+S3 response and durable persistence failures. HTTP errors remain generic. Raw
+provider errors, tokens, keys, object contents and request arguments are excluded.
+Output is limited to 60 events per 30 seconds and 64 queued events; subsequent
+emitted events report suppressed counts. A blocked sink cannot block an
+execution; the final process supervisor also bounds shutdown of that sink.
+The unit adds journald rate limits and a separate `asb-s3` journal namespace.
+The supplied configuration sets a 64 MiB disk-use target, 16 MiB runtime-use
+target, seven-day retention and 128 MiB free-space reserve. Journald rotates files,
+so allow for its active file and filesystem overhead; these are rotation targets,
+not a byte-exact disk quota. Inspect with `journalctl --namespace=asb-s3 -u asb-s3`
+and `journalctl --namespace=asb-s3 --disk-usage`. Adjust this isolated namespace's
+budget to the deployment's requirements, restart `systemd-journald@asb-s3` after
+changes, and ship required audit evidence through a protected channel.
+These lossy operational events do not replace the durable execution journal.
+
+**Decision QD-01:** retain `UNKNOWN` for all adapter failures, including token or
+STS failures before S3 dispatch. Durable authority has already been consumed at
+that boundary, and a diagnostic label is not proof permitting replay. Diagnosis
+now distinguishes those stages without changing the state model. An operator
+may authorize a new read with new IDs after reviewing the old uncertain record;
+no automatic retry, forced `FAILED`, or synthetic success is introduced. A future
+no-dispatch result would need a typed adapter contract and separate proof/tests
+for cancellation races and result-persistence failure. Current evidence does not
+require that change.
 
 ## Qualification evidence
 
