@@ -541,7 +541,7 @@ func readSQLiteStatus(ctx context.Context, directory, expectedNamespace string, 
 	if err != nil {
 		return SQLiteStatus{}, storeError(err)
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	namespace, backup, err := sqliteIdentity(ctx, tx)
 	if err != nil || backup != 0 || (expectedNamespace != "" && namespace != expectedNamespace) {
 		return SQLiteStatus{}, ErrStoreUnavailable

@@ -262,7 +262,7 @@ func TestSQLiteReaderReleasesWALAndKeepsHistory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	var namespace string
 	if err = tx.QueryRowContext(t.Context(), `SELECT namespace FROM metadata`).Scan(&namespace); err != nil {
 		t.Fatal(err)

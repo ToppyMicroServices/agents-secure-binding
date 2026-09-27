@@ -62,6 +62,7 @@ jobs:
           go test -c -tags awsiam_live -o "$RUNNER_TEMP/asb-s3-live.test" ./pkg/leastprivilege/awsiam
           go test -c -tags awsiam_live -o "$RUNNER_TEMP/asb-s3-product-live.test" ./internal/s3product
       - name: Build and exercise the Linux product binary
+        id: product-build
         run: |
           go build -trimpath -o evidence/asb-s3 ./cmd/asb-s3
           ./evidence/asb-s3 init-store --directory "$RUNNER_TEMP/asb-s3-journal" > evidence/initialized.json
@@ -84,6 +85,8 @@ jobs:
           go test -count=1 -timeout=6m -v ./pkg/leastprivilege -run '^TestSQLiteHistoryMonitoringAndBackupQualification$' | tee evidence/qa-capacity.txt
           go test -count=1 -tags awsiam_live -timeout=6m -v ./internal/s3product -run '^TestOfflineProduct' | tee evidence/qa-product.txt
       - name: Verify real storage exhaustion and the installed systemd unit
+        id: storage-systemd
+        if: ${{ !cancelled() && steps.product-build.outcome == 'success' }}
         run: |
           set -o pipefail
           fixture="$RUNNER_TEMP/asb-qa-full"
@@ -99,6 +102,7 @@ jobs:
           go test -c -tags awsiam_live -o "$RUNNER_TEMP/asb-qa-product.test" ./internal/s3product
           sudo env TMPDIR=/var/lib/asb-s3 ASB_QA_SYSTEMD=1 ASB_QA_BINARY=/usr/local/bin/asb-s3 "$RUNNER_TEMP/asb-qa-product.test" -test.run '^TestOfflineSystemdLifecycle$' -test.v -test.timeout=180s | tee evidence/qa-systemd.txt
       - name: Boot the installed unit twice in a disposable Linux container
+        if: ${{ !cancelled() && steps.storage-systemd.outcome == 'success' }}
         run: |
           set -o pipefail
           sudo apt-get update -qq
@@ -114,6 +118,7 @@ jobs:
           sudo systemctl --root="$rootfs" set-default multi-user.target
           sudo env TMPDIR=/var/lib/asb-s3 ASB_QA_ROOTFS="$rootfs" ASB_QA_BINARY=/usr/local/bin/asb-s3 "$RUNNER_TEMP/asb-qa-product.test" -test.run '^TestOfflineSystemdBoot$' -test.v -test.timeout=240s | tee evidence/qa-boot.txt
       - name: Lint the Linux product paths
+        if: ${{ !cancelled() }}
         uses: golangci/golangci-lint-action@v8
         with:
           version: v2.11.1
