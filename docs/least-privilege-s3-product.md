@@ -233,6 +233,14 @@ passed at `ecba88eeb7407fe9d6aa504e0d3f52e40c77a212`: GitHub OIDC authentication
 the permitted adapter GET and outside-object HTTP 403, plus 296 Linux test cases
 including subtests. That run predates the product-process recovery gate below.
 
+The [2026-09-27 product-process run](https://github.com/ToppyMicroServices/agents-secure-binding/actions/runs/36286602920)
+passed at `6c73e3bf156618a625ae1010f444d9a731734ec7`: the actual service completed
+an mTLS/ASB read, recovered its receipt after restart with AWS acquisition
+disabled, restored a sealed backup, rejected the old authority, and completed
+a newly authorized AWS read. The downloaded Linux conformance binary and the
+AWS-executed binary had the same SHA-256. This was a loopback lab with disposable
+identities; target deployment and long-duration qualification remain open.
+
 For real AWS, fill
 [live-fixture.example.json](../packaging/s3/live-fixture.example.json) using two
 existing objects you are authorized to test, in the same bucket. Supply the
