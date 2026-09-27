@@ -16,6 +16,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"io"
 	"math/big"
@@ -47,36 +48,9 @@ func TestLiveProductReadAndRestore(t *testing.T) {
 	if !filepath.IsAbs(binary) {
 		t.Fatal("absolute product binary path is required")
 	}
-	raw, err := privateFile(os.Getenv("ASB_AWS_LIVE_FIXTURE"), awsiam.MaxInputBytes)
-	if err != nil {
-		t.Fatal("private live fixture is required")
-	}
-	var fixture struct {
-		Specification        json.RawMessage  `json:"specification"`
-		Resource             string           `json:"resource"`
-		DeniedResource       string           `json:"denied_resource"`
-		Arguments            awsiam.Arguments `json:"arguments"`
-		CLIPath              string           `json:"cli_path"`
-		CredentialsFile      string           `json:"credentials_file"`
-		WebIdentityTokenFile string           `json:"web_identity_token_file"`
-	}
-	if decode(raw, &fixture) != nil || fixture.CredentialsFile != "" || !filepath.IsAbs(fixture.WebIdentityTokenFile) {
-		t.Fatal("explicit OIDC fixture is required")
-	}
-	profile, err := awsiam.Compile(fixture.Specification)
-	if err != nil {
-		t.Fatal("invalid live profile")
-	}
 	ctx, cancel := context.WithTimeout(t.Context(), 180*time.Second)
 	defer cancel()
-	solution, err := lp.Solve(ctx, profile.Problem(), 1<<lp.MaxGrants)
-	if err != nil || !slices.Contains(solution.Effective, fixture.Resource) || slices.Contains(solution.Effective, fixture.DeniedResource) {
-		t.Fatal("invalid live permission selection")
-	}
-	if fixture.Arguments.ProfileDigest == "" {
-		fixture.Arguments.ProfileDigest = profile.Digest()
-	}
-	action := lp.Action{Operation: awsiam.Operation, Resource: fixture.Resource, Arguments: liveJSON(t, fixture.Arguments)}
+	fixture, solution, action := loadLiveProductFixture(t, ctx)
 	h := newLiveProduct(t, ctx, binary)
 	h.config.ProfileFile = h.write(t, "profile.json", fixture.Specification)
 	h.config.AWSCLI = fixture.CLIPath
@@ -144,6 +118,41 @@ func TestLiveProductReadAndRestore(t *testing.T) {
 	t.Log("product mTLS/ASB read passed; restart recovered without STS; sealed backup restored; old authority denied; new authorized AWS read passed")
 }
 
+type liveProductFixture struct {
+	Specification        json.RawMessage  `json:"specification"`
+	Resource             string           `json:"resource"`
+	DeniedResource       string           `json:"denied_resource"`
+	Arguments            awsiam.Arguments `json:"arguments"`
+	CLIPath              string           `json:"cli_path"`
+	CredentialsFile      string           `json:"credentials_file"`
+	WebIdentityTokenFile string           `json:"web_identity_token_file"`
+}
+
+func loadLiveProductFixture(t *testing.T, ctx context.Context) (liveProductFixture, lp.Solution, lp.Action) {
+	t.Helper()
+	raw, err := privateFile(os.Getenv("ASB_AWS_LIVE_FIXTURE"), awsiam.MaxInputBytes)
+	if err != nil {
+		t.Fatal("private live fixture is required")
+	}
+	var fixture liveProductFixture
+	if decode(raw, &fixture) != nil || fixture.CredentialsFile != "" || !filepath.IsAbs(fixture.WebIdentityTokenFile) {
+		t.Fatal("explicit OIDC fixture is required")
+	}
+	profile, err := awsiam.Compile(fixture.Specification)
+	if err != nil {
+		t.Fatal("invalid live profile")
+	}
+	solution, err := lp.Solve(ctx, profile.Problem(), 1<<lp.MaxGrants)
+	if err != nil || !slices.Contains(solution.Effective, fixture.Resource) || slices.Contains(solution.Effective, fixture.DeniedResource) {
+		t.Fatal("invalid live permission selection")
+	}
+	if fixture.Arguments.ProfileDigest == "" {
+		fixture.Arguments.ProfileDigest = profile.Digest()
+	}
+	action := lp.Action{Operation: awsiam.Operation, Resource: fixture.Resource, Arguments: liveJSON(t, fixture.Arguments)}
+	return fixture, solution, action
+}
+
 type liveProduct struct {
 	ctx                context.Context
 	binary             string
@@ -157,6 +166,8 @@ type liveProduct struct {
 	mandate            lp.Mandate
 	operation          asbbinding.Operation
 	nonce              uint64
+	pid                int
+	kill               func()
 }
 
 func liveJSON(t *testing.T, value any) []byte {
@@ -276,10 +287,11 @@ func (h *liveProduct) start(t *testing.T) func() {
 	if err := cmd.Start(); err != nil {
 		t.Fatal("product process did not start")
 	}
+	h.pid = cmd.Process.Pid
 	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()
 	stopped := false
-	stop := func() {
+	stopProcess := func(force bool) {
 		if stopped {
 			return
 		}
@@ -287,10 +299,19 @@ func (h *liveProduct) start(t *testing.T) func() {
 		if h.transport != nil {
 			h.transport.CloseIdleConnections()
 		}
-		_ = cmd.Process.Signal(syscall.SIGTERM)
+		if force {
+			_ = cmd.Process.Kill()
+		} else {
+			_ = cmd.Process.Signal(syscall.SIGTERM)
+		}
 		select {
 		case err := <-done:
-			if err != nil {
+			if force {
+				var exit *exec.ExitError
+				if !errors.As(err, &exit) || exit.Sys().(syscall.WaitStatus).Signal() != syscall.SIGKILL {
+					t.Error("product did not terminate with the expected signal")
+				}
+			} else if err != nil {
 				t.Error("product process did not stop cleanly")
 			}
 		case <-time.After(10 * time.Second):
@@ -299,6 +320,8 @@ func (h *liveProduct) start(t *testing.T) func() {
 			t.Error("product process exceeded shutdown deadline")
 		}
 	}
+	stop := func() { stopProcess(false) }
+	h.kill = func() { stopProcess(true) }
 	t.Cleanup(stop)
 	h.transport = &http.Transport{TLSClientConfig: h.clientTLS.Clone(), MaxConnsPerHost: 1, MaxIdleConnsPerHost: 1, ForceAttemptHTTP2: false}
 	h.client = &http.Client{Transport: h.transport, Timeout: 40 * time.Second}

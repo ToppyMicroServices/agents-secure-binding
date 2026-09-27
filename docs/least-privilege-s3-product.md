@@ -215,10 +215,27 @@ a newly approved read. Never use a drill to reactivate the retired authority.
 
 ## Qualification evidence
 
-The next operational qualification will use a dedicated Linux service user,
-renewed projected OIDC tokens, and a bounded 15-minute read loop. It will check
-retained outcomes after forced process termination and backup restoration.
-This planned lab does not replace target-host or physical power-loss testing.
+For a bounded operational run, also set workflow input `operations_minutes` to
+`15` or `45`; its default `0` leaves this gate off. The existing explicit AWS
+confirmation and private fixture remain required. The runner creates a dedicated
+`asb-s3` user and executes the same qualified binary with no new privileges and
+no effective Linux capabilities. This uses a subprocess, not the systemd unit.
+
+The client reads the approved object every 30 seconds while the trusted runner
+atomically refreshes its projected OIDC token every minute. Three times, after a
+confirmed result, it sends SIGKILL to the idle service and verifies that restart
+returns the exact receipt with AWS acquisition disabled. It retains the oldest
+receipt, backs up the live journal, stops the old authority, and checks namespace
+rotation, old-authority rejection and a new read after restore. A 15-minute run
+performs 32 reads through this gate; a 45-minute run performs 92. The earlier
+adapter/product gates also run against the same fixture.
+
+`operations-result.json` records the actual elapsed time, read/restart counts,
+observed token changes, sampled resident memory/descriptors and journal size.
+It is emitted only after the test passes, alongside the source and binary hash.
+These samples do not establish freedom from memory leaks. This bounded lab
+does not qualify long-term retention, interruption during an AWS effect,
+physical power loss, systemd confinement or an organization's target host.
 
 `ASB S3 Linux` builds the actual binary, runs race-enabled tests and vet, exercises
 backup/restore commands, verifies the systemd unit and runs lint on Ubuntu. Tests
