@@ -16,6 +16,8 @@ import (
 
 const (
 	serveCommand          = "serve"
+	statusCommand         = "status"
+	healthCommand         = "health"
 	cleanupBackupsCommand = "cleanup-backups"
 )
 
@@ -33,7 +35,7 @@ func Run(ctx context.Context, args []string, out io.Writer) error {
 	switch command {
 	case serveCommand:
 		config = flags.String("config", "", "private product configuration")
-	case "init-store", "status", "health", "check", cleanupBackupsCommand:
+	case "init-store", statusCommand, healthCommand, "check", cleanupBackupsCommand:
 		directory = flags.String("directory", "", "private journal directory")
 	case "inspect":
 		directory = flags.String("directory", "", "private journal directory")
@@ -68,14 +70,14 @@ func Run(ctx context.Context, args []string, out io.Writer) error {
 	var value any
 	var readErr error
 	switch command {
-	case "status":
+	case statusCommand:
 		value, readErr = lp.ReadSQLiteStatus(ctx, *directory)
-	case "health":
+	case healthCommand:
 		value, readErr = lp.ReadSQLiteHealth(ctx, *directory)
 	case cleanupBackupsCommand:
 		value, readErr = lp.RecoverSQLiteBackups(ctx, *directory)
 	}
-	if command == "status" || command == "health" || command == cleanupBackupsCommand {
+	if command == statusCommand || command == healthCommand || command == cleanupBackupsCommand {
 		if readErr != nil {
 			return readErr
 		}
