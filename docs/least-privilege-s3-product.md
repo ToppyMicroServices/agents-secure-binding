@@ -7,9 +7,10 @@ object contents. It supports one active policy authority on one Linux host with
 local durable storage. General IAM policy optimization, multi-host failover and
 S3 download delivery are outside this product profile.
 
-The deployment remains **preview until its AWS qualification and recovery drill
-pass**. Ordinary CI proves local conformance; it does not certify an AWS account,
-storage hardware under power loss, or an organization's OIDC issuer. The
+The product remains **preview**. Before deployment, run its AWS qualification
+and recovery drill in the target environment. Ordinary CI proves local
+conformance; it does not certify storage hardware under power loss or an
+organization's OIDC issuer. The
 [AWS adapter specification](least-privilege-aws.md) lists supported resources,
 ETags, session-policy constraints and the finite-model guarantee.
 
@@ -227,6 +228,19 @@ including subtests, vet, lint, live-gate compilation and binary recovery command
 The downloaded binary matched the artifact's SHA-256; systemd verification had
 no diagnostics. This recorded result does not include a real AWS invocation.
 
+The [2026-09-26 OIDC/S3 qualification run](https://github.com/ToppyMicroServices/agents-secure-binding/actions/runs/36246640700)
+passed at `ecba88eeb7407fe9d6aa504e0d3f52e40c77a212`: GitHub OIDC authentication,
+the permitted adapter GET and outside-object HTTP 403, plus 296 Linux test cases
+including subtests. That run predates the product-process recovery gate below.
+
+The [2026-09-27 product-process run](https://github.com/ToppyMicroServices/agents-secure-binding/actions/runs/36286602920)
+passed at `6c73e3bf156618a625ae1010f444d9a731734ec7`: the actual service completed
+an mTLS/ASB read, recovered its receipt after restart with AWS acquisition
+disabled, restored a sealed backup, rejected the old authority, and completed
+a newly authorized AWS read. The downloaded Linux conformance binary and the
+AWS-executed binary had the same SHA-256. This was a loopback lab with disposable
+identities; target deployment and long-duration qualification remain open.
+
 For real AWS, fill
 [live-fixture.example.json](../packaging/s3/live-fixture.example.json) using two
 existing objects you are authorized to test, in the same bucket. Supply the
@@ -245,9 +259,22 @@ It must show an allowed ranged GET and
 an AWS 403 for the explicitly supplied excluded object. A skipped, failed or
 unconfigured run is not qualification. The evidence contains the source commit,
 AWS CLI version, receipt digest and result, without the fixture or tokens. The
-live gate validates the real STS/S3 adapter; separate Linux tests validate the
-ASB service and journal composition. It does not yet exercise a deployed
-organization's complete agent-to-service path.
+adapter gate validates real STS/S3 behavior. A second opt-in gate starts the
+actual Linux `asb-s3` binary with a private, disposable loopback PKI and exact
+operator mandate. Its client verifies the TLS exporter, signs fresh ASB proofs,
+and reads the supplied object through the service. After a process restart with
+AWS acquisition disabled, the same completed operation must return its exact
+stored receipt. The drill backs up the running journal, stops and reaps the old
+process, restores into a new namespace, and checks the retained record. The
+restored service must reject the old operation and accept a newly authorized
+read with real AWS credentials. Its separate `product-result.json` is written
+only after that gate passes and includes the executed binary's checksum. The
+AWS job uses the binary from the same run's Linux conformance artifact, after
+checking its source commit and checksum; it does not rebuild the product.
+
+These are two bounded qualification gates. The product drill uses a Linux
+runner and disposable identities; it does not certify an organization's deployed
+identity authority, target storage under power loss, or long-duration operation.
 
 An outside-object 403 alone does not identify which AWS policy caused denial.
 Keep the fixture's reviewed role and resource-policy configuration with the
