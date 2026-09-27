@@ -215,6 +215,11 @@ a newly approved read. Never use a drill to reactivate the retired authority.
 
 ## Qualification evidence
 
+The next operational qualification will use a dedicated Linux service user,
+renewed projected OIDC tokens, and a bounded 15-minute read loop. It will check
+retained outcomes after forced process termination and backup restoration.
+This planned lab does not replace target-host or physical power-loss testing.
+
 `ASB S3 Linux` builds the actual binary, runs race-enabled tests and vet, exercises
 backup/restore commands, verifies the systemd unit and runs lint on Ubuntu. Tests
 cover concurrent admission, process interruption, namespace rotation, more than
