@@ -8,6 +8,7 @@ on:
       - 'pkg/leastprivilege/**'
       - 'internal/s3product/**'
       - 'cmd/asb-s3/**'
+      - 'scripts/run-s3-operations.cjs'
       - 'packaging/s3/**'
       - 'go.mod'
       - 'go.sum'
@@ -17,6 +18,7 @@ on:
       - 'pkg/leastprivilege/**'
       - 'internal/s3product/**'
       - 'cmd/asb-s3/**'
+      - 'scripts/run-s3-operations.cjs'
       - 'packaging/s3/**'
   workflow_dispatch:
     inputs:
@@ -25,6 +27,11 @@ on:
         type: string
         required: false
         default: ''
+      operations_minutes:
+        description: Optional dedicated-user operations lab; still requires read-explicit-fixture
+        type: choice
+        options: ['0', '15', '45']
+        default: '0'
 
 permissions:
   contents: read
@@ -84,7 +91,7 @@ jobs:
     needs: conformance
     runs-on: ubuntu-24.04
     environment: aws-s3-live
-    timeout-minutes: 15
+    timeout-minutes: 60
     permissions:
       contents: read
       id-token: write
@@ -179,6 +186,14 @@ jobs:
           binary_sha256=$(sha256sum "$ASB_S3_LIVE_BINARY" | cut -d ' ' -f 1)
           jq -n --arg commit "$GITHUB_SHA" --arg run "$GITHUB_RUN_ID" --arg binary "$binary_sha256" \
             '{schema:"asb.s3-product-live-evidence/v1",commit:$commit,run_id:$run,os:"Linux",source:"github-oidc",binary_sha256:$binary,mtls_asb_read:true,restart_receipt_without_sts:true,sealed_backup_restore:true,old_authority_denied:true,restored_authorized_read:true,loopback_lab:true,organization_deployment_qualified:false}' > evidence/product-result.json
+      - name: Verify dedicated-user operations and renewed identity
+        if: inputs.operations_minutes == '15' || inputs.operations_minutes == '45'
+        uses: actions/github-script@v8
+        env:
+          ASB_S3_OPERATIONS_MINUTES: ${{ inputs.operations_minutes }}
+        with:
+          script: |
+            await require('./scripts/run-s3-operations.cjs')({core});
       - name: Diagnose an unsuccessful OIDC gate without private error text
         if: failure()
         uses: actions/github-script@v8
