@@ -7,9 +7,10 @@ object contents. It supports one active policy authority on one Linux host with
 local durable storage. General IAM policy optimization, multi-host failover and
 S3 download delivery are outside this product profile.
 
-The deployment remains **preview until its AWS qualification and recovery drill
-pass**. Ordinary CI proves local conformance; it does not certify an AWS account,
-storage hardware under power loss, or an organization's OIDC issuer. The
+The product remains **preview**. Before deployment, run its AWS qualification
+and recovery drill in the target environment. Ordinary CI proves local
+conformance; it does not certify storage hardware under power loss or an
+organization's OIDC issuer. The
 [AWS adapter specification](least-privilege-aws.md) lists supported resources,
 ETags, session-policy constraints and the finite-model guarantee.
 
@@ -259,7 +260,9 @@ stored receipt. The drill backs up the running journal, stops and reaps the old
 process, restores into a new namespace, and checks the retained record. The
 restored service must reject the old operation and accept a newly authorized
 read with real AWS credentials. Its separate `product-result.json` is written
-only after that gate passes and includes the executed binary's checksum.
+only after that gate passes and includes the executed binary's checksum. The
+AWS job uses the binary from the same run's Linux conformance artifact, after
+checking its source commit and checksum; it does not rebuild the product.
 
 These are two bounded qualification gates. The product drill uses a Linux
 runner and disposable identities; it does not certify an organization's deployed
