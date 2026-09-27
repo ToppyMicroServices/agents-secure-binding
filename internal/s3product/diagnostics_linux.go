@@ -47,7 +47,11 @@ func newDiagnostics(out io.Writer) *diagnostics {
 		encoder := json.NewEncoder(out)
 		for event := range d.queue {
 			// Logging failure must not change an already committed outcome.
-			_ = encoder.Encode(event)
+			if err := encoder.Encode(event); err != nil {
+				d.mu.Lock()
+				d.suppressed++
+				d.mu.Unlock()
+			}
 		}
 	}()
 	return d

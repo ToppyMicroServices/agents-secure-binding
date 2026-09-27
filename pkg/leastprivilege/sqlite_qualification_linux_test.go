@@ -37,6 +37,7 @@ func TestSQLiteFilesystemFullRecovery(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.Close()
+	checkHistory := retainFaultHistory(t, s)
 	f := sqliteFixture(t, s, "full")
 	id := s.Namespace() + "/full"
 	r, _, err := s.Prepare(t.Context(), id, f.cap, f.key, f.mandate, f.request, f.now)
@@ -70,7 +71,31 @@ func TestSQLiteFilesystemFullRecovery(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertUncertainAndFresh(t, s, f, id)
-	t.Log("storage_fault=ENOSPC running_retained=true repeat_dispatches=0 fresh_request_succeeded=true")
+	checkHistory()
+	t.Log("storage_fault=ENOSPC running_retained=true repeat_dispatches=0 fresh_request_succeeded=true revocation_and_replay_retained=true")
+}
+
+func retainFaultHistory(t *testing.T, s *SQLiteStore) func() {
+	t.Helper()
+	retired := sqliteFixture(t, s, "retired-before-fault")
+	if err := s.SyncMandates(t.Context(), []Mandate{retired.mandate}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SyncMandates(t.Context(), nil); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	if err := s.Use(t.Context(), "proof-before-fault", now.Add(time.Hour), now); err != nil {
+		t.Fatal(err)
+	}
+	return func() {
+		if err := s.SyncMandates(t.Context(), []Mandate{retired.mandate}); !errors.Is(err, ErrInvalidMandate) {
+			t.Fatal("storage failure lost revocation", err)
+		}
+		if err := s.Use(t.Context(), "proof-before-fault", now.Add(time.Hour), now); !errors.Is(err, ErrReplay) {
+			t.Fatal("storage failure lost replay history", err)
+		}
+	}
 }
 
 func assertUncertainAndFresh(t *testing.T, s *SQLiteStore, f durableFixture, id string) {
@@ -103,6 +128,7 @@ func TestSQLiteKernelWriteFailureRecovery(t *testing.T) {
 		return
 	}
 	s := newSQLiteFixture(t)
+	checkHistory := retainFaultHistory(t, s)
 	f := sqliteFixture(t, s, "io")
 	id := s.Namespace() + "/io"
 	r, _, err := s.Prepare(t.Context(), id, f.cap, f.key, f.mandate, f.request, f.now)
@@ -132,7 +158,8 @@ func TestSQLiteKernelWriteFailureRecovery(t *testing.T) {
 		t.Fatal("kernel write limit did not fail persistence")
 	}
 	assertUncertainAndFresh(t, s, f, id)
-	t.Log("storage_fault=kernel_file_size_limit running_retained=true repeat_dispatches=0 fresh_request_succeeded=true")
+	checkHistory()
+	t.Log("storage_fault=kernel_file_size_limit running_retained=true repeat_dispatches=0 fresh_request_succeeded=true revocation_and_replay_retained=true")
 }
 
 func TestSQLiteHistoryMonitoringAndBackupQualification(t *testing.T) {

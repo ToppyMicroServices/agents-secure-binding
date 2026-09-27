@@ -177,6 +177,19 @@ func systemctl(t *testing.T, args ...string) string {
 	return strings.TrimSpace(string(out))
 }
 
+func cleanupSystemdUnit(t *testing.T, unit string) {
+	t.Helper()
+	t.Cleanup(func() {
+		// testing cancels t.Context before running cleanup functions.
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(t.Context()), 70*time.Second)
+		defer cancel()
+		out, err := exec.CommandContext(ctx, "systemctl", "disable", "--now", unit).CombinedOutput()
+		if err != nil {
+			t.Errorf("cleanup systemd %s: %s %v", unit, out, err)
+		}
+	})
+}
+
 func prepareSystemdProduct(t *testing.T, h *liveProduct) {
 	t.Helper()
 	if os.Geteuid() != 0 || !strings.HasPrefix(h.directory, "/var/lib/asb-s3/") {
@@ -223,10 +236,10 @@ func TestOfflineSystemdLifecycle(t *testing.T) {
 	h.config.MandatesFile = h.write(t, "mandates.json", liveJSON(t, []lp.Mandate{original, emergency, renewed}))
 	prepareSystemdProduct(t, h)
 	systemctl(t, "daemon-reload")
+	cleanupSystemdUnit(t, "asb-s3-qa-projector.service")
 	systemctl(t, "enable", "asb-s3-qa-projector.service")
-	t.Cleanup(func() { systemctl(t, "disable", "--now", "asb-s3-qa-projector.service") })
+	cleanupSystemdUnit(t, "asb-s3.service")
 	systemctl(t, "enable", "--now", "asb-s3.service")
-	t.Cleanup(func() { systemctl(t, "disable", "--now", "asb-s3.service") })
 	if systemctl(t, "is-enabled", "asb-s3.service") != "enabled" {
 		t.Fatal("unit not enabled")
 	}
@@ -504,8 +517,12 @@ func TestOfflineSystemdBoot(t *testing.T) {
 		finished := false
 		t.Cleanup(func() {
 			if !finished {
+				cleanup, stopCleanup := context.WithTimeout(context.WithoutCancel(t.Context()), 15*time.Second)
+				_ = exec.CommandContext(cleanup, "machinectl", "terminate", "asb-s3-qa").Run()
+				stopCleanup()
 				cancel()
 				_ = cmd.Wait()
+				t.Logf("disposable container diagnostics: %s", diagnostics.String())
 			}
 		})
 		waitProduct(t, h)
