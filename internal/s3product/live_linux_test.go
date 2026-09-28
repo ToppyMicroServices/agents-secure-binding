@@ -37,11 +37,13 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
+const liveAWSConfirmation = "read-explicit-fixture"
+
 // This opt-in gate uses a real product subprocess and real AWS only for the
 // explicitly supplied object. Its private PKI, mandates and journal are local
 // qualification fixtures, not an organization's deployed identity authority.
 func TestLiveProductReadAndRestore(t *testing.T) {
-	if os.Getenv("ASB_AWS_LIVE_CONFIRM") != "read-explicit-fixture" {
+	if os.Getenv("ASB_AWS_LIVE_CONFIRM") != liveAWSConfirmation {
 		t.Skip("live product gate requires explicit opt-in and fixture")
 	}
 	binary := os.Getenv("ASB_S3_LIVE_BINARY")

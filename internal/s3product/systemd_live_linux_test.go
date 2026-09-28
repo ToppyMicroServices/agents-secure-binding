@@ -27,7 +27,7 @@ import (
 // The real issuer's original token is first accepted, then allowed to expire.
 // Its unverified exp claim schedules the wait; AWS's diagnostic proves denial.
 func TestLiveSystemdIdentityRecovery(t *testing.T) {
-	if os.Getenv("ASB_AWS_LIVE_CONFIRM") != "read-explicit-fixture" || os.Getenv("ASB_S3_SYSTEMD_LIVE") != "1" {
+	if os.Getenv("ASB_AWS_LIVE_CONFIRM") != liveAWSConfirmation || os.Getenv("ASB_S3_SYSTEMD_LIVE") != "1" {
 		t.Skip("explicit live fixture and disposable systemd runner required")
 	}
 	if os.Geteuid() != 0 || os.Getenv("TMPDIR") != "/var/lib/asb-s3/qa" {

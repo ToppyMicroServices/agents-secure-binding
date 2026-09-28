@@ -20,8 +20,9 @@ the supported profile.
 | Real systemd + naturally expired OIDC + renewal without process restart | Opt-in gate implemented; execution result pending | Separate evidence is required; the offline projector is not a real issuer |
 
 PR #62's required CI checks, Linux S3 conformance and CodeQL passed before
-merge. Its macOS jobs were skipped. An explicit Linux-only workflow checks main
-after merge. Results from later runs must identify their source and binary;
+merge. Its macOS jobs were skipped. The
+[Linux-only run 36438643745](https://github.com/ToppyMicroServices/agents-secure-binding/actions/runs/36438643745)
+also passed on the merge commit. Results from later runs must identify their source and binary;
 an earlier passing test must not be silently attributed to a changed binary.
 
 ## Promotion decision
