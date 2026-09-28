@@ -7,9 +7,11 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // SQLiteBackup identifies a sealed snapshot. The digest detects corruption; it
@@ -40,21 +42,32 @@ func syncSQLiteFile(path string) error {
 // Backup atomically publishes a new sealed snapshot in an owner-only directory.
 // WAL is included by SQLite, rather than copying a live main database file.
 func (s *SQLiteStore) Backup(ctx context.Context, destination string) (SQLiteBackup, error) {
-	if s == nil || s.db == nil || ctx == nil || !filepath.IsAbs(destination) || !privateDirectory(filepath.Dir(destination)) {
+	return s.backup(ctx, destination, func(string) {})
+}
+
+// checkpoint observes publication boundaries for process-interruption tests.
+func (s *SQLiteStore) backup(ctx context.Context, destination string, checkpoint func(string)) (SQLiteBackup, error) {
+	if s == nil || s.db == nil || ctx == nil || !filepath.IsAbs(destination) || !privateDirectory(filepath.Dir(destination)) || strings.HasPrefix(filepath.Base(destination), ".asb-s3-backup") {
 		return SQLiteBackup{}, ErrStoreUnavailable
 	}
-	temporary, err := os.CreateTemp(filepath.Dir(destination), ".asb-s3-backup-")
+	lock, err := backupLock(filepath.Dir(destination))
+	if err != nil {
+		return SQLiteBackup{}, err
+	}
+	defer lock.Close()
+	if _, err = recoverSQLiteBackups(ctx, filepath.Dir(destination)); err != nil {
+		return SQLiteBackup{}, err
+	}
+	path, err := newBackupWorkspace(filepath.Dir(destination))
 	if err != nil {
 		return SQLiteBackup{}, storeError(err)
 	}
-	path := temporary.Name()
-	defer os.Remove(path)
-	if err = temporary.Close(); err != nil {
-		return SQLiteBackup{}, storeError(err)
-	}
+	defer removeBackupTemporary(path)
+	checkpoint("created")
 	if _, err = s.db.ExecContext(ctx, `VACUUM INTO ?`, path); err != nil {
 		return SQLiteBackup{}, storeError(err)
 	}
+	checkpoint("snapshot")
 	db, err := openSQLiteFile(path)
 	if err != nil {
 		return SQLiteBackup{}, err
@@ -76,12 +89,13 @@ func (s *SQLiteStore) Backup(ctx context.Context, destination string) (SQLiteBac
 	if err = syncSQLiteFile(path); err != nil {
 		return SQLiteBackup{}, storeError(err)
 	}
+	checkpoint("sealed")
 	f, err := os.Open(path)
 	if err != nil {
 		return SQLiteBackup{}, storeError(err)
 	}
 	h := sha256.New()
-	_, err = io.Copy(h, f)
+	_, err = copySQLiteContext(ctx, h, f)
 	closeErr := f.Close()
 	if err != nil {
 		return SQLiteBackup{}, storeError(err)
@@ -90,12 +104,16 @@ func (s *SQLiteStore) Backup(ctx context.Context, destination string) (SQLiteBac
 		return SQLiteBackup{}, storeError(closeErr)
 	}
 	// link is an atomic no-replace publication on the same filesystem.
+	if err = ctx.Err(); err != nil {
+		return SQLiteBackup{}, storeError(err)
+	}
 	if err = os.Link(path, destination); err != nil {
 		return SQLiteBackup{}, storeError(err)
 	}
 	if err = syncDirectory(filepath.Dir(destination)); err != nil {
 		return SQLiteBackup{}, storeError(err)
 	}
+	checkpoint("published")
 	return SQLiteBackup{SHA256: hex.EncodeToString(h.Sum(nil)), Namespace: namespace}, nil
 }
 
@@ -136,12 +154,13 @@ func RestoreSQLiteStore(ctx context.Context, source, directory, expectedSHA256 s
 		return nil, storeError(err)
 	}
 	h := sha256.New()
-	_, err = io.Copy(io.MultiWriter(output, h), input)
-	syncErr := output.Sync()
-	closeErr := output.Close()
+	_, err = copySQLiteContext(ctx, io.MultiWriter(output, h), input)
 	if err != nil {
+		_ = output.Close()
 		return nil, storeError(err)
 	}
+	syncErr := output.Sync()
+	closeErr := output.Close()
 	if syncErr != nil {
 		return nil, storeError(syncErr)
 	}
@@ -173,6 +192,9 @@ func RestoreSQLiteStore(ctx context.Context, source, directory, expectedSHA256 s
 	if err = syncSQLiteFile(path); err != nil {
 		return nil, storeError(err)
 	}
+	if err = ctx.Err(); err != nil {
+		return nil, storeError(err)
+	}
 	if err = os.Remove(marker); err != nil {
 		return nil, storeError(err)
 	}
@@ -183,4 +205,36 @@ func RestoreSQLiteStore(ctx context.Context, source, directory, expectedSHA256 s
 		return nil, storeError(err)
 	}
 	return OpenSQLiteStore(ctx, directory)
+}
+
+// Check between bounded chunks. A syscall stalled inside the kernel requires
+// the external process deadline; context cannot interrupt arbitrary disk I/O.
+func copySQLiteContext(ctx context.Context, out io.Writer, in io.Reader) (int64, error) {
+	buffer := make([]byte, 64<<10)
+	var total int64
+	for {
+		if err := ctx.Err(); err != nil {
+			return total, err
+		}
+		n, readErr := in.Read(buffer)
+		if err := ctx.Err(); err != nil {
+			return total, err
+		}
+		if n > 0 {
+			written, err := out.Write(buffer[:n])
+			total += int64(written)
+			if err != nil {
+				return total, err
+			}
+			if written != n {
+				return total, io.ErrShortWrite
+			}
+		}
+		if errors.Is(readErr, io.EOF) {
+			return total, ctx.Err()
+		}
+		if readErr != nil {
+			return total, readErr
+		}
+	}
 }

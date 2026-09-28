@@ -7,7 +7,6 @@ import (
 	"context"
 	"crypto/tls"
 	"errors"
-	"io"
 	"log"
 	"net"
 	"net/http"
@@ -50,7 +49,9 @@ func Serve(ctx context.Context, path string) error {
 	if ctx == nil {
 		return ErrConfiguration
 	}
-	runtimeContext, stop := context.WithCancel(ctx)
+	// A maintenance signal stops admission, not already authorized work. Each
+	// execution still has the earlier ASB/capability/adapter deadline.
+	runtimeContext, stop := context.WithCancel(context.WithoutCancel(ctx))
 	defer stop()
 	loaded, err := loadConfig(path)
 	if err != nil {
@@ -80,7 +81,9 @@ func Serve(ctx context.Context, path string) error {
 			return ErrConfiguration
 		}
 	}
-	service, err := asbbinding.NewService(asbbinding.Config{Policies: policies, Store: store, Issuer: c.Issuer, Audience: c.Audience, GrantKeys: c.GrantKeys, ActorKeys: c.ActorKeys, SigningKey: loaded.signer, MaxEvaluations: 1 << lp.MaxGrants, Executors: map[string]asbbinding.Executor{awsiam.Operation: loaded.executor.Execute}})
+	diagnostics := newDiagnostics(os.Stderr)
+	defer diagnostics.Close()
+	service, err := asbbinding.NewService(asbbinding.Config{Policies: policies, Store: &observedStore{SQLiteStore: store, diagnostics: diagnostics}, Issuer: c.Issuer, Audience: c.Audience, GrantKeys: c.GrantKeys, ActorKeys: c.ActorKeys, SigningKey: loaded.signer, MaxEvaluations: 1 << lp.MaxGrants, Executors: map[string]asbbinding.Executor{awsiam.Operation: diagnostics.executor(loaded.executor.Execute)}})
 	if err != nil {
 		return ErrConfiguration
 	}
@@ -94,11 +97,12 @@ func Serve(ctx context.Context, path string) error {
 		return errors.New("S3 listener unavailable")
 	}
 	defer listener.Close()
+	listener = newConnectionLimit(listener, 64)
 	if err = store.SyncMandates(ctx, loaded.mandates); err != nil {
 		return err
 	}
 	gate := &requestGate{handler: handler, slots: make(chan struct{}, 8)}
-	server := &http.Server{Handler: gate, TLSConfig: loaded.tls, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 40 * time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 16 << 10, ErrorLog: log.New(io.Discard, "", 0), BaseContext: func(net.Listener) context.Context { return runtimeContext }}
+	server := &http.Server{Handler: gate, TLSConfig: loaded.tls, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 40 * time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 16 << 10, ErrorLog: log.New(diagnostics, "", 0), BaseContext: func(net.Listener) context.Context { return runtimeContext }}
 	defer func() { stop(); _ = server.Close(); gate.stopAndWait() }()
 	done := make(chan error, 1)
 	go func() { done <- server.Serve(tls.NewListener(listener, loaded.tls)) }()
@@ -109,9 +113,12 @@ func Serve(ctx context.Context, path string) error {
 		}
 		return errors.New("S3 server stopped unexpectedly")
 	case <-ctx.Done():
+		gate.stopAdmission()
+		diagnostics.emit("shutdown", "draining", "")
 		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 45*time.Second)
 		defer cancel()
 		if err = server.Shutdown(cleanup); err != nil {
+			stop()
 			_ = server.Close()
 			<-done
 			return errors.New("S3 shutdown deadline exceeded; inspect uncertain operations")
@@ -149,4 +156,5 @@ func (g *requestGate) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	g.handler.ServeHTTP(w, r)
 }
 
-func (g *requestGate) stopAndWait() { g.mu.Lock(); g.closed = true; g.mu.Unlock(); g.active.Wait() }
+func (g *requestGate) stopAdmission() { g.mu.Lock(); g.closed = true; g.mu.Unlock() }
+func (g *requestGate) stopAndWait()   { g.stopAdmission(); g.active.Wait() }

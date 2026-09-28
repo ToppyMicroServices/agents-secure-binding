@@ -9,15 +9,23 @@ import (
 	"errors"
 	"flag"
 	"io"
+	"time"
 
 	lp "github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/leastprivilege"
+)
+
+const (
+	serveCommand          = "serve"
+	statusCommand         = "status"
+	healthCommand         = "health"
+	cleanupBackupsCommand = "cleanup-backups"
 )
 
 // Run exposes local administration and the ASB listener. It provides no command
 // to bypass ASB authorization, reset a live journal, or repeat uncertain reads.
 func Run(ctx context.Context, args []string, out io.Writer) error {
 	if len(args) == 0 {
-		return errors.New("usage: asb-s3 serve|init-store|status|inspect|backup|restore [flags]")
+		return errors.New("usage: asb-s3 serve|init-store|health|status|check|inspect|backup|cleanup-backups|restore [flags]")
 	}
 	command := args[0]
 	flags := flag.NewFlagSet(command, flag.ContinueOnError)
@@ -25,9 +33,9 @@ func Run(ctx context.Context, args []string, out io.Writer) error {
 	var directory, config, output, input, hash *string
 	var operation, digest *string
 	switch command {
-	case "serve":
+	case serveCommand:
 		config = flags.String("config", "", "private product configuration")
-	case "init-store", "status":
+	case "init-store", statusCommand, healthCommand, "check", cleanupBackupsCommand:
 		directory = flags.String("directory", "", "private journal directory")
 	case "inspect":
 		directory = flags.String("directory", "", "private journal directory")
@@ -43,11 +51,37 @@ func Run(ctx context.Context, args []string, out io.Writer) error {
 	default:
 		return errors.New("unknown S3 product command")
 	}
+	var timeout *time.Duration
+	if command != serveCommand {
+		timeout = flags.Duration("timeout", 5*time.Minute, "administrative deadline (at most 1h)")
+	}
 	if err := flags.Parse(args[1:]); err != nil || flags.NArg() != 0 {
 		return errors.New("invalid S3 product command arguments")
 	}
-	if command == "serve" {
+	if command == serveCommand {
 		return Serve(ctx, *config)
+	}
+	if ctx == nil || *timeout <= 0 || *timeout > time.Hour {
+		return errors.New("invalid administrative deadline")
+	}
+	ctx, cancel := context.WithTimeout(ctx, *timeout)
+	defer cancel()
+	// Monitoring does not open a writer or perform an O(N) integrity scan.
+	var value any
+	var readErr error
+	switch command {
+	case statusCommand:
+		value, readErr = lp.ReadSQLiteStatus(ctx, *directory)
+	case healthCommand:
+		value, readErr = lp.ReadSQLiteHealth(ctx, *directory)
+	case cleanupBackupsCommand:
+		value, readErr = lp.RecoverSQLiteBackups(ctx, *directory)
+	}
+	if command == statusCommand || command == healthCommand || command == cleanupBackupsCommand {
+		if readErr != nil {
+			return readErr
+		}
+		return json.NewEncoder(out).Encode(value)
 	}
 	var store *lp.SQLiteStore
 	var err error

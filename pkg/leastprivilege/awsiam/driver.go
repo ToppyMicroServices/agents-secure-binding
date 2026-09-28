@@ -161,7 +161,13 @@ func readPrivateSource(path string, limit int64) ([]byte, error) {
 	return raw, nil
 }
 
-func (e *Executor) assume(ctx context.Context, id string, policy []byte) (credentials, error) {
+func (e *Executor) assume(ctx context.Context, id string, policy []byte) (result credentials, resultErr error) {
+	stage, code := "identity", "source_unavailable"
+	defer func() {
+		if resultErr != nil {
+			resultErr = providerFailure(stage, code, resultErr)
+		}
+	}()
 	dir, err := os.MkdirTemp("", "asb-aws-session-")
 	if err != nil {
 		return credentials{}, ErrProvider
@@ -210,10 +216,12 @@ func (e *Executor) assume(ctx context.Context, id string, policy []byte) (creden
 		args = append(args, "--profile", e.profile.spec.CredentialProfile, "sts", "assume-role")
 	}
 	args = append(args, "--role-arn", e.profile.spec.RoleARN, "--role-session-name", name, "--duration-seconds", "900", "--policy", string(policy), "--query", "Credentials")
+	stage, code = "sts", "request_failed"
 	cmd := exec.CommandContext(ctx, e.config.Path, args...)
 	cmd.Env = []string{"PATH=/usr/bin:/bin", "LANG=C", "AWS_CONFIG_FILE=" + configFile, "AWS_SHARED_CREDENTIALS_FILE=" + credentialFile, "AWS_EC2_METADATA_DISABLED=true", "AWS_STS_REGIONAL_ENDPOINTS=regional", "AWS_MAX_ATTEMPTS=1", "AWS_PAGER=", "AWS_CLI_AUTO_PROMPT=off", "AWS_CLI_ERROR_FORMAT=json"}
 	cmd.Dir = dir
 	cmd.WaitDelay = time.Second
+	confineCommand(cmd)
 	output := &boundedOutput{limit: 64 << 10}
 	diagnostic := &boundedOutput{limit: 16 << 10}
 	defer func() { clear(diagnostic.data) }()
@@ -226,11 +234,13 @@ func (e *Executor) assume(ctx context.Context, id string, policy []byte) (creden
 		}
 		var exit *exec.ExitError
 		if errors.As(err, &exit) {
+			code = stsErrorCode(diagnostic.data)
 			return credentials{}, fmt.Errorf("%w: STS CLI exit %d: %s", ErrProvider, exit.ExitCode(), stsErrorCode(diagnostic.data))
 		}
 		return credentials{}, fmt.Errorf("%w: STS CLI could not complete", ErrProvider)
 	}
 	defer clear(output.data)
+	code = "invalid_response"
 	var response struct {
 		AccessKeyID     string `json:"AccessKeyId"`
 		SecretAccessKey string `json:"SecretAccessKey"`

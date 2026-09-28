@@ -68,9 +68,13 @@ func privateSQLitePath(directory string) (string, error) {
 }
 
 func openSQLiteFile(path string) (*sql.DB, error) {
+	return openSQLiteMode(path, "rw")
+}
+
+func openSQLiteMode(path, mode string) (*sql.DB, error) {
 	u := url.URL{Scheme: "file", Path: filepath.ToSlash(path)}
 	q := u.Query()
-	q.Set("mode", "rw")
+	q.Set("mode", mode)
 	q.Add("_pragma", "busy_timeout(5000)")
 	q.Add("_pragma", "synchronous(FULL)")
 	q.Add("_pragma", "foreign_keys(1)")
@@ -145,8 +149,20 @@ func CreateSQLiteStore(ctx context.Context, directory string) (*SQLiteStore, err
 }
 
 func sqliteMetadata(ctx context.Context, db *sql.DB) (string, int, error) {
+	var integrity string
+	if err := db.QueryRowContext(ctx, `PRAGMA quick_check`).Scan(&integrity); err != nil || integrity != "ok" {
+		return "", 0, ErrStoreUnavailable
+	}
+	return sqliteIdentity(ctx, db)
+}
+
+type sqliteQuerier interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
+func sqliteIdentity(ctx context.Context, db sqliteQuerier) (string, int, error) {
 	var app, version, backup int
-	var integrity, namespace string
+	var namespace string
 	if err := db.QueryRowContext(ctx, `PRAGMA application_id`).Scan(&app); err != nil {
 		return "", 0, storeError(err)
 	}
@@ -154,9 +170,6 @@ func sqliteMetadata(ctx context.Context, db *sql.DB) (string, int, error) {
 		return "", 0, storeError(err)
 	}
 	if app != sqliteApplicationID || version != 1 {
-		return "", 0, ErrStoreUnavailable
-	}
-	if err := db.QueryRowContext(ctx, `PRAGMA quick_check`).Scan(&integrity); err != nil || integrity != "ok" {
 		return "", 0, ErrStoreUnavailable
 	}
 	if err := db.QueryRowContext(ctx, `SELECT namespace,backup FROM metadata WHERE id=1`).Scan(&namespace, &backup); err != nil {
@@ -482,9 +495,59 @@ type SQLiteStatus struct {
 	Bytes         int64  `json:"bytes"`
 }
 
+// Status uses a separate read-only connection. Monitoring never acquires the
+// writer lock or occupies the execution store's single writer connection.
 func (s *SQLiteStore) Status(ctx context.Context) (SQLiteStatus, error) {
-	result := SQLiteStatus{Namespace: s.Namespace()}
-	err := s.write(ctx, func(conn *sql.Conn) error {
+	if s == nil || s.db == nil {
+		return SQLiteStatus{}, ErrStoreUnavailable
+	}
+	return readSQLiteStatus(ctx, s.directory, s.namespace, true)
+}
+
+// ReadSQLiteStatus performs bounded snapshot counts without a full integrity
+// scan. Use OpenSQLiteStore (or the check command) for an offline quick_check.
+func ReadSQLiteStatus(ctx context.Context, directory string) (SQLiteStatus, error) {
+	return readSQLiteStatus(ctx, directory, "", true)
+}
+
+// SQLiteHealth is the lightweight monitoring result. Counts are deliberately
+// absent: an arbitrarily large retained history is not scanned every poll.
+type SQLiteHealth struct {
+	Namespace string `json:"namespace"`
+	Bytes     int64  `json:"bytes"`
+}
+
+func ReadSQLiteHealth(ctx context.Context, directory string) (SQLiteHealth, error) {
+	status, err := readSQLiteStatus(ctx, directory, "", false)
+	return SQLiteHealth{Namespace: status.Namespace, Bytes: status.Bytes}, err
+}
+
+func readSQLiteStatus(ctx context.Context, directory, expectedNamespace string, counts bool) (SQLiteStatus, error) {
+	if ctx == nil {
+		return SQLiteStatus{}, ErrStoreUnavailable
+	}
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	path, err := privateSQLitePath(directory)
+	if err != nil {
+		return SQLiteStatus{}, err
+	}
+	db, err := openSQLiteMode(path, "ro")
+	if err != nil {
+		return SQLiteStatus{}, err
+	}
+	defer db.Close()
+	tx, err := db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return SQLiteStatus{}, storeError(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	namespace, backup, err := sqliteIdentity(ctx, tx)
+	if err != nil || backup != 0 || (expectedNamespace != "" && namespace != expectedNamespace) {
+		return SQLiteStatus{}, ErrStoreUnavailable
+	}
+	result := SQLiteStatus{Namespace: namespace}
+	if counts {
 		for _, query := range []struct {
 			sql string
 			out *int64
@@ -494,17 +557,17 @@ func (s *SQLiteStore) Status(ctx context.Context) (SQLiteStatus, error) {
 			{`SELECT count(*) FROM operations WHERE state='ACCEPTED'`, &result.Accepted},
 			{`SELECT count(*) FROM uses`, &result.ReplayRecords},
 		} {
-			if err := conn.QueryRowContext(ctx, query.sql).Scan(query.out); err != nil {
-				return storeError(err)
+			if err = tx.QueryRowContext(ctx, query.sql).Scan(query.out); err != nil {
+				return SQLiteStatus{}, storeError(err)
 			}
 		}
-		return nil
-	})
-	if err != nil {
-		return SQLiteStatus{}, err
 	}
+	if err = tx.Commit(); err != nil {
+		return SQLiteStatus{}, storeError(err)
+	}
+	// Sizes are sampled after releasing the snapshot and may change concurrently.
 	for _, suffix := range []string{"", "-wal", "-shm"} {
-		info, err := os.Lstat(filepath.Join(s.directory, "journal.sqlite") + suffix)
+		info, err := os.Lstat(path + suffix)
 		if errors.Is(err, os.ErrNotExist) {
 			continue
 		}

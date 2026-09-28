@@ -281,6 +281,10 @@ func (h *liveProduct) admin(t *testing.T, result any, args ...string) {
 }
 
 func (h *liveProduct) start(t *testing.T) func() {
+	return h.startWithin(t, 10*time.Second)
+}
+
+func (h *liveProduct) startWithin(t *testing.T, budget time.Duration) func() {
 	t.Helper()
 	config := h.write(t, "config.json", liveJSON(t, h.config))
 	cmd := h.command("serve", "--config", config)
@@ -312,7 +316,7 @@ func (h *liveProduct) start(t *testing.T) func() {
 					t.Error("product did not terminate with the expected signal")
 				}
 			} else if err != nil {
-				t.Error("product process did not stop cleanly")
+				t.Errorf("product process did not stop cleanly: %v", err)
 			}
 		case <-time.After(10 * time.Second):
 			_ = cmd.Process.Kill()
@@ -325,11 +329,22 @@ func (h *liveProduct) start(t *testing.T) func() {
 	t.Cleanup(stop)
 	h.transport = &http.Transport{TLSClientConfig: h.clientTLS.Clone(), MaxConnsPerHost: 1, MaxIdleConnsPerHost: 1, ForceAttemptHTTP2: false}
 	h.client = &http.Client{Transport: h.transport, Timeout: 40 * time.Second}
-	deadline := time.Now().Add(10 * time.Second)
+	deadline := time.Now().Add(budget)
 	for time.Now().Before(deadline) {
-		connection, err := net.DialTimeout("tcp", h.config.Listen, 100*time.Millisecond)
+		// TCP is reserved before policy synchronization. Wait for an authenticated
+		// TLS response so measurement/stop cannot race initialization.
+		probe, cancel := context.WithTimeout(h.ctx, min(time.Second, time.Until(deadline)))
+		req, err := http.NewRequestWithContext(probe, http.MethodGet, "https://"+h.config.Listen+"/", http.NoBody)
+		if err != nil {
+			cancel()
+			t.Fatal("cannot prepare readiness request")
+		}
+		response, err := h.client.Do(req)
 		if err == nil {
-			_ = connection.Close()
+			_ = response.Body.Close()
+		}
+		cancel()
+		if err == nil {
 			return stop
 		}
 		select {
