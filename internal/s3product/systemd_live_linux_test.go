@@ -16,12 +16,19 @@ import (
 	"os/exec"
 	"os/user"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	lp "github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/leastprivilege"
+)
+
+const (
+	stsExpiredCode         = "ExpiredToken"
+	stsExpiredIdentityCode = "InvalidIdentityToken (token_expired)"
+	stsDeniedCode          = "AccessDenied"
 )
 
 // The real issuer's original token is first accepted, then allowed to expire.
@@ -113,7 +120,7 @@ func TestLiveSystemdIdentityRecovery(t *testing.T) {
 	if status != http.StatusConflict {
 		t.Fatal("identity beyond the AWS clock-skew window did not leave an uncertain operation")
 	}
-	code := liveExpiryDiagnostic(t, ctx, h.operation.ID)
+	code := awaitSystemdSTSDiagnostic(t, ctx, h.operation.ID, stsExpiredCode, stsExpiredIdentityCode)
 	if before.Operations != 2 || before.Uncertain != 1 || before.Accepted != 0 {
 		t.Fatal("expired identity did not preserve consumed authority")
 	}
@@ -203,26 +210,46 @@ func assertLiveServiceIdentity(t *testing.T, pid string) {
 	}
 }
 
-func liveExpiryDiagnostic(t *testing.T, ctx context.Context, operation string) string {
+func awaitSystemdSTSDiagnostic(t *testing.T, ctx context.Context, operation string, expected ...string) string {
 	t.Helper()
 	hash := sha256.Sum256([]byte(operation))
 	correlation := hex.EncodeToString(hash[:16])
 	deadline, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
+	var decoded, matched int
+	observed := "none"
 	for deadline.Err() == nil {
 		raw, err := exec.CommandContext(deadline, "journalctl", "--namespace=asb-s3", "--unit=asb-s3.service", "--no-pager", "--output=cat", "--lines=32").Output()
 		if err != nil || len(raw) > 64<<10 {
 			t.Fatal("bounded service diagnostics unavailable")
 		}
+		decoded, matched = 0, 0
 		for _, line := range strings.Split(string(raw), "\n") {
 			var event diagnosticEvent
-			if json.Unmarshal([]byte(line), &event) == nil && event.Stage == "sts" && event.Correlation == correlation &&
-				(event.Code == "ExpiredToken" || event.Code == "InvalidIdentityToken (token_expired)") {
+			if json.Unmarshal([]byte(line), &event) != nil {
+				continue
+			}
+			decoded++
+			if event.Correlation != correlation {
+				continue
+			}
+			matched++
+			if event.Stage != "sts" {
+				continue
+			}
+			// Failure logs contain only a fixed vocabulary, never raw journal text.
+			switch event.Code {
+			case stsExpiredCode, stsExpiredIdentityCode, stsDeniedCode, "InvalidIdentityToken", "IDPRejectedClaim", "unclassified failure", "request_failed":
+				observed = event.Code
+			default:
+				observed = "other"
+			}
+			if slices.Contains(expected, event.Code) {
 				return event.Code
 			}
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	t.Fatal("AWS did not confirm identity expiry with a recognized diagnostic")
+	t.Fatalf("expected STS diagnostic unavailable: decoded_events=%d matching_operation=%d bounded_sts_code=%s", decoded, matched, observed)
 	return ""
 }

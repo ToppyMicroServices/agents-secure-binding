@@ -254,6 +254,7 @@ func TestOfflineSystemdLifecycle(t *testing.T) {
 	if status := <-done; status != http.StatusConflict || time.Since(start) < time.Second {
 		t.Fatal("systemd interrupted STS rather than draining")
 	}
+	awaitSystemdSTSDiagnostic(t, t.Context(), h.operation.ID, stsDeniedCode)
 	if systemctl(t, "show", "asb-s3", "--property=MainPID", "--value") != "0" {
 		t.Fatal("main process retained after stop")
 	}
