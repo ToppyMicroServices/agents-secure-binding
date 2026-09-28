@@ -9,6 +9,7 @@ on:
       - 'internal/s3product/**'
       - 'cmd/asb-s3/**'
       - 'scripts/run-s3-operations.cjs'
+      - 'scripts/run-s3-systemd-live.cjs'
       - 'scripts/s3-qa-evidence.py'
       - 'packaging/s3/**'
       - 'go.mod'
@@ -20,6 +21,7 @@ on:
       - 'internal/s3product/**'
       - 'cmd/asb-s3/**'
       - 'scripts/run-s3-operations.cjs'
+      - 'scripts/run-s3-systemd-live.cjs'
       - 'scripts/s3-qa-evidence.py'
       - 'packaging/s3/**'
   workflow_dispatch:
@@ -34,6 +36,10 @@ on:
         type: choice
         options: ['0', '15', '45']
         default: '0'
+      systemd_identity:
+        description: Optional real OIDC expiry and renewal under systemd; requires operations_minutes=0
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -156,6 +162,11 @@ jobs:
             echo '::error::Environment aws-s3-live must supply ASB_AWS_LIVE_FIXTURE_JSON.'
             exit 1
           fi
+      - name: Require separate disposable identity and operations labs
+        if: inputs.systemd_identity && inputs.operations_minutes != '0'
+        run: |
+          echo '::error::Run systemd_identity with operations_minutes=0 in its own disposable job.'
+          exit 1
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
@@ -244,6 +255,14 @@ jobs:
         with:
           script: |
             await require('./scripts/run-s3-operations.cjs')({core});
+      - name: Verify real identity expiry and recovery in the installed systemd unit
+        if: inputs.systemd_identity
+        uses: actions/github-script@v8
+        env:
+          ASB_S3_OPERATIONS_MINUTES: ${{ inputs.operations_minutes }}
+        with:
+          script: |
+            await require('./scripts/run-s3-systemd-live.cjs')({core});
       - name: Diagnose an unsuccessful OIDC gate without private error text
         if: failure()
         uses: actions/github-script@v8

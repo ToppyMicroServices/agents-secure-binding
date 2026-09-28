@@ -330,6 +330,20 @@ require that change.
 
 ## Qualification evidence
 
+For real OIDC expiry and recovery in the installed systemd unit, set workflow
+input `systemd_identity=true` with `operations_minutes=0` and the existing
+`read-explicit-fixture` confirmation. Run this in a separate disposable job from
+the operations lab. It installs the checked-in unit under a fresh dedicated
+user, performs an authorized read, and lets that same GitHub token expire
+naturally. AWS must return a recognized expiry diagnostic. The trusted runner
+then atomically projects a new token; the same service process must preserve
+the uncertain operation and complete a separately authorized read. Evidence is
+written only after all assertions pass, with the tested binary hash. The runner
+removes its private files and service on exit; it does not change AWS resources.
+The runner supplies this lab's projector. This does not qualify a site's
+projector startup, issuer or physical reboot. See the
+[release qualification record](s3-release-qualification.md) for current results.
+
 For a bounded operational run, also set workflow input `operations_minutes` to
 `15` or `45`; its default `0` leaves this gate off. The existing explicit AWS
 confirmation and private fixture remain required. The runner creates a dedicated
