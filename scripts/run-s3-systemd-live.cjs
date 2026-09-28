@@ -57,11 +57,11 @@ module.exports = async ({ core }) => {
       fs.unlinkSync(temporary);
     };
     await project();
-    child = spawn('sudo', ['-n', 'timeout', '--signal=TERM', '--kill-after=10s', '17m',
+    child = spawn('sudo', ['-n', 'timeout', '--signal=TERM', '--kill-after=10s', '25m',
       'env', '-i', 'PATH=/usr/bin:/bin', 'LANG=C', 'TMPDIR=/var/lib/asb-s3/qa',
       'ASB_AWS_LIVE_CONFIRM=read-explicit-fixture', 'ASB_S3_SYSTEMD_LIVE=1',
       `ASB_AWS_LIVE_FIXTURE=${path.join(state, 'fixture.json')}`, `ASB_S3_LIVE_BINARY=${installed}`,
-      testBinary, '-test.run=^TestLiveSystemdIdentityRecovery$', '-test.v', '-test.timeout=16m'],
+      testBinary, '-test.run=^TestLiveSystemdIdentityRecovery$', '-test.v', '-test.timeout=24m'],
     { stdio: ['ignore', 'pipe', 'pipe'] });
     let settled = false;
     let overflow = false;
@@ -81,7 +81,7 @@ module.exports = async ({ core }) => {
       child.once('error', () => { settled = true; resolve(-1); });
       child.once('close', code => { settled = true; resolve(code ?? -1); });
     });
-    const deadline = Date.now() + 18 * 60 * 1000;
+    const deadline = Date.now() + 26 * 60 * 1000;
     let renewed = false;
     while (!settled) {
       let timer;
@@ -105,7 +105,7 @@ module.exports = async ({ core }) => {
       'natural_expiry_denied', 'atomic_identity_renewal', 'same_process_recovered', 'renewed_authorized_read',
       'old_operation_conflict', 'first_receipt_retained', 'service_stopped'];
     if (report.schema !== 'asb.s3-systemd-live-evidence/v1' || required.some(key => report[key] !== true) ||
-        report.completed_reads !== 2 || report.uncertain_records !== 1 ||
+        report.completed_reads !== 2 || report.uncertain_records !== 1 || report.expiry_allowance_seconds !== 360 ||
         !['ExpiredToken', 'InvalidIdentityToken (token_expired)'].includes(report.aws_expiry_code) ||
         report.organization_deployment_qualified !== false || report.physical_power_loss_tested !== false) {
       throw new Error('Live systemd evidence is incomplete.');

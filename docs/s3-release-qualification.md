@@ -17,6 +17,7 @@ the supported profile.
 | Real OIDC/STS, allowed S3 read and outside-object denial | [AWS run 36246640700](https://github.com/ToppyMicroServices/agents-secure-binding/actions/runs/36246640700) | Explicit fixture only; no general IAM guarantee |
 | Real product mTLS/ASB, retained receipt and sealed restore | [AWS run 36287447802](https://github.com/ToppyMicroServices/agents-secure-binding/actions/runs/36287447802) | Local test PKI and journal |
 | Dedicated-user continuous operation and identity replacement | [15-minute run 36288991572](https://github.com/ToppyMicroServices/agents-secure-binding/actions/runs/36288991572), 32 reads, three idle process kills, 14 observed token changes | Bounded lab, not a long-duration leak claim |
+| Extended dedicated-user operation | [45-minute run 36437065955](https://github.com/ToppyMicroServices/agents-secure-binding/actions/runs/36437065955), 92 reads, three idle process kills, 44 observed token changes | Same limits as the 15-minute lab; it does not run the systemd unit |
 | Real systemd + naturally expired OIDC + renewal without process restart | Opt-in gate implemented; execution result pending | Separate evidence is required; the offline projector is not a real issuer |
 
 PR #62's required CI checks, Linux S3 conformance and CodeQL passed before
@@ -24,6 +25,16 @@ merge. Its macOS jobs were skipped. The
 [Linux-only run 36438643745](https://github.com/ToppyMicroServices/agents-secure-binding/actions/runs/36438643745)
 also passed on the merge commit. Results from later runs must identify their source and binary;
 an earlier passing test must not be silently attributed to a changed binary.
+
+The 45-minute run executed source `f3c031544594c9616cef57220f7634bd445d0a2e`
+for 2,702.65 seconds. Its binary SHA-256 was
+`8adaf84d789adfe171a011385dde2c5ead1b68b191d245b53d57388b46857014`.
+The downloaded Linux artifact's 15 hashes and 32 evidence checks passed; the
+AWS reports identified that same source and binary. Sampled maxima were
+26,776 KiB RSS, 12 descriptors and 4,106,928 journal bytes. The oldest receipt,
+sealed restore, retired-authority denial and newly authorized restored read
+all passed. Runner private-file cleanup also passed. These results do not
+establish unbounded retention or absence of long-term leaks.
 
 ## Promotion decision
 

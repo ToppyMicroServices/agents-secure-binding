@@ -125,6 +125,11 @@ instance metadata. AWS validates the token's issuer, audience, subject and expir
 against the role trust policy. This service does not enroll an issuer or refresh
 a token by itself.
 
+AWS IAM allows five minutes beyond the token's `exp` for clock skew. The exact
+JWT expiry instant is therefore not an immediate AWS revocation boundary. The
+live expiry gate waits six minutes beyond `exp` before requiring AWS rejection.
+See [AWS OIDC federation](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_providers_oidc.html).
+
 On Linux, request cancellation kills the CLI's process group. The direct child
 also receives a parent-death signal. The supported service still requires its
 systemd cgroup: a deliberately detached descendant and private token files after

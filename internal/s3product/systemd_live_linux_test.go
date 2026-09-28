@@ -33,7 +33,7 @@ func TestLiveSystemdIdentityRecovery(t *testing.T) {
 	if os.Geteuid() != 0 || os.Getenv("TMPDIR") != "/var/lib/asb-s3/qa" {
 		t.Fatal("isolated root harness and private state fixtures required")
 	}
-	ctx, cancel := context.WithTimeout(t.Context(), 16*time.Minute)
+	ctx, cancel := context.WithTimeout(t.Context(), 22*time.Minute)
 	defer cancel()
 	fixture, solution, action := loadLiveProductFixture(t, ctx)
 	token, err := privateFile(fixture.WebIdentityTokenFile, 64<<10)
@@ -64,7 +64,7 @@ func TestLiveSystemdIdentityRecovery(t *testing.T) {
 	mandates := []lp.Mandate{h.mandate, h.mandate, h.mandate}
 	for i := range mandates {
 		mandates[i].ID += "-" + strconv.Itoa(i)
-		mandates[i].ExpiresAt = time.Now().Add(20 * time.Minute).UTC().Truncate(time.Second)
+		mandates[i].ExpiresAt = time.Now().Add(30 * time.Minute).UTC().Truncate(time.Second)
 	}
 	h.config.MandatesFile = h.write(t, "mandates.json", liveJSON(t, mandates))
 	if err := os.WriteFile("/etc/asb-s3/config.json", liveJSON(t, h.config), 0o600); err != nil {
@@ -93,7 +93,11 @@ func TestLiveSystemdIdentityRecovery(t *testing.T) {
 	selectOperation(0)
 	first := h.execute(t, h.authorize(t, solution))
 	t.Log("installed systemd service completed its first authorized AWS read")
-	timer := time.NewTimer(time.Until(expires.Add(90 * time.Second)))
+	// IAM accepts OIDC JWTs for five minutes beyond exp to allow clock skew.
+	// Wait beyond that documented window, with one additional minute of margin.
+	// https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_providers_oidc.html
+	const expiryAllowance = 6 * time.Minute
+	timer := time.NewTimer(time.Until(expires.Add(expiryAllowance)))
 	defer timer.Stop()
 	select {
 	case <-ctx.Done():
@@ -102,12 +106,14 @@ func TestLiveSystemdIdentityRecovery(t *testing.T) {
 	}
 	selectOperation(1)
 	capability := h.authorize(t, solution)
-	if status := <-executeAsync(t, h, capability); status != http.StatusConflict {
-		t.Fatal("expired identity did not leave an uncertain operation")
-	}
-	code := liveExpiryDiagnostic(t, ctx, h.operation.ID)
+	status := <-executeAsync(t, h, capability)
 	var before lp.SQLiteStatus
 	h.admin(t, &before, "status", "--directory", h.config.StoreDirectory)
+	t.Logf("expiry_probe_http=%d operations=%d uncertain=%d seconds_after_exp=%d", status, before.Operations, before.Uncertain, int(time.Since(expires).Seconds()))
+	if status != http.StatusConflict {
+		t.Fatal("identity beyond the AWS clock-skew window did not leave an uncertain operation")
+	}
+	code := liveExpiryDiagnostic(t, ctx, h.operation.ID)
 	if before.Operations != 2 || before.Uncertain != 1 || before.Accepted != 0 {
 		t.Fatal("expired identity did not preserve consumed authority")
 	}
@@ -158,7 +164,8 @@ func TestLiveSystemdIdentityRecovery(t *testing.T) {
 		"schema": "asb.s3-systemd-live-evidence/v1", "os": "Linux", "installed_unit": true,
 		"nonroot": true, "no_new_privileges": true, "effective_capabilities_zero": true,
 		"initial_authorized_read": true, "aws_expiry_code": code, "natural_expiry_denied": true,
-		"atomic_identity_renewal": true, "same_process_recovered": true, "renewed_authorized_read": true,
+		"expiry_allowance_seconds": int(expiryAllowance.Seconds()),
+		"atomic_identity_renewal":  true, "same_process_recovered": true, "renewed_authorized_read": true,
 		"old_operation_conflict": true, "uncertain_records": final.Uncertain, "completed_reads": 2,
 		"first_receipt_retained": true, "service_stopped": true,
 		"organization_deployment_qualified": false, "physical_power_loss_tested": false,
