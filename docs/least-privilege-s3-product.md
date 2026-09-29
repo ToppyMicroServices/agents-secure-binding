@@ -313,6 +313,8 @@ provider errors, tokens, keys, object contents and request arguments are exclude
 Output is limited to 60 events per 30 seconds and 64 queued events; subsequent
 emitted events report suppressed counts. A blocked sink cannot block an
 execution; the final process supervisor also bounds shutdown of that sink.
+A write failure does not disable later write attempts. Undelivered suppression
+counts remain pending for a later emitted event; failed events are not replayed.
 The unit adds journald rate limits and a separate `asb-s3` journal namespace.
 The supplied configuration sets a 64 MiB disk-use target, 16 MiB runtime-use
 target, seven-day retention and 128 MiB free-space reserve. Journald rotates files,
@@ -322,6 +324,23 @@ and `journalctl --namespace=asb-s3 --disk-usage`. Adjust this isolated namespace
 budget to the deployment's requirements, restart `systemd-journald@asb-s3` after
 changes, and ship required audit evidence through a protected channel.
 These lossy operational events do not replace the durable execution journal.
+
+STS CLI failures also carry a `cli` object: exit code (`-1` when unavailable),
+exit/deadline/cancellation classification, stderr format and parsing result,
+bounded stderr size, and stdout/stderr limit flags. A recognized provider code
+is retained separately from the normalized reason; unknown strings and all raw
+messages remain excluded. This distinguishes an unsupported code from malformed
+JSON, a traceback, empty output, or a process failure. It does not change UNKNOWN.
+The systemd gate preserves these fields, UTC time and the operation correlation
+in its artifact even when the gate fails. Its STS role-session name is `asb-`
+followed by that correlation, allowing a CloudTrail lookup without an operation ID.
+CLI error output does not reliably expose AWS request IDs. Some unauthenticated
+STS requests may also be absent from
+[CloudTrail](https://docs.aws.amazon.com/IAM/latest/UserGuide/cloudtrail-integration.html);
+absence alone cannot identify the failure or prove that AWS was not contacted.
+The workflow's failure-only STS probe uses the adapter fixture's token, which
+differs from the systemd gate's separately projected token. Its artifact records
+that source and does not establish the original request's failure cause.
 
 **Decision QD-01:** retain `UNKNOWN` for all adapter failures, including token or
 STS failures before S3 dispatch. Durable authority has already been consumed at

@@ -218,6 +218,7 @@ func awaitSystemdSTSDiagnostic(t *testing.T, ctx context.Context, operation stri
 	defer cancel()
 	var decoded, matched int
 	observed := "none"
+	logged := false
 	for deadline.Err() == nil {
 		raw, err := exec.CommandContext(deadline, "journalctl", "--namespace=asb-s3", "--unit=asb-s3.service", "--no-pager", "--output=cat", "--lines=32").Output()
 		if err != nil || len(raw) > 64<<10 {
@@ -243,6 +244,27 @@ func awaitSystemdSTSDiagnostic(t *testing.T, ctx context.Context, operation stri
 				observed = event.Code
 			default:
 				observed = "other"
+			}
+			if !logged {
+				t.Logf("sts_diagnostic time=%s correlation=%s role_session_name=asb-%s code=%s", event.Time.UTC().Format(time.RFC3339Nano), correlation, correlation, observed)
+				if cli := event.CLI; cli != nil {
+					label := func(value string, allowed ...string) string {
+						if slices.Contains(allowed, value) {
+							return value
+						}
+						return "other"
+					}
+					t.Logf("cli_diagnostic exit_code=%d failure=%s format=%s parse=%s provider_code=%s stderr_bytes=%d stderr_limit_exceeded=%t stdout_limit_exceeded=%t",
+						cli.ExitCode,
+						label(cli.Failure, "exit", "deadline", "cancelled", "launch_or_io"),
+						label(cli.Format, "empty", "json", "invalid_json", "legacy", "traceback", "cli_text", "text"),
+						label(cli.Parse, "classified", "unknown_code", "missing_code", "invalid_fields", "invalid_json", "unrecognized"),
+						label(cli.ProviderCode, "", "ExpiredToken", "ExpiredTokenException", "InvalidIdentityToken", "AccessDenied", "IDPCommunicationError", "IDPRejectedClaim", "MalformedPolicyDocument", "PackedPolicyTooLarge", "RegionDisabled", "Throttling", "ValidationError"),
+						cli.StderrBytes, cli.StderrLimitExceeded, cli.StdoutLimitExceeded)
+				} else {
+					t.Fatal("STS failure is missing CLI diagnostic metadata")
+				}
+				logged = true
 			}
 			if slices.Contains(expected, event.Code) {
 				return event.Code

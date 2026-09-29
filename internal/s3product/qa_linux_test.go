@@ -8,12 +8,15 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"encoding/json"
 	"errors"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -106,6 +109,103 @@ func TestDiagnosticsAreBoundedAndRedactUntrustedText(t *testing.T) {
 	d.Close()
 	if strings.Contains(output.String(), secret) || !strings.Contains(output.String(), `"stage":"adapter"`) || !strings.Contains(output.String(), `"correlation":`) {
 		t.Fatal("diagnostic did not preserve safe classification")
+	}
+}
+
+type failOnceDiagnosticWriter struct {
+	bytes.Buffer
+	failed bool
+}
+
+func (w *failOnceDiagnosticWriter) Write(raw []byte) (int, error) {
+	if !w.failed {
+		w.failed = true
+		return 0, io.ErrClosedPipe
+	}
+	return w.Buffer.Write(raw)
+}
+
+func TestDiagnosticsRetainSuppressedCountAfterWriteFailure(t *testing.T) {
+	var output failOnceDiagnosticWriter
+	d := newDiagnostics(&output)
+	defer d.Close()
+	// Represent seven earlier events lost to rate limiting or a full queue.
+	d.mu.Lock()
+	d.suppressed = 7
+	d.mu.Unlock()
+	d.emit("transport", "server_error", "")
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		d.mu.Lock()
+		count := d.suppressed
+		d.mu.Unlock()
+		if count > 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("failed diagnostic write did not finish")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	d.emit("transport", "server_error", "")
+	d.Close()
+	var event diagnosticEvent
+	if err := json.Unmarshal(output.Bytes(), &event); err != nil {
+		t.Fatal(err)
+	}
+	if event.Suppressed != 8 {
+		t.Fatalf("lost events were undercounted: got %d, want 8", event.Suppressed)
+	}
+}
+
+type blockedDiagnosticWriter struct {
+	started, release chan struct{}
+	once             sync.Once
+}
+
+func (w *blockedDiagnosticWriter) Write(raw []byte) (int, error) {
+	w.once.Do(func() { close(w.started) })
+	<-w.release
+	return len(raw), nil
+}
+
+func TestBlockedDiagnosticsBoundEmissionAndShutdown(t *testing.T) {
+	output := &blockedDiagnosticWriter{started: make(chan struct{}), release: make(chan struct{})}
+	d := newDiagnostics(output)
+	var release sync.Once
+	unblock := func() { release.Do(func() { close(output.release) }) }
+	t.Cleanup(func() { unblock(); d.Close() })
+	d.emit("transport", "server_error", "")
+	select {
+	case <-output.started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("diagnostic writer did not start")
+	}
+	emitted := make(chan struct{})
+	go func() {
+		defer close(emitted)
+		for range 10000 {
+			d.emit("transport", "server_error", "")
+		}
+	}()
+	select {
+	case <-emitted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("blocked diagnostics stalled emission")
+	}
+	closed := make(chan struct{})
+	go func() { d.Close(); close(closed) }()
+	select {
+	case <-closed:
+	case <-time.After(3 * time.Second):
+		t.Fatal("blocked diagnostics stalled shutdown")
+	}
+	d.emit("transport", "server_error", "") // Closed queues reject new events.
+	unblock()
+	select {
+	case <-d.done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("diagnostic writer did not exit after the sink recovered")
 	}
 }
 

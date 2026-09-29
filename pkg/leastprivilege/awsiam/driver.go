@@ -28,6 +28,12 @@ type credentials struct {
 	Expiration                  time.Time
 }
 
+const (
+	stsExpiredToken        = "ExpiredToken"
+	stsUnclassifiedFailure = "unclassified failure"
+	stsJSONFormat          = "json"
+)
+
 var keyPatternAWS = regexp.MustCompile(`^[A-Z0-9]{16,128}$`)
 
 var webIdentityPattern = regexp.MustCompile(`^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$`)
@@ -36,18 +42,61 @@ var stsErrorPattern = regexp.MustCompile(`(?m)^(?:aws: \[ERROR\]: )?An error occ
 
 // Only known codes and fixed reason labels may leave the CLI boundary. Never
 // include raw diagnostics, which can contain identities or credential material.
-func stsErrorCode(raw []byte) string {
+func stsErrorDiagnostic(raw []byte) (string, CLIFailure) {
+	detail := CLIFailure{ExitCode: -1, Format: "text", Parse: "unrecognized", StderrBytes: len(raw)}
 	var response struct {
 		Code    string
 		Message string
 	}
-	if err := json.Unmarshal(raw, &response); err != nil {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 {
+		detail.Format = "empty"
+	} else if err := json.Unmarshal(raw, &response); err != nil {
+		var fieldError *json.UnmarshalTypeError
+		switch {
+		case errors.As(err, &fieldError):
+			detail.Format, detail.Parse = stsJSONFormat, "invalid_fields"
+			return stsUnclassifiedFailure, detail
+		case trimmed[0] == '{' || trimmed[0] == '[':
+			detail.Format, detail.Parse = "invalid_json", "invalid_json"
+			return stsUnclassifiedFailure, detail
+		case bytes.Contains(raw, []byte("Traceback (most recent call last):")):
+			detail.Format = "traceback"
+		case bytes.HasPrefix(trimmed, []byte("aws: [ERROR]:")):
+			detail.Format = "cli_text"
+		}
 		// Older CLI versions ignore AWS_CLI_ERROR_FORMAT; retain their format.
 		if match := stsErrorPattern.FindSubmatch(raw); len(match) == 2 {
 			response.Code = string(match[1])
+			detail.Format = "legacy"
+		} else {
+			// Do not classify a partially decoded or malformed JSON document.
+			return stsUnclassifiedFailure, detail
 		}
+	} else {
+		detail.Format = stsJSONFormat
 	}
-	switch response.Code {
+	if response.Code == "" {
+		if detail.Format == stsJSONFormat {
+			detail.Parse = "missing_code"
+		}
+		return stsUnclassifiedFailure, detail
+	}
+	code := normalizeSTSError(response.Code, response.Message)
+	if code == stsUnclassifiedFailure {
+		detail.Parse = "unknown_code"
+	} else {
+		detail.Parse, detail.ProviderCode = "classified", response.Code
+	}
+	return code, detail
+}
+
+func normalizeSTSError(code, message string) string {
+	switch code {
+	case "ExpiredTokenException":
+		// The CLI STS model names this ExpiredTokenException; the API reference
+		// calls it ExpiredToken. Keep one bounded diagnostic for both spellings.
+		return stsExpiredToken
 	case "InvalidIdentityToken":
 		// Match documented AWS reasons, but discard all URLs and identity details.
 		for _, reason := range []struct{ prefix, label string }{
@@ -58,15 +107,15 @@ func stsErrorCode(raw []byte) string {
 			{"Token is expired", "token_expired"},
 			{"The ID Token provided is not a valid JWT", "malformed_token"},
 		} {
-			if strings.HasPrefix(response.Message, reason.prefix) {
-				return response.Code + " (" + reason.label + ")"
+			if strings.HasPrefix(message, reason.prefix) {
+				return code + " (" + reason.label + ")"
 			}
 		}
-		return response.Code
-	case "AccessDenied", "ExpiredToken", "IDPCommunicationError", "IDPRejectedClaim", "MalformedPolicyDocument", "PackedPolicyTooLarge", "RegionDisabled", "Throttling", "ValidationError":
-		return response.Code
+		return code
+	case "AccessDenied", stsExpiredToken, "IDPCommunicationError", "IDPRejectedClaim", "MalformedPolicyDocument", "PackedPolicyTooLarge", "RegionDisabled", "Throttling", "ValidationError":
+		return code
 	}
-	return "unclassified failure"
+	return stsUnclassifiedFailure
 }
 
 func safeCredential(value string, max int) bool {
@@ -130,12 +179,14 @@ func staticProfile(raw []byte, profile string) ([]byte, error) {
 }
 
 type boundedOutput struct {
-	data  []byte
-	limit int
+	data     []byte
+	limit    int
+	exceeded bool
 }
 
 func (b *boundedOutput) Write(p []byte) (int, error) {
 	if len(p) > b.limit-len(b.data) {
+		b.exceeded = true
 		return 0, ErrProvider
 	}
 	b.data = append(b.data, p...)
@@ -163,9 +214,10 @@ func readPrivateSource(path string, limit int64) ([]byte, error) {
 
 func (e *Executor) assume(ctx context.Context, id string, policy []byte) (result credentials, resultErr error) {
 	stage, code := "identity", "source_unavailable"
+	var cli *CLIFailure
 	defer func() {
 		if resultErr != nil {
-			resultErr = providerFailure(stage, code, resultErr)
+			resultErr = &providerError{stage: stage, code: code, cause: resultErr, cli: cli}
 		}
 	}()
 	dir, err := os.MkdirTemp("", "asb-aws-session-")
@@ -229,13 +281,24 @@ func (e *Executor) assume(ctx context.Context, id string, policy []byte) (result
 	cmd.Stderr = diagnostic
 	if err := cmd.Run(); err != nil {
 		clear(output.data)
-		if ctx.Err() != nil {
-			return credentials{}, ctx.Err()
-		}
+		parsed, detail := stsErrorDiagnostic(diagnostic.data)
+		detail.Failure = "launch_or_io"
+		detail.StderrLimitExceeded, detail.StdoutLimitExceeded = diagnostic.exceeded, output.exceeded
 		var exit *exec.ExitError
 		if errors.As(err, &exit) {
-			code = stsErrorCode(diagnostic.data)
-			return credentials{}, fmt.Errorf("%w: STS CLI exit %d: %s", ErrProvider, exit.ExitCode(), stsErrorCode(diagnostic.data))
+			detail.ExitCode, detail.Failure = exit.ExitCode(), "exit"
+		}
+		cli = &detail
+		if ctx.Err() != nil {
+			detail.Failure = "cancelled"
+			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+				detail.Failure = "deadline"
+			}
+			return credentials{}, ctx.Err()
+		}
+		if exit != nil {
+			code = parsed
+			return credentials{}, fmt.Errorf("%w: STS CLI exit %d: %s", ErrProvider, exit.ExitCode(), code)
 		}
 		return credentials{}, fmt.Errorf("%w: STS CLI could not complete", ErrProvider)
 	}
