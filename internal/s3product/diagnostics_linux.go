@@ -20,11 +20,12 @@ import (
 )
 
 type diagnosticEvent struct {
-	Time        time.Time `json:"time"`
-	Stage       string    `json:"stage"`
-	Code        string    `json:"code"`
-	Correlation string    `json:"correlation,omitempty"`
-	Suppressed  uint64    `json:"suppressed,omitempty"`
+	Time        time.Time          `json:"time"`
+	Stage       string             `json:"stage"`
+	Code        string             `json:"code"`
+	Correlation string             `json:"correlation,omitempty"`
+	Suppressed  uint64             `json:"suppressed,omitempty"`
+	CLI         *awsiam.CLIFailure `json:"cli,omitempty"`
 }
 
 // At most 60 events per 30 seconds and 64 queued records. A stalled journal
@@ -49,8 +50,12 @@ func newDiagnostics(out io.Writer) *diagnostics {
 			// Logging failure must not change an already committed outcome.
 			if err := encoder.Encode(event); err != nil {
 				d.mu.Lock()
-				d.suppressed++
+				// The failed event also carried counts that were not delivered.
+				d.suppressed += event.Suppressed + 1
 				d.mu.Unlock()
+				// Encoder retains I/O errors. Let the next event reach a recovered
+				// sink without replaying this failed event or its AWS operation.
+				encoder = json.NewEncoder(out)
 			}
 		}
 	}()
@@ -58,6 +63,10 @@ func newDiagnostics(out io.Writer) *diagnostics {
 }
 
 func (d *diagnostics) emit(stage, code, id string) {
+	d.emitCLI(stage, code, id, nil)
+}
+
+func (d *diagnostics) emitCLI(stage, code, id string, cli *awsiam.CLIFailure) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if d.closed {
@@ -71,7 +80,7 @@ func (d *diagnostics) emit(stage, code, id string) {
 		d.suppressed++
 		return
 	}
-	event := diagnosticEvent{Time: now, Stage: stage, Code: code, Suppressed: d.suppressed}
+	event := diagnosticEvent{Time: now, Stage: stage, Code: code, Suppressed: d.suppressed, CLI: cli}
 	if id != "" {
 		hash := sha256.Sum256([]byte(id))
 		event.Correlation = hex.EncodeToString(hash[:16])
@@ -109,7 +118,7 @@ func (d *diagnostics) executor(next asbbinding.Executor) asbbinding.Executor {
 		result, err := next(ctx, id, request, solution)
 		if err != nil {
 			stage, code := awsiam.Diagnostic(err)
-			d.emit(stage, code, id)
+			d.emitCLI(stage, code, id, awsiam.CLIDiagnostic(err))
 		}
 		return result, err
 	}

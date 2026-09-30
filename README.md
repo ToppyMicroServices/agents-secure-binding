@@ -114,7 +114,7 @@ that local policy.
 | Agent → Human relay | **Experimental, current branch / next prerelease candidate** | One active reachability grant queues one opaque relay intent; local gateway only, no real delivery provider |
 | Task–Action lifecycle | **Experimental, current branch / next prerelease candidate** | Separate responsibility and execution state machines; bounded single-host SQLite transaction adapter |
 | Local Human approval app | **Experimental, current branch** | Browser inbox, real software-only ASB/mTLS, and SQLite-backed local setting changes; one trusted host and user |
-| Least-privilege execution | **Experimental, current branch** | Finite optimization, ASB-bound prior mandates, durable single-host admission, and a limited S3 executor; live AWS qualification pending |
+| Least-privilege execution | **Preview, current branch** | Finite optimization, ASB-bound prior mandates, durable single-host admission, and a limited S3 executor; [live AWS and operational evidence](docs/s3-release-qualification.md), deployment qualification pending |
 
 `v2.0.0-rc.2` does not include the current-branch Human Coordination
 surfaces; they are candidates for a later prerelease. No production-readiness

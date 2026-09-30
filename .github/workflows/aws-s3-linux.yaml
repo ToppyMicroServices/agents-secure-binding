@@ -9,6 +9,7 @@ on:
       - 'internal/s3product/**'
       - 'cmd/asb-s3/**'
       - 'scripts/run-s3-operations.cjs'
+      - 'scripts/run-s3-systemd-live.cjs'
       - 'scripts/s3-qa-evidence.py'
       - 'packaging/s3/**'
       - 'go.mod'
@@ -20,6 +21,7 @@ on:
       - 'internal/s3product/**'
       - 'cmd/asb-s3/**'
       - 'scripts/run-s3-operations.cjs'
+      - 'scripts/run-s3-systemd-live.cjs'
       - 'scripts/s3-qa-evidence.py'
       - 'packaging/s3/**'
   workflow_dispatch:
@@ -34,6 +36,10 @@ on:
         type: choice
         options: ['0', '15', '45']
         default: '0'
+      systemd_identity:
+        description: Optional real OIDC expiry and renewal under systemd; requires operations_minutes=0
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -156,6 +162,11 @@ jobs:
             echo '::error::Environment aws-s3-live must supply ASB_AWS_LIVE_FIXTURE_JSON.'
             exit 1
           fi
+      - name: Require separate disposable identity and operations labs
+        if: inputs.systemd_identity && inputs.operations_minutes != '0'
+        run: |
+          echo '::error::Run systemd_identity with operations_minutes=0 in its own disposable job.'
+          exit 1
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
@@ -244,6 +255,14 @@ jobs:
         with:
           script: |
             await require('./scripts/run-s3-operations.cjs')({core});
+      - name: Verify real identity expiry and recovery in the installed systemd unit
+        if: inputs.systemd_identity
+        uses: actions/github-script@v8
+        env:
+          ASB_S3_OPERATIONS_MINUTES: ${{ inputs.operations_minutes }}
+        with:
+          script: |
+            await require('./scripts/run-s3-systemd-live.cjs')({core});
       - name: Diagnose an unsuccessful OIDC gate without private error text
         if: failure()
         uses: actions/github-script@v8
@@ -256,7 +275,9 @@ jobs:
             const directory = path.join(process.env.RUNNER_TEMP, 'asb-aws-private');
             const fixturePath = path.join(directory, 'fixture.json');
             if (!fs.existsSync(fixturePath)) return;
-            if (!fs.existsSync('evidence/aws-gate.txt') || !fs.readFileSync('evidence/aws-gate.txt', 'utf8').includes('InvalidIdentityToken')) return;
+            const adapterFailure = fs.existsSync('evidence/aws-gate.txt') && fs.readFileSync('evidence/aws-gate.txt', 'utf8').includes('InvalidIdentityToken');
+            const systemdFailure = fs.existsSync('evidence/systemd-gate.txt') && fs.readFileSync('evidence/systemd-gate.txt', 'utf8').includes('--- FAIL: TestLiveSystemdIdentityRecovery');
+            if (!adapterFailure && !systemdFailure) return;
             const fixture = JSON.parse(fs.readFileSync(fixturePath, 'utf8'));
             const token = fs.readFileSync(fixture.web_identity_token_file, 'utf8').trim();
             const parts = token.split('.');
@@ -265,6 +286,9 @@ jobs:
             const now = Math.floor(Date.now() / 1000);
             const diagnostic = {
               schema: 'asb.oidc-diagnostic/v1',
+              probe_identity_source: 'adapter_fixture',
+              failed_gate: systemdFailure ? 'systemd' : 'adapter',
+              original_failure_cause_established: false,
               algorithm_supported: header.alg === 'RS256',
               time_valid: Number.isInteger(claims.iat) && Number.isInteger(claims.exp) && claims.iat <= now && now < claims.exp && (claims.nbf === undefined || (Number.isInteger(claims.nbf) && claims.nbf <= now)),
               issuer_matches: claims.iss === 'https://token.actions.githubusercontent.com',
@@ -280,7 +304,9 @@ jobs:
             } catch {
               diagnostic.public_key_check_unavailable = true;
             }
-            // Repeat only STS with the same single-object bound; never retry S3.
+            // Independent STS probe with the adapter fixture and the same
+            // single-object bound; the systemd gate projects its own token.
+            // This is not a replay or diagnosis of the original failed request.
             const policy = JSON.stringify({Version: '2012-10-17', Statement: [
               {Effect: 'Deny', NotAction: 's3:GetObject', Resource: '*'},
               {Effect: 'Deny', Action: 's3:GetObject', NotResource: [fixture.resource]},
@@ -301,12 +327,17 @@ jobs:
             }});
             diagnostic.sts_exit_code = result.status;
             diagnostic.sts_probe_succeeded = result.status === 0;
+            diagnostic.sts_stderr_bytes = Buffer.byteLength(result.stderr || '');
+            diagnostic.sts_stderr_format = 'unstructured';
             // Only words from this fixed vocabulary may appear in the artifact.
             // Unknown words, URLs, identifiers and token material are discarded.
             const vocabulary = new Set("a an and are as at be been by can cannot could couldn't did does doesn't failed failure for from has have id in invalid is it jwt key keys missing must no not of oidc on only openidconnect or parse provided provider required retrieve signature signed signer signing supported that the their this to token tokens too unable unknown unsupported url valid validation verify was were which with your audience account certificate configured expires expired expiry issuer claim claims found algorithm incorrect requested request response subject authentication format identity limit length size disabled thumbprint mismatch verification decode decoded byte character malformed unexpected".split(' '));
             try {
-              const failure = JSON.parse(result.stderr);
-              const codes = new Set(['InvalidIdentityToken', 'AccessDenied', 'ExpiredToken', 'IDPCommunicationError', 'IDPRejectedClaim', 'MalformedPolicyDocument', 'PackedPolicyTooLarge', 'RegionDisabled', 'Throttling', 'ValidationError']);
+              const failure = JSON.parse(result.stderr || '');
+              diagnostic.sts_stderr_format = 'json';
+              if (!failure || typeof failure !== 'object' || Array.isArray(failure)) throw new Error();
+              diagnostic.sts_has_code = typeof failure.Code === 'string';
+              const codes = new Set(['InvalidIdentityToken', 'AccessDenied', 'ExpiredToken', 'ExpiredTokenException', 'IDPCommunicationError', 'IDPRejectedClaim', 'MalformedPolicyDocument', 'PackedPolicyTooLarge', 'RegionDisabled', 'Throttling', 'ValidationError']);
               diagnostic.sts_error_code = codes.has(failure.Code) ? failure.Code : 'unclassified';
               if (typeof failure.Message === 'string') {
                 diagnostic.reason_words = (failure.Message.match(/[A-Za-z]+(?:'[A-Za-z]+)?/g) || []).slice(0, 96).map(word => vocabulary.has(word.toLowerCase()) ? word.toLowerCase() : '[omitted]');

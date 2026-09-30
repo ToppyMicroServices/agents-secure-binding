@@ -125,6 +125,11 @@ instance metadata. AWS validates the token's issuer, audience, subject and expir
 against the role trust policy. This service does not enroll an issuer or refresh
 a token by itself.
 
+AWS IAM allows five minutes beyond the token's `exp` for clock skew. The exact
+JWT expiry instant is therefore not an immediate AWS revocation boundary. The
+live expiry gate waits six minutes beyond `exp` before requiring AWS rejection.
+See [AWS OIDC federation](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_providers_oidc.html).
+
 On Linux, request cancellation kills the CLI's process group. The direct child
 also receives a parent-death signal. The supported service still requires its
 systemd cgroup: a deliberately detached descendant and private token files after
@@ -308,6 +313,8 @@ provider errors, tokens, keys, object contents and request arguments are exclude
 Output is limited to 60 events per 30 seconds and 64 queued events; subsequent
 emitted events report suppressed counts. A blocked sink cannot block an
 execution; the final process supervisor also bounds shutdown of that sink.
+A write failure does not disable later write attempts. Undelivered suppression
+counts remain pending for a later emitted event; failed events are not replayed.
 The unit adds journald rate limits and a separate `asb-s3` journal namespace.
 The supplied configuration sets a 64 MiB disk-use target, 16 MiB runtime-use
 target, seven-day retention and 128 MiB free-space reserve. Journald rotates files,
@@ -317,6 +324,23 @@ and `journalctl --namespace=asb-s3 --disk-usage`. Adjust this isolated namespace
 budget to the deployment's requirements, restart `systemd-journald@asb-s3` after
 changes, and ship required audit evidence through a protected channel.
 These lossy operational events do not replace the durable execution journal.
+
+STS CLI failures also carry a `cli` object: exit code (`-1` when unavailable),
+exit/deadline/cancellation classification, stderr format and parsing result,
+bounded stderr size, and stdout/stderr limit flags. A recognized provider code
+is retained separately from the normalized reason; unknown strings and all raw
+messages remain excluded. This distinguishes an unsupported code from malformed
+JSON, a traceback, empty output, or a process failure. It does not change UNKNOWN.
+The systemd gate preserves these fields, UTC time and the operation correlation
+in its artifact even when the gate fails. Its STS role-session name is `asb-`
+followed by that correlation, allowing a CloudTrail lookup without an operation ID.
+CLI error output does not reliably expose AWS request IDs. Some unauthenticated
+STS requests may also be absent from
+[CloudTrail](https://docs.aws.amazon.com/IAM/latest/UserGuide/cloudtrail-integration.html);
+absence alone cannot identify the failure or prove that AWS was not contacted.
+The workflow's failure-only STS probe uses the adapter fixture's token, which
+differs from the systemd gate's separately projected token. Its artifact records
+that source and does not establish the original request's failure cause.
 
 **Decision QD-01:** retain `UNKNOWN` for all adapter failures, including token or
 STS failures before S3 dispatch. Durable authority has already been consumed at
@@ -329,6 +353,20 @@ for cancellation races and result-persistence failure. Current evidence does not
 require that change.
 
 ## Qualification evidence
+
+For real OIDC expiry and recovery in the installed systemd unit, set workflow
+input `systemd_identity=true` with `operations_minutes=0` and the existing
+`read-explicit-fixture` confirmation. Run this in a separate disposable job from
+the operations lab. It installs the checked-in unit under a fresh dedicated
+user, performs an authorized read, and lets that same GitHub token expire
+naturally. AWS must return a recognized expiry diagnostic. The trusted runner
+then atomically projects a new token; the same service process must preserve
+the uncertain operation and complete a separately authorized read. Evidence is
+written only after all assertions pass, with the tested binary hash. The runner
+removes its private files and service on exit; it does not change AWS resources.
+The runner supplies this lab's projector. This does not qualify a site's
+projector startup, issuer or physical reboot. See the
+[release qualification record](s3-release-qualification.md) for current results.
 
 For a bounded operational run, also set workflow input `operations_minutes` to
 `15` or `45`; its default `0` leaves this gate off. The existing explicit AWS

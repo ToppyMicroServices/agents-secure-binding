@@ -250,6 +250,8 @@ func TestSTSDiagnosticsAreBoundedAndRedacted(t *testing.T) {
 		{"verification_key", `{"Code":"InvalidIdentityToken","Message":"Couldn't retrieve verification key from your identity provider: private-key-info"}`, "InvalidIdentityToken (verification_key_unavailable)"},
 		{"certificate", `{"Code":"InvalidIdentityToken","Message":"OpenIDConnect provider's HTTPS certificate doesn't match configured thumbprint: private-thumbprint"}`, "InvalidIdentityToken (provider_certificate_mismatch)"},
 		{"expiry", `{"Code":"InvalidIdentityToken","Message":"Token is expired: private-token-info"}`, "InvalidIdentityToken (token_expired)"},
+		{"expiry_exception_json", `{"Code":"ExpiredTokenException","Message":"private-token-info"}`, "ExpiredToken"},
+		{"expiry_exception_legacy", "An error occurred (ExpiredTokenException) when calling the AssumeRoleWithWebIdentity operation: private-token-info", "ExpiredToken"},
 		{"malformed", `{"Code":"InvalidIdentityToken","Message":"The ID Token provided is not a valid JWT: private-token"}`, "InvalidIdentityToken (malformed_token)"},
 		{"wrong_code_for_reason", `{"Code":"AccessDenied","Message":"Incorrect token audience: private-details"}`, "AccessDenied"},
 		{"json_unknown", `{"Code":"PrivateSecret","Message":"private-diagnostic"}`, "unclassified failure"},
@@ -278,6 +280,21 @@ func TestSTSDiagnosticsAreBoundedAndRedacted(t *testing.T) {
 			_, err := e.Execute(ctx, "operation", r, s)
 			if !errors.Is(err, ErrProvider) || err.Error() != ErrProvider.Error()+": STS CLI exit 1: "+tc.want {
 				t.Fatalf("unexpected sanitized failure: %v", err)
+			}
+			detail := CLIDiagnostic(err)
+			if detail == nil || detail.ExitCode != 1 || detail.Failure != "exit" || detail.StderrBytes > 16<<10 {
+				t.Fatal("missing bounded CLI process metadata")
+			}
+			if tc.name == "oversized" && !detail.StderrLimitExceeded {
+				t.Fatal("stderr limit was not recorded")
+			}
+			encoded, marshalErr := json.Marshal(detail)
+			if marshalErr != nil || strings.Contains(strings.ToLower(string(encoded)), "private") {
+				t.Fatal("CLI metadata exposed private error text")
+			}
+			detail.ExitCode = 99
+			if CLIDiagnostic(err).ExitCode != 1 {
+				t.Fatal("diagnostic caller modified the retained failure")
 			}
 		})
 	}

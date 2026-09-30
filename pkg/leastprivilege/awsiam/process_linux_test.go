@@ -45,6 +45,9 @@ func TestCLICancellationStopsChildGroupAndRemovesIdentity(t *testing.T) {
 		if !errors.Is(err, context.Canceled) {
 			t.Fatal(err)
 		}
+		if detail := CLIDiagnostic(err); detail == nil || detail.Failure != "cancelled" || detail.ProviderCode != "" {
+			t.Fatal("cancellation lost its process diagnostic or became an AWS rejection")
+		}
 	case <-time.After(3 * time.Second):
 		t.Fatal("CLI did not cancel")
 	}
@@ -66,4 +69,31 @@ func TestCLICancellationStopsChildGroupAndRemovesIdentity(t *testing.T) {
 		t.Fatal("temporary credential copy retained")
 	}
 	t.Logf("cancel_ms=%d descendant_running=false temporary_retained=false", time.Since(start).Milliseconds())
+}
+
+func TestCLILaunchAndDeadlineDiagnostics(t *testing.T) {
+	for _, name := range []string{"launch", "deadline"} {
+		t.Run(name, func(t *testing.T) {
+			e, _, _, cli := fakeExecutor(t)
+			wantFailure, wantErr := "launch_or_io", ErrProvider
+			if name == "launch" {
+				e.config.Path = cli + ".missing"
+			} else {
+				if err := os.WriteFile(cli, []byte("#!/bin/sh\nexec /bin/sleep 60\n"), 0o700); err != nil {
+					t.Fatal(err)
+				}
+				wantFailure, wantErr = "deadline", context.DeadlineExceeded
+			}
+			ctx, cancel := context.WithTimeout(t.Context(), 200*time.Millisecond)
+			defer cancel()
+			_, err := e.assume(ctx, "operation:process-diagnostic", nil)
+			if !errors.Is(err, wantErr) {
+				t.Fatalf("process failure changed its error contract: %v", err)
+			}
+			detail := CLIDiagnostic(err)
+			if detail == nil || detail.Failure != wantFailure || detail.ExitCode != -1 || detail.Format != "empty" || detail.ProviderCode != "" {
+				t.Fatal("process failure lost its diagnostic or became an AWS rejection")
+			}
+		})
+	}
 }

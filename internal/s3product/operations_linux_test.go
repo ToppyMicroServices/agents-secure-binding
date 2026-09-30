@@ -26,7 +26,7 @@ import (
 // This wall-clock lab kills an idle process after a confirmed read. It does not
 // simulate loss of storage power or certify recovery of an interrupted effect.
 func TestLiveProductOperations(t *testing.T) {
-	if os.Getenv("ASB_AWS_LIVE_CONFIRM") != "read-explicit-fixture" || os.Getenv("ASB_S3_OPERATIONS_MINUTES") == "" {
+	if os.Getenv("ASB_AWS_LIVE_CONFIRM") != liveAWSConfirmation || os.Getenv("ASB_S3_OPERATIONS_MINUTES") == "" {
 		t.Skip("operations gate requires explicit live opt-in and duration")
 	}
 	minutes, err := strconv.Atoi(os.Getenv("ASB_S3_OPERATIONS_MINUTES"))
