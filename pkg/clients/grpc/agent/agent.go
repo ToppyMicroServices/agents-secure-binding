@@ -4,6 +4,7 @@ package agent
 
 import (
 	"context"
+	"time"
 
 	"github.com/ToppyMicroServices/agents-secure-binding/v2/agent"
 	"github.com/ToppyMicroServices/agents-secure-binding/v2/internal/errors"
@@ -23,12 +24,19 @@ func NewAgentClient(ctx context.Context, cfg clients.AttestedClientConfig) (grpc
 	}
 
 	if client.Secure() != tls.WithMATLS.String() && client.Secure() != tls.WithATLS.String() && client.Secure() != tls.WithTLS.String() {
+		timeout := cfg.Timeout
+		if timeout <= 0 {
+			timeout = 60 * time.Second
+		}
+		healthCtx, cancel := context.WithTimeout(ctx, timeout)
+		defer cancel()
 		health := grpchealth.NewHealthClient(client.Connection())
-		resp, err := health.Check(ctx, &grpchealth.HealthCheckRequest{
+		resp, err := health.Check(healthCtx, &grpchealth.HealthCheckRequest{
 			Service: "agent",
 		})
 
 		if err != nil || resp.GetStatus() != grpchealth.HealthCheckResponse_SERVING {
+			_ = client.Close()
 			return nil, nil, errors.Wrap(err, ErrAgentServiceUnavailable)
 		}
 	}

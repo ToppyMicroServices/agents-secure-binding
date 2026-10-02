@@ -100,7 +100,9 @@ func TestPrintError(t *testing.T) {
 			buf := new(bytes.Buffer)
 			cmd.SetOut(buf)
 
-			printError(cmd, tt.message, tt.err)
+			if err := printError(cmd, tt.message, tt.err); !errors.Is(err, ErrCommandFailed) {
+				t.Fatalf("printError() error = %v", err)
+			}
 
 			if got := buf.String(); got != tt.expected {
 				t.Errorf("printError() output = %q, want %q", got, tt.expected)

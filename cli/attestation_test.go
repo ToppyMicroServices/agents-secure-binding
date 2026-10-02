@@ -72,14 +72,14 @@ func TestNewGetAttestationCmd(t *testing.T) {
 			args:         []string{"snp-vtpm", "--tee", teeNonce},
 			mockResponse: []byte("mock attestation"),
 			mockError:    nil,
-			expectedOut:  "vTPM nonce must be defined for vTPM attestation",
+			expectedErr:  "vTPM nonce must be defined for vTPM attestation",
 		},
 		{
 			name:         "missing TEE nonce",
 			args:         []string{"snp-vtpm", "--vtpm", vtpmNonce},
 			mockResponse: []byte("mock attestation"),
 			mockError:    nil,
-			expectedOut:  "TEE nonce must be defined for SEV-SNP attestation",
+			expectedErr:  "TEE nonce must be defined for SEV-SNP attestation",
 		},
 		{
 			name:         "invalid report data size",
@@ -170,6 +170,7 @@ func TestNewGetAttestationCmd(t *testing.T) {
 			err := cmd.Execute()
 
 			if tc.expectedErr != "" {
+				assert.ErrorIs(t, err, ErrCommandFailed)
 				assert.Contains(t, buf.String(), tc.expectedErr)
 			} else {
 				assert.NoError(t, err)

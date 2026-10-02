@@ -5,6 +5,8 @@ package cli
 import (
 	"bytes"
 	"context"
+	"crypto/sha512"
+	"encoding/binary"
 	"io"
 	"os"
 	"path/filepath"
@@ -12,6 +14,7 @@ import (
 
 	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/attestation/gcp"
 	"github.com/google/gce-tcb-verifier/proto/endorsement"
+	"github.com/google/go-sev-guest/abi"
 	"github.com/google/go-sev-guest/proto/sevsnp"
 	"github.com/google/go-tpm-tools/proto/attest"
 	"github.com/stretchr/testify/assert"
@@ -29,89 +32,78 @@ func TestNewAttestationPolicyCmd(t *testing.T) {
 }
 
 func TestCLI_NewDownloadGCPOvmfFile(t *testing.T) {
-	cli := &CLI{}
-	cmd := cli.NewDownloadGCPOvmfFile()
-
-	assert.NotNil(t, cmd)
-	assert.Equal(t, "download", cmd.Use)
-
+	t.Chdir(t.TempDir())
 	oldNewStorageClient := gcp.NewStorageClient
-	defer func() { gcp.NewStorageClient = oldNewStorageClient }()
+	t.Cleanup(func() { gcp.NewStorageClient = oldNewStorageClient })
 
-	tmpDir := t.TempDir()
-	attestationPath := filepath.Join(tmpDir, "attestation.bin")
-
-	// Change working directory to tmpDir so ovmf.fd is written there
-	oldWd, err := os.Getwd()
+	// This fixture tests the download checksum boundary, not hardware appraisal.
+	reportBytes := make([]byte, abi.ReportSize)
+	binary.LittleEndian.PutUint32(reportBytes[:4], abi.ReportVersion2)
+	binary.LittleEndian.PutUint64(reportBytes[8:16], abi.SnpPolicyToBytes(abi.SnpPolicy{}))
+	report, err := abi.ReportToProto(reportBytes)
 	require.NoError(t, err)
-	err = os.Chdir(tmpDir)
+	att := &attest.Attestation{
+		TeeAttestation: &attest.Attestation_SevSnpAttestation{
+			SevSnpAttestation: &sevsnp.Attestation{Report: report},
+		},
+	}
+	attestationBytes, err := proto.Marshal(att)
 	require.NoError(t, err)
-	defer func() {
-		_ = os.Chdir(oldWd)
-	}()
+	require.NoError(t, os.WriteFile("attestation.bin", attestationBytes, 0o600))
+	firmware := []byte("firmware checksum fixture")
+	validDigest := sha512.Sum384(firmware)
 
-	t.Run("invalid attestation file", func(t *testing.T) {
-		var outBuf bytes.Buffer
-		cmd.SetOut(&outBuf)
-		cmd.SetErr(&outBuf)
-		cmd.SetArgs([]string{"non-existent"})
-		err := cmd.Execute()
-		assert.NoError(t, err) // printError doesn't return error
-		assert.Contains(t, outBuf.String(), "Error reading attestation report file")
-	})
-
-	t.Run("successful download mock", func(t *testing.T) {
-		// Mock storage client
-		gcp.NewStorageClient = func(ctx context.Context) (gcp.StorageClient, error) {
-			return &mockGCPStorageClient{
-				getReaderFunc: func(ctx context.Context, bucket, object string) (io.ReadCloser, error) {
-					if filepath.Base(object) == "ovmf_x64_csm.fd" || filepath.Ext(object) == ".fd" {
-						data := make([]byte, 100)
-						return io.NopCloser(bytes.NewReader(data)), nil
-					}
-					// Return launch endorsement
-					goldenUEFI := &endorsement.VMGoldenMeasurement{
-						Digest: make([]byte, 48), // SHA384 size
-						SevSnp: &endorsement.VMSevSnp{
-							Policy: 123,
-						},
-					}
-					goldenBytes, _ := proto.Marshal(goldenUEFI)
-					launchEndorsement := &endorsement.VMLaunchEndorsement{
-						SerializedUefiGolden: goldenBytes,
-					}
-					launchBytes, _ := proto.Marshal(launchEndorsement)
-					return io.NopCloser(bytes.NewReader(launchBytes)), nil
-				},
-				closeFunc: func() error { return nil },
-			}, nil
-		}
-
-		// Create a mock binary attestation file.
-		// It needs to be a valid attest.Attestation proto.
-		att := &attest.Attestation{
-			TeeAttestation: &attest.Attestation_SevSnpAttestation{
-				SevSnpAttestation: &sevsnp.Attestation{
-					Report: &sevsnp.Report{
-						// Minimal report
+	for _, test := range []struct {
+		name   string
+		path   string
+		match  bool
+		output string
+	}{
+		{"missing attestation", "missing.bin", false, "Error reading attestation report file"},
+		{"checksum mismatch", "attestation.bin", false, "Error OVMF file does not match"},
+		{"verified download", "attestation.bin", true, "OVMF file downloaded successfully"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			gcp.NewStorageClient = func(context.Context) (gcp.StorageClient, error) {
+				return &mockGCPStorageClient{
+					getReaderFunc: func(_ context.Context, _, object string) (io.ReadCloser, error) {
+						if filepath.Ext(object) == ".fd" {
+							return io.NopCloser(bytes.NewReader(firmware)), nil
+						}
+						digest := make([]byte, sha512.Size384)
+						if test.match {
+							digest = validDigest[:]
+						}
+						goldenBytes, err := proto.Marshal(&endorsement.VMGoldenMeasurement{Digest: digest})
+						if err != nil {
+							return nil, err
+						}
+						launchBytes, err := proto.Marshal(&endorsement.VMLaunchEndorsement{SerializedUefiGolden: goldenBytes})
+						if err != nil {
+							return nil, err
+						}
+						return io.NopCloser(bytes.NewReader(launchBytes)), nil
 					},
-				},
-			},
-		}
-		attBytes, _ := proto.Marshal(att)
-		err := os.WriteFile(attestationPath, attBytes, 0o644)
-		require.NoError(t, err)
-
-		var outBuf bytes.Buffer
-		cmd.SetOut(&outBuf)
-		cmd.SetErr(&outBuf)
-		cmd.SetArgs([]string{attestationPath})
-
-		// This will still fail at gcp.Extract384BitMeasurement because report.Transform(attestation, "bin")
-		// will likely fail on a nearly empty sevsnp.Attestation.
-		// But let's see how it behaves.
-		err = cmd.Execute()
-		assert.NoError(t, err)
-		// assert.Contains(t, outBuf.String(), "OVMF file downloaded successfully")
-	})
+					closeFunc: func() error { return nil },
+				}, nil
+			}
+			cmd := (&CLI{}).NewDownloadGCPOvmfFile()
+			var output bytes.Buffer
+			cmd.SetOut(&output)
+			cmd.SetErr(&output)
+			cmd.SetArgs([]string{test.path})
+			err := cmd.Execute()
+			require.Contains(t, output.String(), test.output)
+			if test.match {
+				require.NoError(t, err)
+				actual, err := os.ReadFile("ovmf.fd")
+				require.NoError(t, err)
+				require.Equal(t, firmware, actual)
+			} else {
+				require.ErrorIs(t, err, ErrCommandFailed)
+				_, err = os.Stat("ovmf.fd")
+				require.ErrorIs(t, err, os.ErrNotExist, "failed verification must not publish a firmware file")
+			}
+		})
+	}
 }

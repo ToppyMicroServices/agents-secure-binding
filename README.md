@@ -277,8 +277,8 @@ prove Human liveness, Human-facing UI confirmation, or legal consent. The
 [Human request binding profile](docs/asb-taskcoord-human-request-binding-v1.md#21-human-assurance-vocabulary)
 defines the full vocabulary and non-guarantees.
 
-The Human TaskCoord HTTP endpoints are `challenge` and
-`execute`; their existing success responses remain `201` and `200`. Every
+The Human TaskCoord HTTP endpoints are `challenge` (`201`), `execute` (`200`),
+and `recover` (`200` with a durable Store and fresh recovery authorization). Every
 response has a server-generated `X-Request-ID`. Public errors keep the string
 `error` field and add `code`, `retryable`, and `request_id`, while internal
 details are redacted. `429` uses `Retry-After: 1`; an unknown execute outcome

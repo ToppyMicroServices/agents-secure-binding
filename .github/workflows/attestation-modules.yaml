@@ -2,6 +2,12 @@ name: Attestation Modules
 
 on:
   workflow_dispatch:
+    inputs:
+      linux_only:
+        description: Run the Linux module checks without starting macOS jobs
+        type: boolean
+        required: false
+        default: false
   push:
     branches: [main]
     paths:
@@ -45,7 +51,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: ${{ fromJSON(contains(github.event.pull_request.labels.*.name, 'ci:linux-only') && '["ubuntu-latest"]' || '["ubuntu-latest","macos-latest"]') }}
+        os: ${{ fromJSON((inputs.linux_only || contains(github.event.pull_request.labels.*.name, 'ci:linux-only')) && '["ubuntu-latest"]' || '["ubuntu-latest","macos-latest"]') }}
         module: [snp, tdx]
     env:
       GOWORK: "off"
@@ -76,7 +82,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: ${{ fromJSON(contains(github.event.pull_request.labels.*.name, 'ci:linux-only') && '["ubuntu-latest"]' || '["ubuntu-latest","macos-latest"]') }}
+        os: ${{ fromJSON((inputs.linux_only || contains(github.event.pull_request.labels.*.name, 'ci:linux-only')) && '["ubuntu-latest"]' || '["ubuntu-latest","macos-latest"]') }}
     env:
       GOWORK: "off"
     steps:
@@ -102,7 +108,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: ${{ fromJSON(contains(github.event.pull_request.labels.*.name, 'ci:linux-only') && '["ubuntu-latest"]' || '["ubuntu-latest","macos-latest"]') }}
+        os: ${{ fromJSON((inputs.linux_only || contains(github.event.pull_request.labels.*.name, 'ci:linux-only')) && '["ubuntu-latest"]' || '["ubuntu-latest","macos-latest"]') }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5

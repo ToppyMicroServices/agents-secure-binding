@@ -29,6 +29,7 @@ var (
 	ErrInvalidAuthority         = errors.New("production: invalid authority policy")
 	ErrInvalidTokenLifetime     = errors.New("production: invalid token lifetime")
 	ErrMissingContext           = errors.New("production: missing context")
+	ErrInvalidCurrentTime       = errors.New("production: current time unavailable")
 )
 
 // TrustSnapshot is one fail-closed view of trusted keys and revocation state.
@@ -161,9 +162,16 @@ func (p Profile) Verify(ctx context.Context, req VerifyRequest) (AcceptedIdentit
 		return AcceptedIdentity{}, ErrMissingAttestation
 	}
 
-	now := time.Now()
-	if p.Now != nil {
-		now = p.Now()
+	clock := p.Now
+	if clock == nil {
+		clock = time.Now
+	}
+	now := clock()
+	if now.IsZero() {
+		return AcceptedIdentity{}, ErrInvalidCurrentTime
+	}
+	if err := ctx.Err(); err != nil {
+		return AcceptedIdentity{}, err
 	}
 
 	verified, err := verifyIdentity(
@@ -195,8 +203,26 @@ func (p Profile) Verify(ctx context.Context, req VerifyRequest) (AcceptedIdentit
 		verified.statement.Binding.RequestContextSHA256,
 		verified.statement.Binding.Nonce,
 	}, "\x00")
+	if err := validateAcceptanceTime(ctx, clock(), verified, p.GrantAuthority.ClockSkew, p.BindingAuthority.ClockSkew); err != nil {
+		return AcceptedIdentity{}, err
+	}
+	if err := p.Attestation.Verify(ctx, req.Attestation, req.ExpectedBinding.AttestationBinderSHA256, clock()); err != nil {
+		return AcceptedIdentity{}, fmt.Errorf("recheck attestation: %w", err)
+	}
 	if err := p.ReplayCache.MarkUsed(replayKey, replayExpiry); err != nil {
 		return AcceptedIdentity{}, fmt.Errorf("commit replay state: %w", err)
+	}
+
+	if err := validateAcceptanceTime(ctx, clock(), verified, p.GrantAuthority.ClockSkew, p.BindingAuthority.ClockSkew); err != nil {
+		return AcceptedIdentity{}, err
+	}
+
+	if err := p.Attestation.Verify(ctx, req.Attestation, req.ExpectedBinding.AttestationBinderSHA256, clock()); err != nil {
+		return AcceptedIdentity{}, fmt.Errorf("recheck attestation: %w", err)
+	}
+
+	if err := validateAcceptanceTime(ctx, clock(), verified, p.GrantAuthority.ClockSkew, p.BindingAuthority.ClockSkew); err != nil {
+		return AcceptedIdentity{}, err
 	}
 
 	return AcceptedIdentity{
@@ -349,4 +375,20 @@ func identityReplayExpiry(verified verifiedIdentity, grantSkew, bindingSkew time
 		verified.grant.ExpiresAt.Add(grantSkew),
 		verified.statement.Binding.ExpiresAt.Add(bindingSkew),
 	)
+}
+
+// validateAcceptanceTime runs on both sides of a potentially slow replay commit.
+// A consumed nonce stays consumed if the commit crosses a deadline; no identity
+// outside its configured freshness window may escape to the application.
+func validateAcceptanceTime(ctx context.Context, now time.Time, verified verifiedIdentity, grantSkew, bindingSkew time.Duration) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if now.IsZero() {
+		return ErrInvalidCurrentTime
+	}
+	if !now.Before(verified.grant.ExpiresAt.Add(grantSkew)) || !now.Before(verified.statement.Binding.ExpiresAt.Add(bindingSkew)) {
+		return identitypolicy.ErrExpiredAssertion
+	}
+	return nil
 }

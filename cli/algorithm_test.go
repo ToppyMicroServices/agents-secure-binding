@@ -168,7 +168,11 @@ func TestAlgorithmCmd(t *testing.T) {
 			cmd.SetOut(buf)
 			cmd.SetArgs(tt.args)
 			err := cmd.Execute()
-			require.NoError(t, err)
+			if tt.name == "successful upload" {
+				require.NoError(t, err)
+			} else {
+				require.ErrorIs(t, err, ErrCommandFailed)
+			}
 
 			require.Contains(t, buf.String(), tt.expectedOutput)
 

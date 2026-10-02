@@ -25,27 +25,26 @@ func (cli *CLI) NewFileHashCmd() *cobra.Command {
 		Short:   "Compute the sha3-256 hash of a file",
 		Example: "checksum <file>",
 		Args:    cobra.ExactArgs(1),
-		Run: func(cmd *cobra.Command, args []string) {
+		RunE: func(cmd *cobra.Command, args []string) error {
 			path := args[0]
 
 			if ismanifest {
 				hash, err := manifestChecksum(path)
 				if err != nil {
-					printError(cmd, "Error computing hash: %v ❌ ", err)
-					return
+					return printError(cmd, "Error computing hash: %v ❌ ", err)
 				}
 
 				cmd.Println("Hash of manifest file:", hashOut(hash))
-				return
+				return nil
 			}
 
 			hash, err := internal.ChecksumHex(path)
 			if err != nil {
-				printError(cmd, "Error computing hash: %v ❌ ", err)
-				return
+				return printError(cmd, "Error computing hash: %v ❌ ", err)
 			}
 
 			cmd.Println("Hash of file:", hashOut(hash))
+			return nil
 		},
 	}
 

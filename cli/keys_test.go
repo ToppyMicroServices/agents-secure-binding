@@ -39,7 +39,9 @@ func TestGenerateAndWriteKeys(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			KeyType = tt.keyType
 			cmd := (&CLI{}).NewKeysCmd()
-			cmd.Run(cmd, []string{})
+			if err := cmd.RunE(cmd, []string{}); err != nil {
+				t.Fatal(err)
+			}
 
 			if _, err := os.Stat(privateKeyFile); os.IsNotExist(err) {
 				t.Errorf("Private key file was not created")
@@ -60,6 +62,9 @@ func TestGenerateAndWriteKeys(t *testing.T) {
 			var privKey any
 			switch tt.keyType {
 			case "rsa":
+				if privPem.Type != "RSA PRIVATE KEY" {
+					t.Fatalf("RSA private key has incorrect PEM label %q", privPem.Type)
+				}
 				privKey, err = x509.ParsePKCS1PrivateKey(privPem.Bytes)
 			case "ecdsa":
 				privKey, err = x509.ParseECPrivateKey(privPem.Bytes)

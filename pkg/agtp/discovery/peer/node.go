@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/agtp/discovery"
+	"golang.org/x/net/netutil"
 )
 
 const (
@@ -31,6 +32,7 @@ const (
 	DefaultAuditMaxBytes     = 10 << 20
 	DefaultRequestsPerSecond = 20
 	DefaultRequestBurst      = 40
+	maxPeerConnections       = 64
 )
 
 // Config fixes the bounded discovery profile. NetworkPolicy opts in to
@@ -170,6 +172,9 @@ func (n *Node) Start() error {
 		n.started.Store(false)
 		return err
 	}
+	// Bound accepted sockets before TLS allocates per-connection state. Excess
+	// connections wait in the kernel backlog until a slot becomes available.
+	listener = netutil.LimitListener(listener, maxPeerConnections)
 	if err := n.recordAudit(AuditEvent{NodeID: n.Info().ID, Action: "start", Result: "ok"}); err != nil {
 		_ = listener.Close()
 		n.started.Store(false)
