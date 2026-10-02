@@ -41,24 +41,21 @@ func (cli *CLI) NewDownloadGCPOvmfFile() *cobra.Command {
 		Short:   "Download GCP OVMF file",
 		Example: `download <bin_vtmp_attestation_report_file>`,
 		Args:    cobra.ExactArgs(1),
-		Run: func(cmd *cobra.Command, args []string) {
+		RunE: func(cmd *cobra.Command, args []string) error {
 			attestationBin, err := os.ReadFile(args[0])
 			if err != nil {
-				printError(cmd, "Error reading attestation report file: %v ❌ ", err)
-				return
+				return printError(cmd, "Error reading attestation report file: %v ❌ ", err)
 			}
 
 			attestation := &attest.Attestation{}
 
 			if isJsonAttestation {
 				if err := protojson.Unmarshal(attestationBin, attestation); err != nil {
-					printError(cmd, "Error converting JSON attestation to binary: %v ❌", err)
-					return
+					return printError(cmd, "Error converting JSON attestation to binary: %v ❌", err)
 				}
 			} else {
 				if err := proto.Unmarshal(attestationBin, attestation); err != nil {
-					printError(cmd, "Error unmarshaling attestation report: %v ❌ ", err)
-					return
+					return printError(cmd, "Error unmarshaling attestation report: %v ❌ ", err)
 				}
 			}
 
@@ -66,36 +63,33 @@ func (cli *CLI) NewDownloadGCPOvmfFile() *cobra.Command {
 
 			measurement, err := gcp.Extract384BitMeasurement(attestationPB)
 			if err != nil {
-				printError(cmd, "Error extracting 384-bit measurement: %v ❌ ", err)
-				return
+				return printError(cmd, "Error extracting 384-bit measurement: %v ❌ ", err)
 			}
 
 			launchEndorsement, err := gcp.GetLaunchEndorsement(cmd.Context(), measurement)
 			if err != nil {
-				printError(cmd, "Error getting launch endorsement: %v ❌ ", err)
-				return
+				return printError(cmd, "Error getting launch endorsement: %v ❌ ", err)
 			}
 
 			ovmf, err := gcp.DownloadOvmfFile(cmd.Context(), fmt.Sprintf("%x", launchEndorsement.Digest))
 			if err != nil {
-				printError(cmd, "Error downloading OVMF file: %v ❌ ", err)
-				return
+				return printError(cmd, "Error downloading OVMF file: %v ❌ ", err)
 			}
 
 			sum384 := sha512.Sum384(ovmf)
 
 			if !bytes.Equal(sum384[:], launchEndorsement.Digest) {
-				printError(cmd, "Error OVMF file does not match the measurement: %v ❌ ", fmt.Errorf("digest mismatch"))
+				return printError(cmd, "Error OVMF file does not match the measurement: %v ❌ ", fmt.Errorf("digest mismatch"))
 			} else {
 				cmd.Println("OVMF firmware in vm is unmodified ✅")
 			}
 
 			if err := os.WriteFile("ovmf.fd", ovmf, filePermission); err != nil {
-				printError(cmd, "Error writing OVMF file: %v ❌ ", err)
-				return
+				return printError(cmd, "Error writing OVMF file: %v ❌ ", err)
 			}
 
 			cmd.Println("OVMF file downloaded successfully ✅")
+			return nil
 		},
 	}
 

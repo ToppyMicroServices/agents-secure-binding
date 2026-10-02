@@ -56,7 +56,7 @@
     {
       "id": "human-taskcoord",
       "classification": "external-asb",
-      "operations": ["ASSIGNMENT_OFFER", "ASSIGNMENT_TRANSITION", "ASSIGNMENT_DELEGATION", "INTERACTION_APPEND"],
+      "operations": ["ASSIGNMENT_OFFER", "ASSIGNMENT_TRANSITION", "ASSIGNMENT_DELEGATION", "INTERACTION_APPEND", "OPERATION_RECOVER"],
       "profile_id": "asb.taskcoord-human-request/v1",
       "assurance_level": "gateway-asserted-for-human",
       "transcript_domain": "ASB-TASKCOORD-HUMAN-REQUEST-v1",
@@ -66,7 +66,7 @@
       "freshness": "intersection of grant, session binding, and trusted acceptance windows",
       "replay": "one-shot ASB session binding committed after request and policy validation",
       "error_surface": "bounded Human ingress errors or typed programmatic errors",
-      "store_order": "verify proof and policy before mutation; consume replay before Store commit; reconcile unknown commit outcomes",
+      "store_order": "verify proof and policy before mutation; HumanTransactionStore commits replay, mutation, outbox and first outcome atomically; fresh authorized recovery reads the retained outcome; other Stores consume replay before commit and require outcome reconciliation",
       "network_exposure": "human-ingress-and-programmatic-profile",
       "debug_evidence": "signed-simulated-asb",
       "tests": [
@@ -359,14 +359,17 @@
             "en": "A durable Store MUST atomically enforce revision compare-and-swap, exact event deduplication, immutable state, and required outbox writes; the in-memory Store is reference behavior only.",
             "ja": "durable Storeはrevision compare-and-swap、exact event deduplication、immutable state、必要なoutbox writeをatomicに強制しなければならない。in-memory Storeはreference behaviorにすぎない。"
           },
-          "status": "reference-only",
+          "status": "implemented",
           "capability": "taskcoord-store",
           "optional_capability": false,
           "tests": [
             {"format": "go-test", "package": "./pkg/taskcoord", "name": "TestMemoryStoreRejectsStaleRevision"},
-            {"format": "go-test", "package": "./pkg/taskcoord", "name": "TestMemoryStoreRejectsConflictingIdempotencyPayload"}
+            {"format": "go-test", "package": "./pkg/taskcoord", "name": "TestMemoryStoreRejectsConflictingIdempotencyPayload"},
+            {"format": "go-test", "package": "./pkg/taskcoord/sqlitestore", "name": "TestProcessCrashAtomicHumanOutcome"},
+            {"format": "go-test", "package": "./pkg/taskcoord/sqlitestore", "name": "TestWriteFailureRollsBackAllRecords"},
+            {"format": "go-test", "package": "./pkg/taskcoord/sqlitestore", "name": "TestOutboxLeaseFencingBackupAndRollback"}
           ],
-          "evidence": ["pkg/taskcoord/store.go", "pkg/taskcoord/memory_store.go", "pkg/taskcoord/outbox.go"]
+          "evidence": ["pkg/taskcoord/store.go", "pkg/taskcoord/memory_store.go", "pkg/taskcoord/outbox.go", "pkg/taskcoord/sqlitestore/store.go", "pkg/taskcoord/sqlitestore/outbox.go", "docs/taskcoord-sqlite-store.md"]
         },
         {
           "id": "ASB-HC-CORE-010",
@@ -516,17 +519,19 @@
         {
           "id": "ASB-HC-TA-008",
           "normative": {
-            "en": "A production Task-Action Store MUST provide the documented multi-record atomic commits, strict durable schemas, event re-application, and restart durability; the repository Store is reference-only.",
-            "ja": "production Task-Action Storeは規定されたmulti-record atomic commit、strict durable schema、event再適用、restart durabilityを提供しなければならない。repositoryのStoreはreference-onlyである。"
+            "en": "A production Task-Action Store MUST provide the documented multi-record atomic commits, strict durable schemas, event re-application, and restart durability; the in-memory Store is reference-only, while the SQLite adapter implements the contract for one host.",
+            "ja": "production Task-Action Storeは規定されたmulti-record atomic commit、strict durable schema、event再適用、restart durabilityを提供しなければならない。in-memory Storeはreference-onlyであり、SQLite adapterは単一host向けにこのcontractを実装する。"
           },
-          "status": "reference-only",
+          "status": "implemented",
           "capability": "task-action-store",
           "optional_capability": true,
           "tests": [
             {"format": "go-test", "package": "./pkg/taskcoord/actionbinding", "name": "TestMemoryStoreRejectsDependencyTOCTOUWithoutPartialCommit"},
-            {"format": "go-test", "package": "./schemas", "name": "TestActionLifecycleValidatorsAcceptDurableDocuments"}
+            {"format": "go-test", "package": "./schemas", "name": "TestActionLifecycleValidatorsAcceptDurableDocuments"},
+            {"format": "go-test", "package": "./pkg/taskcoord/sqlitestore", "name": "TestDependencyWaitResumeAndCompletionSurviveRestart"},
+            {"format": "go-test", "package": "./pkg/taskcoord/sqlitestore", "name": "TestWriteFailureRollsBackAllRecords"}
           ],
-          "evidence": ["pkg/taskcoord/actionbinding/store.go", "pkg/taskcoord/actionbinding/memory_store.go", "schemas/task-action-binding-v1.schema.json"]
+          "evidence": ["pkg/taskcoord/actionbinding/store.go", "pkg/taskcoord/actionbinding/memory_store.go", "pkg/taskcoord/sqlitestore/store.go", "pkg/taskcoord/sqlitestore/action.go", "schemas/task-action-binding-v1.schema.json", "docs/taskcoord-sqlite-store.md"]
         },
         {
           "id": "ASB-HC-TA-009",
@@ -534,16 +539,18 @@
             "en": "A Task-Action Store MUST keep the acceptance business identity, exact proof-attempt identity, and first canonical result distinct; an exact attempt retry MUST return that result after proof expiry, an expired proof MUST NOT create state, and a different proof MUST require reconciliation without rewriting provenance.",
             "ja": "Task-Action Storeはacceptanceのbusiness identity、exactなproof-attempt identity、最初のcanonical resultを分離して保持しなければならない。exact attemptのretryはproof期限後もその結果を返し、expired proofでstateを新規作成してはならず、異なるproofはprovenanceを書き換えずreconciliationを要求しなければならない。"
           },
-          "status": "reference-only",
+          "status": "implemented",
           "capability": "task-action-acceptance-idempotency",
           "optional_capability": true,
           "tests": [
             {"format": "go-test", "package": "./pkg/taskcoord/actionbinding", "name": "TestServiceAcceptExactAttemptRetryReturnsCanonicalViewAfterExpiry"},
             {"format": "go-test", "package": "./pkg/taskcoord/actionbinding", "name": "TestServiceAcceptExpiredAttemptCannotCreateState"},
             {"format": "go-test", "package": "./pkg/taskcoord/actionbinding", "name": "TestServiceAcceptDifferentProofRequiresReconciliation"},
-            {"format": "go-test", "package": "./pkg/taskcoord/actionbinding", "name": "TestMemoryStoreConcurrentExactAcceptanceRetriesShareCanonicalView"}
+            {"format": "go-test", "package": "./pkg/taskcoord/actionbinding", "name": "TestMemoryStoreConcurrentExactAcceptanceRetriesShareCanonicalView"},
+            {"format": "go-test", "package": "./pkg/taskcoord/sqlitestore", "name": "TestRestartPreservesAcceptanceAndRevocation"},
+            {"format": "go-test", "package": "./pkg/taskcoord/sqlitestore", "name": "TestConcurrentAcceptanceReturnsFirstResult"}
           ],
-          "evidence": ["pkg/taskcoord/actionbinding/acceptance.go", "pkg/taskcoord/actionbinding/store.go", "pkg/taskcoord/actionbinding/memory_store.go", "testdata/action-transcript-v1-vectors.json"]
+          "evidence": ["pkg/taskcoord/actionbinding/acceptance.go", "pkg/taskcoord/actionbinding/store.go", "pkg/taskcoord/actionbinding/memory_store.go", "pkg/taskcoord/sqlitestore/action.go", "docs/taskcoord-sqlite-store.md", "testdata/action-transcript-v1-vectors.json"]
         }
       ]
     },
@@ -681,17 +688,18 @@
         {
           "id": "ASB-HC-HTTP-001",
           "normative": {
-            "en": "The Human Coordination HTTP profile MUST expose POST /v1/human-operations/challenge with 201 success and POST /v1/human-operations/execute with 200 success; other routes and methods MUST return structured errors.",
-            "ja": "Human Coordination HTTP profileはPOST /v1/human-operations/challengeを201 success、POST /v1/human-operations/executeを200 successとして提供し、それ以外のrouteとmethodにはstructured errorを返さなければならない。"
+            "en": "The Human Coordination HTTP profile MUST expose POST /v1/human-operations/challenge with 201 success and POST /v1/human-operations/execute with 200 success; POST /v1/human-operations/recover MUST return the retained response with 200 success when a HumanTransactionStore and fresh recovery authorization are supplied. Other routes and methods MUST return structured errors.",
+            "ja": "Human Coordination HTTP profileはPOST /v1/human-operations/challengeを201 success、POST /v1/human-operations/executeを200 successとして提供しなければならない。POST /v1/human-operations/recoverはHumanTransactionStoreとfreshなrecovery認可がある場合に保存済みresponseを200 successで返し、それ以外のrouteとmethodにはstructured errorを返さなければならない。"
           },
           "status": "implemented",
           "capability": "human-ingress-http",
           "optional_capability": true,
           "tests": [
             {"format": "go-test", "package": "./pkg/taskcoord/asbbinding", "name": "TestIngressSuccessResponseContract"},
-            {"format": "go-test", "package": "./pkg/taskcoord/asbbinding", "name": "TestIngressRouteMethodAndMediaTypeContract"}
+            {"format": "go-test", "package": "./pkg/taskcoord/asbbinding", "name": "TestIngressRouteMethodAndMediaTypeContract"},
+            {"format": "go-test", "package": "./pkg/taskcoord/asbbinding", "name": "TestSQLiteHumanIngressLostResponsesRecoverAllOperationKinds"}
           ],
-          "evidence": ["pkg/taskcoord/asbbinding/ingress.go", "pkg/taskcoord/asbbinding/ingress_http.go"]
+          "evidence": ["pkg/taskcoord/asbbinding/ingress.go", "pkg/taskcoord/asbbinding/ingress_http.go", "pkg/taskcoord/asbbinding/durable.go", "pkg/taskcoord/sqlitestore/human.go"]
         },
         {
           "id": "ASB-HC-HTTP-002",
@@ -926,14 +934,14 @@
         {
           "id": "ASB-HC-PROD-008",
           "normative": {
-            "en": "A deployment selecting Task-Action, relay delivery, or cross-proof Human-ingress reconciliation MUST supply the corresponding production Store, restart-durable dispatch and provider recovery, or durable outcome journal; these adapters are not implemented in this repository.",
-            "ja": "Task-Action、relay delivery、cross-proof Human-ingress reconciliationを選択するdeploymentは、それぞれproduction Store、restart-durable dispatchとprovider recovery、durable outcome journalを提供しなければならない。これらのadapterはrepositoryに未実装である。"
+            "en": "A deployment selecting Task-Action, relay delivery, or cross-proof Human-ingress reconciliation MUST supply the corresponding production Store, restart-durable dispatch and provider recovery, or durable outcome journal. Single-host SQLite Task-Action and Human outcome adapters exist; production relay and provider-recovery adapters remain unimplemented, and every selected adapter still requires deployment qualification.",
+            "ja": "Task-Action、relay delivery、cross-proof Human-ingress reconciliationを選択するdeploymentは、それぞれproduction Store、restart-durable dispatchとprovider recovery、durable outcome journalを提供しなければならない。単一host向けSQLite Task-ActionとHuman outcome adapterは実装済みだが、production relayとprovider recovery adapterは未実装であり、選択した各adapterには引き続きdeployment qualificationが必要である。"
           },
           "status": "unimplemented",
           "capability": "missing-production-adapters",
           "optional_capability": true,
           "tests": [],
-          "evidence": ["docs/task-action-lifecycle-v1.md", "docs/agent-to-human-relay-v1.md", "docs/asb-taskcoord-human-ingress-demo.md"]
+          "evidence": ["docs/task-action-lifecycle-v1.md", "docs/agent-to-human-relay-v1.md", "docs/asb-taskcoord-human-ingress-demo.md", "docs/taskcoord-sqlite-store.md"]
         }
       ]
     }

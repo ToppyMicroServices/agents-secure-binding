@@ -3,6 +3,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
@@ -33,9 +34,15 @@ type config struct {
 }
 
 func main() {
+	os.Exit(run())
+}
+
+func run() int {
 	rootCmd := &cobra.Command{
-		Use:   "agents-secure-binding-cli [command]",
-		Short: "CLI application for the Agents Secure Binding runtime API",
+		Use:           "agents-secure-binding-cli [command]",
+		SilenceErrors: true,
+		SilenceUsage:  true,
+		Short:         "CLI application for the Agents Secure Binding runtime API",
 		Run: func(cmd *cobra.Command, args []string) {
 			fmt.Printf("CLI application for the Agents Secure Binding runtime API\n\n")
 			fmt.Printf("Usage:\n  %s [command]\n\n", cmd.CommandPath())
@@ -62,27 +69,31 @@ func main() {
 	}
 
 	signalChan := make(chan os.Signal, 1)
+	done := make(chan struct{})
 	signal.Notify(signalChan, syscall.SIGINT, syscall.SIGTERM)
-
+	defer signal.Stop(signalChan)
+	defer close(done)
 	go func() {
-		<-signalChan
-		fmt.Println()
-		rootCmd.Println(color.New(color.FgRed).Sprint("Operation aborted by user!"))
-		os.Exit(2)
+		select {
+		case <-signalChan:
+			rootCmd.Println(color.New(color.FgRed).Sprint("Operation aborted by user!"))
+			os.Exit(2)
+		case <-done:
+		}
 	}()
 
 	var cfg config
 	if err := env.Parse(&cfg); err != nil {
 		message := color.New(color.FgRed).Sprintf("failed to load %s configuration : %s", svcName, err)
 		rootCmd.Println(message)
-		return
+		return 1
 	}
 
 	homePath, err := os.UserHomeDir()
 	if err != nil {
 		message := color.New(color.FgRed).Sprintf("failed to fetch user home directory: %s", err)
 		rootCmd.Println(message)
-		return
+		return 1
 	}
 
 	directoryCachePath := path.Join(homePath, cacheDirectory)
@@ -90,21 +101,21 @@ func main() {
 	if err := os.MkdirAll(directoryCachePath, filePermision); err != nil {
 		message := color.New(color.FgRed).Sprintf("failed to create directory %s : %s", directoryCachePath, err)
 		rootCmd.Println(message)
-		return
+		return 1
 	}
 
 	agentGRPCConfig := clients.AttestedClientConfig{}
 	if err := env.ParseWithOptions(&agentGRPCConfig, env.Options{Prefix: envPrefixAgentGRPC}); err != nil {
 		message := color.New(color.FgRed).Sprintf("failed to load %s gRPC client configuration : %s", svcName, err)
 		rootCmd.Println(message)
-		return
+		return 1
 	}
 
 	managerGRPCConfig := clients.StandardClientConfig{}
 	if err := env.ParseWithOptions(&managerGRPCConfig, env.Options{Prefix: envPrefixManagerGRPC}); err != nil {
 		message := color.New(color.FgRed).Sprintf("failed to load %s gRPC client configuration : %s", svcName, err)
 		rootCmd.Println(message)
-		return
+		return 1
 	}
 
 	options := cmdconfig.IgvmMeasureOptions
@@ -112,14 +123,12 @@ func main() {
 	if err != nil {
 		message := color.New(color.FgRed).Sprintf("failed to initialize measurement: %s", err) // Use %s instead of %w
 		rootCmd.Println(message)
-		return
+		return 1
 	}
 
 	cliSVC := cli.New(agentGRPCConfig, managerGRPCConfig, measurement)
 
-	if err := cliSVC.InitializeAgentSDK(rootCmd); err == nil {
-		defer cliSVC.Close()
-	}
+	defer cliSVC.Close()
 
 	rootCmd.PersistentFlags().BoolVarP(&cli.Verbose, "verbose", "v", false, "Enable verbose output")
 
@@ -166,9 +175,12 @@ func main() {
 	// attestationPolicyCmd.AddCommand(cliSVC.NewExtendWithManifestCmd())
 
 	if err := rootCmd.Execute(); err != nil {
-		logErrorCmd(*rootCmd, err)
-		return
+		if !errors.Is(err, cli.ErrCommandFailed) {
+			logErrorCmd(*rootCmd, err)
+		}
+		return 1
 	}
+	return 0
 }
 
 func logErrorCmd(cmd cobra.Command, err error) {

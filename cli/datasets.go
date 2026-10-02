@@ -25,10 +25,9 @@ func (cli *CLI) NewDatasetsCmd() *cobra.Command {
 		Short:   "Upload a dataset",
 		Example: "data <dataset_path> <private_key_file_path>",
 		Args:    cobra.ExactArgs(2),
-		Run: func(cmd *cobra.Command, args []string) {
-			if cli.connectErr != nil {
-				printError(cmd, "Failed to connect to agent: %v ❌ ", cli.connectErr)
-				return
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := cli.ensureAgentSDK(cmd); err != nil {
+				return printError(cmd, "Failed to connect to agent: %v ❌ ", err)
 			}
 
 			datasetPath := args[0]
@@ -37,8 +36,7 @@ func (cli *CLI) NewDatasetsCmd() *cobra.Command {
 
 			f, err := os.Stat(datasetPath)
 			if err != nil {
-				printError(cmd, "Error reading dataset file: %v ❌ ", err)
-				return
+				return printError(cmd, "Error reading dataset file: %v ❌ ", err)
 			}
 
 			var dataset *os.File
@@ -47,41 +45,37 @@ func (cli *CLI) NewDatasetsCmd() *cobra.Command {
 				cmd.Println("Detected directory, zipping dataset...")
 				dataset, err = internal.ZipDirectoryToTempFile(datasetPath)
 				if err != nil {
-					printError(cmd, "Error zipping dataset directory: %v ❌ ", err)
-					return
+					return printError(cmd, "Error zipping dataset directory: %v ❌ ", err)
 				}
 				defer dataset.Close()
 				defer os.Remove(dataset.Name())
 			} else {
 				dataset, err = os.Open(datasetPath)
 				if err != nil {
-					printError(cmd, "Error reading dataset file: %v ❌ ", err)
-					return
+					return printError(cmd, "Error reading dataset file: %v ❌ ", err)
 				}
 				defer dataset.Close()
 			}
 
 			privKeyFile, err := os.ReadFile(args[1])
 			if err != nil {
-				printError(cmd, "Error reading private key file: %v ❌ ", err)
-				return
+				return printError(cmd, "Error reading private key file: %v ❌ ", err)
 			}
 
 			pemBlock, _ := pem.Decode(privKeyFile)
 
 			privKey, err := decodeKey(pemBlock)
 			if err != nil {
-				printError(cmd, "Error decoding private key: %v ❌ ", err)
-				return
+				return printError(cmd, "Error decoding private key: %v ❌ ", err)
 			}
 
 			ctx := metadata.NewOutgoingContext(cmd.Context(), metadata.New(make(map[string]string)))
 			if err := cli.agentSDK.Data(addDatasetMetadata(ctx), dataset, path.Base(datasetPath), privKey); err != nil {
-				printError(cmd, "Failed to upload dataset due to error: %v ❌ ", err)
-				return
+				return printError(cmd, "Failed to upload dataset due to error: %v ❌ ", err)
 			}
 
 			cmd.Println(color.New(color.FgGreen).Sprint("Successfully uploaded dataset! ✔ "))
+			return nil
 		},
 	}
 

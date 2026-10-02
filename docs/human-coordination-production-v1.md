@@ -43,17 +43,23 @@ and test that capability separately.
 
 ## Open stable-release decisions
 
+The bounded single-host adapter already uses the request's `EventID` as its
+Human `OperationID`. `RunHumanTransaction` commits replay, the TaskCoord
+mutation, outbox entry, and first response together. A fresh, separately
+authorized `/recover` request retrieves that original response. This contract
+is implemented in `pkg/taskcoord/asbbinding` and `pkg/taskcoord/sqlitestore`;
+it does not require a second reservation in `pkg/operationjournal`.
+
 Before any Human Coordination wire or Go surface receives a compatibility
 promise, the following contracts remain to be decided:
 
-1. how Human ingress derives the `OperationID` used by `pkg/operationjournal`
-   from `event_id` or a separate identifier, and atomically stores its
-   reservation, status-readable result, and TaskCoord mutation;
-2. which production component owns the authoritative transaction spanning the
-   selected TaskCoord, operation-journal, outbox, Task–Action, and relay records;
-3. if a relay HTTP ingress is added, its public error, retry, and reconciliation
+1. which component owns the transaction and reconciliation boundaries when a
+   deployment extends beyond the existing single-host TaskCoord, Task–Action,
+   outbox, and Human outcome transaction to multiple hosts or external relay
+   effects;
+2. if a relay HTTP ingress is added, its public error, retry, and reconciliation
    contract; and
-4. the exact Go packages and interfaces, profile IDs, JSON Schemas, and HTTP
+3. the exact Go packages and interfaces, profile IDs, JSON Schemas, and HTTP
    envelopes that receive semantic-versioning and migration guarantees.
 
 These decisions do not change the current Developer Preview behavior. Until

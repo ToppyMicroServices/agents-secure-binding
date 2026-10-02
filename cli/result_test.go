@@ -74,7 +74,7 @@ func TestResultsCmd_InvalidPrivateKey(t *testing.T) {
 	cmd.SetOut(buf)
 	cmd.SetArgs([]string{invalidPrivateKey.Name()})
 	err = cmd.Execute()
-	require.NoError(t, err)
+	require.ErrorIs(t, err, ErrCommandFailed)
 
 	require.Contains(t, buf.String(), "Error decoding private key")
 	mockSDK.AssertNotCalled(t, "Result", mock.Anything, mock.Anything, mock.Anything)
@@ -165,7 +165,11 @@ func TestResultsCmd(t *testing.T) {
 			cmd.SetOut(buf)
 			cmd.SetArgs([]string{file})
 			err = cmd.Execute()
-			require.NoError(t, err)
+			if tt.name == "successful result retrieval" {
+				require.NoError(t, err)
+			} else {
+				require.ErrorIs(t, err, ErrCommandFailed)
+			}
 
 			require.Contains(t, buf.String(), tt.expectedOutput)
 

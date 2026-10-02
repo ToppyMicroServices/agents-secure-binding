@@ -12,6 +12,10 @@ import (
 	"google.golang.org/grpc/status"
 )
 
+// ErrCommandFailed reports an already displayed command failure without duplicating
+// potentially sensitive backend details in the returned error.
+var ErrCommandFailed = errors.New("command failed")
+
 var (
 	errAgentUnavailable                   = errors.New("agent is unavailable on the current address")
 	errDigitalSignatureVerificationFailed = errors.New("digital signature verification failed, check the provided public key")
@@ -40,10 +44,11 @@ func decodeErros(err error) error {
 	}
 }
 
-func printError(cmd *cobra.Command, message string, err error) {
+func printError(cmd *cobra.Command, message string, err error) error {
 	if !Verbose {
 		err = decodeErros(err)
 	}
 	msg := color.New(color.FgRed).Sprintf(message, err)
 	cmd.Println(msg)
+	return ErrCommandFailed
 }
