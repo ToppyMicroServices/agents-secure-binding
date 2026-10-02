@@ -6,13 +6,52 @@ package peer
 import (
 	"context"
 	"crypto/tls"
+	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/agtp/discovery"
 )
+
+func TestClientRejectsOversizedResponseHeadersBeforeTimeout(t *testing.T) {
+	cluster := newTestCluster(t, time.Hour)
+	defer cluster.stop()
+	var requests atomic.Int32
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		requests.Add(1)
+		writer.Header().Set("X-Oversized", strings.Repeat("x", (1<<20)+int(maxResponseOverheadBytes)+1))
+		_, _ = writer.Write([]byte(`{"nonce":"unused"}`))
+	}))
+	server.TLS = &tls.Config{
+		Certificates: []tls.Certificate{cluster.materials[1].tlsCert},
+		ClientCAs:    cluster.roots, ClientAuth: tls.RequireAndVerifyClientCert,
+		MinVersion: tls.VersionTLS13,
+	}
+	server.StartTLS()
+	t.Cleanup(server.Close)
+	client := *cluster.nodes[0].config.Client
+	client.Timeout = 10 * time.Second
+	remote := cluster.nodes[1].Info()
+	remote.Endpoint = server.Listener.Addr().String()
+	result := callStalledPeer(t.Context(), &client, remote, cluster.nodes[0].Info())
+	select {
+	case err := <-result:
+		var networkError net.Error
+		if err == nil || errors.As(err, &networkError) && networkError.Timeout() {
+			t.Fatalf("oversized response was not rejected by its byte budget: %v", err)
+		}
+		if requests.Load() != 1 {
+			t.Fatal("client accepted an oversized nonce response and sent an action")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("client waited for timeout while parsing oversized headers")
+	}
+}
 
 func TestClientTimeoutBoundsNonceReadWithLongerParentDeadline(t *testing.T) {
 	cluster := newTestCluster(t, time.Hour)

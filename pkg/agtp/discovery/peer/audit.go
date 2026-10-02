@@ -30,6 +30,7 @@ type AuditLog struct {
 	path     string
 	maxBytes int64
 	size     int64
+	closed   bool
 }
 
 // NewAuditLog opens a mode-0600 append-only audit file.
@@ -43,16 +44,26 @@ func NewAuditLog(path string, maxBytes int64) (*AuditLog, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, err
 	}
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
-	if err != nil {
+	log := &AuditLog{path: path, maxBytes: maxBytes}
+	if err := log.openLocked(); err != nil {
 		return nil, err
+	}
+	return log, nil
+}
+
+func (l *AuditLog) openLocked() error {
+	file, err := os.OpenFile(l.path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		return err
 	}
 	info, err := file.Stat()
 	if err != nil {
 		_ = file.Close()
-		return nil, err
+		return err
 	}
-	return &AuditLog{file: file, path: path, maxBytes: maxBytes, size: info.Size()}, nil
+	l.file = file
+	l.size = info.Size()
+	return nil
 }
 
 // Write appends and syncs one event.
@@ -62,8 +73,13 @@ func (l *AuditLog) Write(event AuditEvent) error {
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if l.file == nil {
+	if l.closed {
 		return errors.New("agtp discovery peer: audit log closed")
+	}
+	if l.file == nil {
+		if err := l.openLocked(); err != nil {
+			return err
+		}
 	}
 	event.Time = time.Now().UTC()
 	encoded, err := json.Marshal(event)
@@ -71,15 +87,19 @@ func (l *AuditLog) Write(event AuditEvent) error {
 		return err
 	}
 	encoded = append(encoded, '\n')
+	if int64(len(encoded)) > l.maxBytes {
+		return errors.New("agtp discovery peer: audit event exceeds size limit")
+	}
 	if l.size+int64(len(encoded)) > l.maxBytes {
 		if err := l.rotateLocked(); err != nil {
 			return err
 		}
 	}
-	if _, err := l.file.Write(encoded); err != nil {
+	written, err := l.file.Write(encoded)
+	l.size += int64(written)
+	if err != nil {
 		return err
 	}
-	l.size += int64(len(encoded))
 	return l.file.Sync()
 }
 
@@ -87,23 +107,21 @@ func (l *AuditLog) rotateLocked() error {
 	if err := l.file.Sync(); err != nil {
 		return err
 	}
-	if err := l.file.Close(); err != nil {
-		return err
-	}
 	rotated := l.path + ".1"
 	if err := os.Remove(rotated); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	if err := os.Rename(l.path, rotated); err != nil {
-		return err
-	}
-	file, err := os.OpenFile(l.path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	// Close before rename for platforms that cannot move an open file. A
+	// failed rename reopens the active file; a failed open is retried by Write.
+	err := l.file.Close()
+	l.file = nil
 	if err != nil {
 		return err
 	}
-	l.file = file
-	l.size = 0
-	return nil
+	if err := os.Rename(l.path, rotated); err != nil {
+		return errors.Join(err, l.openLocked())
+	}
+	return l.openLocked()
 }
 
 // Close flushes the audit file.
@@ -113,13 +131,12 @@ func (l *AuditLog) Close() error {
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	l.closed = true
 	if l.file == nil {
 		return nil
 	}
-	if err := l.file.Sync(); err != nil {
-		return err
-	}
-	err := l.file.Close()
+	// A failed flush must still release the descriptor during node shutdown.
+	err := errors.Join(l.file.Sync(), l.file.Close())
 	l.file = nil
 	return err
 }

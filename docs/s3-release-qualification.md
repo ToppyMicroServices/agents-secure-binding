@@ -91,8 +91,10 @@ establish unbounded retention or absence of long-term leaks.
 ## Promotion decision
 
 The reference integration gates now pass for the candidate identified above.
+The [S3 distribution candidate](s3-distribution.md) packages these exact tested
+bytes separately from the ASB module, with a manifest and verification procedure.
 The S3 reader remains a current-branch preview: no versioned S3 distribution or
-organization deployment acceptance is recorded here. These release and rollout
+organization deployment acceptance has been published here. These release and rollout
 steps are separate from the passing reference tests. A finite lab cannot prove
 the absence of every future leak. Use measured workload duration, history size,
 memory, descriptors, disk growth and recovery results as bounded evidence, and

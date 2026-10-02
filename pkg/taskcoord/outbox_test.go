@@ -4,6 +4,7 @@
 package taskcoord
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -36,6 +37,16 @@ func TestOutboxEventBindsCanonicalAssignmentTransition(t *testing.T) {
 	}
 	if err := event.Validate(); err != nil {
 		t.Fatalf("Validate() error = %v", err)
+	}
+	ambiguous := event
+	ambiguous.Payload = bytes.Replace(payload, []byte(`"Assignment":{`), []byte(`"Assignment":{"schema":"unexpected",`), 1)
+	if bytes.Equal(ambiguous.Payload, payload) {
+		t.Fatal("fixture did not inject a duplicate assignment schema")
+	}
+	ambiguousSum := sha256.Sum256(ambiguous.Payload)
+	ambiguous.PayloadDigest = hex.EncodeToString(ambiguousSum[:])
+	if err := ambiguous.Validate(); !errors.Is(err, ErrInvalidEvent) {
+		t.Fatalf("duplicate-member payload with matching digest: %v, want ErrInvalidEvent", err)
 	}
 	tampered := event
 	tampered.Payload = append(json.RawMessage(nil), payload...)
