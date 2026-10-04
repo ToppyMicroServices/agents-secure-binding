@@ -13,6 +13,8 @@ import (
 	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/atls/identitypolicy"
 )
 
+const attestationExpiresCase = "attestation expires"
+
 type replayCacheFunc func(string, time.Time) error
 
 func (f replayCacheFunc) MarkUsed(key string, expiry time.Time) error {
@@ -27,8 +29,8 @@ func TestProductionProfilesRecheckAcceptanceDeadline(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			for _, stage := range []string{"trust lookup", "replay commit"} {
-				for _, failure := range []string{"binding expires", "request cancelled", "clock unavailable", "attestation expires"} {
-					if softwareOnly && failure == "attestation expires" {
+				for _, failure := range []string{"binding expires", "request cancelled", "clock unavailable", attestationExpiresCase} {
+					if softwareOnly && failure == attestationExpiresCase {
 						continue
 					}
 					t.Run(stage+"/"+failure, func(t *testing.T) {
@@ -50,7 +52,7 @@ func TestProductionProfilesRecheckAcceptanceDeadline(t *testing.T) {
 								cancel()
 							case "clock unavailable":
 								now = time.Time{}
-							case "attestation expires":
+							case attestationExpiresCase:
 								now = fixture.request.Attestation.ExpiresAt.Add(6 * time.Second)
 							}
 						}
@@ -59,7 +61,7 @@ func TestProductionProfilesRecheckAcceptanceDeadline(t *testing.T) {
 							want = context.Canceled
 						case "clock unavailable":
 							want = ErrInvalidCurrentTime
-						case "attestation expires":
+						case attestationExpiresCase:
 							want = ErrAttestationExpired
 						}
 						grantAuthority := fixture.profile.GrantAuthority

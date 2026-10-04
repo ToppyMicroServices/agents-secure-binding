@@ -25,7 +25,7 @@ FILES = (
     "packaging/s3/journald-asb-s3.conf", "packaging/s3/config.example.json",
     "packaging/s3/acceptance.example.json", "scripts/package-s3.py",
     "docs/s3-distribution.md", "docs/s3-deployment-acceptance.md",
-    "docs/asb-linux-distribution.md",
+    "docs/asb-linux-distribution.md", "docs/asb-debian-packages.md",
     "docs/least-privilege-s3-product.md", "docs/least-privilege-aws.md",
     "docs/least-privilege-execution.md", "docs/s3-release-qualification.md",
     "docs/s3-operational-qa.md",

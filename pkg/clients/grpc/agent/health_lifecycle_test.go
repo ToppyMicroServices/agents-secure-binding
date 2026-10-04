@@ -34,10 +34,13 @@ type connectionEndStats struct{ ended chan struct{} }
 func (s connectionEndStats) TagRPC(ctx context.Context, _ *stats.RPCTagInfo) context.Context {
 	return ctx
 }
+
 func (s connectionEndStats) HandleRPC(context.Context, stats.RPCStats) {}
+
 func (s connectionEndStats) TagConn(ctx context.Context, _ *stats.ConnTagInfo) context.Context {
 	return ctx
 }
+
 func (s connectionEndStats) HandleConn(_ context.Context, event stats.ConnStats) {
 	if _, ok := event.(*stats.ConnEnd); ok {
 		select {
