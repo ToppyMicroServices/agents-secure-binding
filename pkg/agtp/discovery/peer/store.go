@@ -17,7 +17,10 @@ import (
 	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/agtp/discovery"
 )
 
-const stateVersion = 1
+const (
+	stateVersion      = 1
+	epochStateVersion = 2
+)
 
 var (
 	ErrCorruptState     = errors.New("agtp discovery peer: corrupt persistent state")
@@ -32,6 +35,7 @@ type diskEnvelope struct {
 
 // PersistentState is the durable state owned by one discovery node.
 type PersistentState struct {
+	Epoch    uint64                  `json:"epoch,omitempty"`
 	Version  int                     `json:"version"`
 	SavedAt  time.Time               `json:"saved_at"`
 	Presence discovery.Delta         `json:"presence"`
@@ -65,7 +69,8 @@ func (s *StateStore) Load() (PersistentState, bool, error) {
 	if err != nil || !found {
 		return PersistentState{}, found, err
 	}
-	if state.Version != stateVersion {
+	if state.Version != stateVersion && state.Version != epochStateVersion ||
+		state.Version == stateVersion && state.Epoch != 0 || state.Version == epochStateVersion && state.Epoch == 0 {
 		return PersistentState{}, true, ErrUnsupportedState
 	}
 	return state, true, nil
@@ -76,6 +81,9 @@ func (s *StateStore) Save(state PersistentState) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	state.Version = stateVersion
+	if state.Epoch != 0 {
+		state.Version = epochStateVersion
+	}
 	state.SavedAt = time.Now().UTC()
 	return writeChecksummedJSON(s.path, state)
 }

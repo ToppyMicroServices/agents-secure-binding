@@ -38,6 +38,17 @@ const (
 // Config fixes the bounded discovery profile. NetworkPolicy opts in to
 // explicitly configured LAN/VPC peers; nil keeps loopback networking.
 type Config struct {
+	// Epoch opts in to protocol 2 and disables time-based tombstone GC. All
+	// peers must use the same positive epoch; zero preserves protocol 1.
+	Epoch uint64
+	// InitializeEpoch permits a one-time empty positive-epoch bootstrap only
+	// when no snapshot exists. Remove it after initialization. Otherwise a
+	// missing positive-epoch snapshot is treated as state loss.
+	InitializeEpoch bool
+	// ReclaimFromEpoch is a one-time startup instruction to discard all old
+	// Presence and ANS state. It must match the stored epoch and be below Epoch.
+	// Remove it after migration; reusing it on the new snapshot is rejected.
+	ReclaimFromEpoch   *uint64
 	Info               discovery.NodeInfo
 	ListenAddress      string
 	NetworkPolicy      *NetworkPolicy
@@ -422,7 +433,7 @@ func (n *Node) Locate(ctx context.Context, target string, count int) ([]discover
 				return nil, errors.New("agtp discovery peer: peer partitioned")
 			}
 			response, err := n.config.Client.FindNode(ctx, peerInfo, FindNodeRequest{
-				Protocol: ProtocolVersion, Sender: n.Info(), Target: target, Count: min(count, n.config.MaxPeers),
+				Protocol: protocolForEpoch(n.config.Epoch), Epoch: n.config.Epoch, Sender: n.Info(), Target: target, Count: min(count, n.config.MaxPeers),
 			})
 			if err != nil {
 				return nil, err
@@ -603,7 +614,7 @@ func (n *Node) authenticated(action Action, next actionHandler) http.HandlerFunc
 
 func (n *Node) handleReplicate(writer http.ResponseWriter, _ *http.Request, identity PeerIdentity, body []byte) {
 	var request ReplicateRequest
-	if err := decodeStrict(body, &request); err != nil || request.Protocol != ProtocolVersion || request.Sender != identity.Node {
+	if err := decodeStrict(body, &request); err != nil || request.Protocol != protocolForEpoch(n.config.Epoch) || request.Epoch != n.config.Epoch || request.Sender != identity.Node {
 		http.Error(writer, "invalid request", http.StatusBadRequest)
 		return
 	}
@@ -626,7 +637,8 @@ func (n *Node) handleReplicate(writer http.ResponseWriter, _ *http.Request, iden
 		return
 	}
 	response := ReplicateResponse{
-		Protocol:   ProtocolVersion,
+		Protocol:   protocolForEpoch(n.config.Epoch),
+		Epoch:      n.config.Epoch,
 		Digest:     n.presence.Digest(),
 		Delta:      n.presence.Delta(request.Digest),
 		NameDigest: n.names.Digest(),
@@ -639,7 +651,7 @@ func (n *Node) handleReplicate(writer http.ResponseWriter, _ *http.Request, iden
 
 func (n *Node) handleFindNode(writer http.ResponseWriter, _ *http.Request, identity PeerIdentity, body []byte) {
 	var request FindNodeRequest
-	if err := decodeStrict(body, &request); err != nil || request.Protocol != ProtocolVersion || request.Sender != identity.Node || request.Count < 1 || request.Count > n.config.MaxPeers {
+	if err := decodeStrict(body, &request); err != nil || request.Protocol != protocolForEpoch(n.config.Epoch) || request.Epoch != n.config.Epoch || request.Sender != identity.Node || request.Count < 1 || request.Count > n.config.MaxPeers {
 		http.Error(writer, "invalid request", http.StatusBadRequest)
 		return
 	}
@@ -648,7 +660,7 @@ func (n *Node) handleFindNode(writer http.ResponseWriter, _ *http.Request, ident
 		http.Error(writer, "invalid request", http.StatusBadRequest)
 		return
 	}
-	if err := writeJSON(writer, FindNodeResponse{Protocol: ProtocolVersion, Peers: peers}); err != nil {
+	if err := writeJSON(writer, FindNodeResponse{Protocol: protocolForEpoch(n.config.Epoch), Epoch: n.config.Epoch, Peers: peers}); err != nil {
 		return
 	}
 }
@@ -732,7 +744,8 @@ func (n *Node) gossipPeer(ctx context.Context, target discovery.NodeInfo) error 
 		}
 	}
 	request := ReplicateRequest{
-		Protocol:   ProtocolVersion,
+		Protocol:   protocolForEpoch(n.config.Epoch),
+		Epoch:      n.config.Epoch,
 		Sender:     n.Info(),
 		Digest:     n.presence.Digest(),
 		Delta:      n.presence.Delta(remoteDigest),
@@ -767,8 +780,15 @@ func (n *Node) peerBlocked(peerID string) bool {
 
 func (n *Node) load() error {
 	state, found, err := n.state.Load()
-	if err != nil || !found {
+	if err != nil {
 		return err
+	}
+	mustPersist, err := n.prepareEpoch(&state, found)
+	if err != nil {
+		return err
+	}
+	if !found && !mustPersist {
+		return nil
 	}
 	if err := n.presence.Merge(discovery.Delta{Tombstones: state.Presence.Tombstones}); err != nil {
 		return err
@@ -786,6 +806,9 @@ func (n *Node) load() error {
 		if _, err := n.routing.Observe(peerInfo); err != nil {
 			return err
 		}
+	}
+	if mustPersist {
+		return n.persistLocked()
 	}
 	return nil
 }
@@ -807,6 +830,7 @@ func (n *Node) persistLocked() error {
 
 func (n *Node) snapshotLocked() PersistentState {
 	return PersistentState{
+		Epoch:    n.config.Epoch,
 		Presence: n.presence.Snapshot(),
 		Names:    n.names.Bindings(),
 		Peers:    n.routing.Peers(),
@@ -840,7 +864,7 @@ func withDefaults(config Config) Config {
 	if config.RequestTimeout == 0 {
 		config.RequestTimeout = 5 * time.Second
 	}
-	if config.TombstoneRetention == 0 {
+	if config.TombstoneRetention == 0 && config.Epoch == 0 {
 		config.TombstoneRetention = discovery.DefaultTombstoneRetention
 	}
 	if config.MaxRecords == 0 {
@@ -871,6 +895,15 @@ func withDefaults(config Config) Config {
 }
 
 func validateConfig(config Config) error {
+	if config.InitializeEpoch && (config.Epoch == 0 || config.ReclaimFromEpoch != nil) {
+		return ErrEpochMismatch
+	}
+	if config.ReclaimFromEpoch != nil && (config.Epoch == 0 || *config.ReclaimFromEpoch >= config.Epoch) {
+		return ErrEpochMismatch
+	}
+	if config.Epoch != 0 && config.TombstoneRetention != 0 {
+		return errors.New("agtp discovery peer: epoch profile requires tombstone retention disabled")
+	}
 	if config.Directory == nil || config.Client == nil || config.Client.TLSConfig == nil || config.TLSConfig == nil || config.StatePath == "" || config.AuditPath == "" {
 		return errors.New("agtp discovery peer: incomplete node config")
 	}

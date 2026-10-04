@@ -56,7 +56,7 @@ type Client struct {
 
 // Replicate exchanges Presence and ANS deltas with one peer.
 func (c *Client) Replicate(ctx context.Context, peer discovery.NodeInfo, request ReplicateRequest) (ReplicateResponse, error) {
-	if request.Sender.ID != c.AgentID || request.Protocol != ProtocolVersion {
+	if request.Sender.ID != c.AgentID || request.Protocol != protocolForEpoch(request.Epoch) {
 		return ReplicateResponse{}, ErrInvalidProtocol
 	}
 	body, err := json.Marshal(request)
@@ -67,7 +67,7 @@ func (c *Client) Replicate(ctx context.Context, peer discovery.NodeInfo, request
 	if err := c.do(ctx, peer, ActionReplicate, body, &response); err != nil {
 		return ReplicateResponse{}, err
 	}
-	if response.Protocol != ProtocolVersion {
+	if response.Protocol != request.Protocol || response.Epoch != request.Epoch {
 		return ReplicateResponse{}, ErrInvalidProtocol
 	}
 	return response, nil
@@ -75,7 +75,7 @@ func (c *Client) Replicate(ctx context.Context, peer discovery.NodeInfo, request
 
 // FindNode performs one authenticated DHT lookup hop.
 func (c *Client) FindNode(ctx context.Context, peer discovery.NodeInfo, request FindNodeRequest) (FindNodeResponse, error) {
-	if request.Sender.ID != c.AgentID || request.Protocol != ProtocolVersion {
+	if request.Sender.ID != c.AgentID || request.Protocol != protocolForEpoch(request.Epoch) {
 		return FindNodeResponse{}, ErrInvalidProtocol
 	}
 	body, err := json.Marshal(request)
@@ -86,7 +86,7 @@ func (c *Client) FindNode(ctx context.Context, peer discovery.NodeInfo, request 
 	if err := c.do(ctx, peer, ActionFindNode, body, &response); err != nil {
 		return FindNodeResponse{}, err
 	}
-	if response.Protocol != ProtocolVersion {
+	if response.Protocol != request.Protocol || response.Epoch != request.Epoch {
 		return FindNodeResponse{}, ErrInvalidProtocol
 	}
 	return response, nil

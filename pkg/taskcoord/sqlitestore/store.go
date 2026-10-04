@@ -34,8 +34,9 @@ const (
 // no independently persisted Assignment copy participates in authorization.
 // State snapshots make this a bounded adapter, not a high-volume database.
 type Store struct {
-	db  *sql.DB
-	now func() time.Time
+	db        *sql.DB
+	now       func() time.Time
+	guardPath string
 }
 
 // Open opens a private local database. The containing directory must be owned
@@ -52,6 +53,11 @@ func Open(path string) (*Store, error) {
 	if err := os.MkdirAll(filepath.Dir(abs), 0o700); err != nil {
 		return nil, unavailable(err)
 	}
+	parent, err := filepath.EvalSymlinks(filepath.Dir(abs))
+	if err != nil {
+		return nil, unavailable(err)
+	}
+	abs = filepath.Join(parent, filepath.Base(abs))
 	f, err := os.OpenFile(abs, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o600)
 	if err == nil {
 		err = f.Close()
@@ -65,7 +71,7 @@ func Open(path string) (*Store, error) {
 	if err != nil {
 		return nil, unavailable(err)
 	}
-	if !info.Mode().IsRegular() || info.Mode().Perm()&0o077 != 0 {
+	if !info.Mode().IsRegular() || info.Mode().Perm()&0o077 != 0 || !singleLinkDatabaseFile(info) {
 		return nil, unavailable(errors.New("database must be an owner-only regular file"))
 	}
 	u := url.URL{Scheme: "file", Path: filepath.ToSlash(abs)}
@@ -81,7 +87,7 @@ func Open(path string) (*Store, error) {
 	}
 	db.SetMaxOpenConns(1)
 	db.SetMaxIdleConns(1)
-	s := &Store{db: db, now: time.Now}
+	s := &Store{db: db, now: time.Now, guardPath: abs + ".reachability.lock"}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := s.initialize(ctx); err != nil {
@@ -92,6 +98,11 @@ func Open(path string) (*Store, error) {
 }
 
 func (s *Store) initialize(ctx context.Context) error {
+	release, err := s.acquireGrantGuard(ctx, true)
+	if err != nil {
+		return err
+	}
+	defer release()
 	conn, err := s.db.Conn(ctx)
 	if err != nil {
 		return unavailable(err)
@@ -130,8 +141,22 @@ func (s *Store) initialize(ctx context.Context) error {
 				return unavailable(err)
 			}
 		}
-	} else if version != 1 || app != applicationID {
+		version = 1
+	} else if (version != 1 && version != 2) || app != applicationID {
 		return unavailable(errors.New("unsupported database schema"))
+	}
+	if version == 1 {
+		for _, statement := range []string{
+			`CREATE TABLE reachability (id INTEGER PRIMARY KEY CHECK(id=1), state BLOB NOT NULL)`,
+			`INSERT INTO reachability VALUES (1, X'')`,
+			`CREATE TABLE outbox_quarantine (quarantine_id TEXT PRIMARY KEY, delivery_id TEXT NOT NULL REFERENCES outbox(id), document BLOB NOT NULL, document_digest TEXT NOT NULL, reason_ref TEXT NOT NULL, quarantined_at INTEGER NOT NULL, restored_at INTEGER NOT NULL DEFAULT 0, replacement_digest TEXT NOT NULL DEFAULT '')`,
+			`CREATE UNIQUE INDEX outbox_one_quarantine ON outbox_quarantine(delivery_id) WHERE restored_at=0`,
+			`PRAGMA user_version = 2`,
+		} {
+			if _, err := conn.ExecContext(ctx, statement); err != nil {
+				return unavailable(err)
+			}
+		}
 	}
 	if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
 		return unavailable(err)
@@ -163,6 +188,13 @@ func unavailable(err error) error { return fmt.Errorf("%w: %v", taskcoord.ErrSto
 func (s *Store) run(ctx context.Context, write bool, fn func(*transaction) error) error {
 	if ctx == nil {
 		return unavailable(errors.New("missing context"))
+	}
+	if write {
+		release, err := s.acquireGrantGuard(ctx, false)
+		if err != nil {
+			return err
+		}
+		defer release()
 	}
 	conn, err := s.db.Conn(ctx)
 	if err != nil {

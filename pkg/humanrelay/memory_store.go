@@ -27,6 +27,8 @@ type MemoryStore struct {
 	mu        sync.RWMutex
 	records   map[string]memoryRecord
 	grantUse  map[string]string
+	// checkpoint runs under mu, before publishing a transition or calling a provider.
+	checkpoint func(map[string]memoryRecord) error
 }
 
 var _ Store = (*MemoryStore)(nil)
@@ -140,7 +142,9 @@ func (s *MemoryStore) commitIntent(intent Intent, queued Event) (Receipt, error)
 	if err := receipt.Validate(); err != nil {
 		return Receipt{}, err
 	}
-	s.records[intent.IntentID] = memoryRecord{intent: intent, receipt: receipt, events: []Event{queued}}
+	if err := s.commitRecord(intent.IntentID, memoryRecord{intent: intent, receipt: receipt, events: []Event{queued}}); err != nil {
+		return Receipt{}, err
+	}
 	s.grantUse[intent.GrantID] = intent.IntentID
 	return receipt, nil
 }
@@ -250,8 +254,17 @@ func (s *MemoryStore) CommitAuthorizedDispatch(
 				return receiptErr
 			}
 			current.events = append(current.events, dispatching)
-			s.records[intentID] = current
+			if err := s.commitRecord(intentID, current); err != nil {
+				return err
+			}
 			result = current.receipt
+
+			// Slow durable storage must not turn expired authorization into a send.
+			providerAt := now().UTC()
+			if ctx.Err() != nil || providerAt.IsZero() || providerAt.Before(grant.IssuedAt) ||
+				providerAt.Before(current.receipt.UpdatedAt) || !providerAt.Before(grant.ExpiresAt) {
+				return ErrDispatchUnavailable
+			}
 
 			ack, dispatchErr := dispatcher.Dispatch(ctx, DispatchRequest{
 				IntentID: current.intent.IntentID, RelaySessionRef: current.intent.RelaySessionRef,
@@ -292,7 +305,9 @@ func (s *MemoryStore) CommitAuthorizedDispatch(
 				return ErrDispatchConflict
 			}
 			current.events = append(current.events, acknowledged)
-			s.records[intentID] = current
+			if err := s.commitRecord(intentID, current); err != nil {
+				return err
+			}
 			result = current.receipt
 			return nil
 		},
@@ -340,7 +355,9 @@ func (s *MemoryStore) cancelQueuedIntent(intentID string, now func() time.Time) 
 		return Receipt{}, err
 	}
 	record.events = append(record.events, canceled)
-	s.records[intentID] = record
+	if err := s.commitRecord(intentID, record); err != nil {
+		return Receipt{}, err
+	}
 	return record.receipt, nil
 }
 
@@ -409,5 +426,22 @@ func validateQueueCommit(commit QueueCommit) error {
 		!commit.QueuedAt.Before(commit.Authorization.ExpiresAt) {
 		return fmt.Errorf("%w: projection is not valid at queue time", ErrInvalidProjection)
 	}
+	return nil
+}
+
+// commitRecord must be called with mu held. Failed checkpoints do not publish
+// an in-memory success; their durable outcome may still require recovery.
+func (s *MemoryStore) commitRecord(id string, record memoryRecord) error {
+	if s.checkpoint != nil {
+		next := make(map[string]memoryRecord, len(s.records)+1)
+		for key, value := range s.records {
+			next[key] = value
+		}
+		next[id] = record
+		if err := s.checkpoint(next); err != nil {
+			return err
+		}
+	}
+	s.records[id] = record
 	return nil
 }

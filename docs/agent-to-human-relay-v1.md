@@ -148,11 +148,11 @@ intent identifier or an operator decision.
 acknowledgement is append-only and must match the same intent. Dispatch is not
 an Agent operation: the separate `Worker` API is a trusted internal outbox
 consumer and must not be exposed as a network route. Raw dispatcher,
-contact-resolution, and provider errors remain private worker telemetry. These
-are interface requirements; the included `MemoryStore` and `LocalGatewaySink`
-satisfy them only inside one process.
+contact-resolution, and provider errors remain private worker telemetry. These are interface requirements. `MemoryStore` and `LocalGatewaySink`
+satisfy them only inside one process. The Linux `FileStore` implements the
+restart-durable relay side described below.
 
-A production implementation needs equivalent cross-process serialization. It
+A deployment needs equivalent cross-process serialization. It
 may use a grant-scoped distributed lock with a fencing token, or issue a
 one-shot gateway permit only after the final reachability check. A database
 check committed before an unguarded provider call does not provide the
@@ -188,13 +188,73 @@ telemetry only and must not become `Event.At` or `Receipt.UpdatedAt`. If a
 valid acknowledgement cannot be committed after the callback, the state stays
 `DISPATCHING` rather than claiming that no attempt occurred.
 
-## Mac and CI mode
+## Linux durable relay and provider recovery
+
+`OpenFileStore(path, directory)` persists the immutable intent and its ordered
+transport events in a private directory on one Linux host. Every operation
+acquires the same permanent file lock across processes. Each transition syncs
+the replacement state file and its parent directory before returning. In
+particular, `DISPATCHING` is durable before the provider callback. A provider
+success followed by process termination before its acknowledgement commit
+therefore reopens as `DISPATCHING`; it does not become a new dispatch.
+
+The directory argument remains the authorization authority. Use a durable
+`taskcoord/sqlitestore.Store` shared by the queue, worker and revocation paths.
+The SQLite adapter serializes grant/consent changes with dispatch while reading
+its current Participant registry; it does not hold an SQL transaction during
+provider I/O. Its Participant registry is immutable; changing an identity or
+status is not exposed as an in-place registry update. Callback contexts must
+have at most 30 seconds remaining, as enforced by both adapters. Stop all old
+writers before opening the schema-2 SQLite database for migration. Older
+binaries do not participate in the new grant guard. Passing a
+`MemoryReachabilityDirectory` is useful for tests but
+provides no restart or cross-process revocation guarantee.
+
+The trusted worker can enumerate `Pending(ctx, afterIntentID, limit)` with a
+limit of 1–256 and a lexical cursor. It returns privacy-minimized receipts:
+`QUEUED` entries need fresh dispatch authorization; `DISPATCHING` entries need
+reconciliation. Concurrent workers use the durable marker to reserve one
+provider attempt. The pending list itself grants no authority or lease.
+
+`Worker.Reconcile(ctx, intentID, provider)` uses a trusted `ProviderReconciler`
+adapter to query the configured provider by the exact immutable dispatch
+request. The adapter must authenticate the provider and compare the opaque
+session, channel and content binding. It must perform no send or redelivery.
+Only an authoritative acknowledgement of that same request can append
+`PROVIDER_ACKNOWLEDGED`. Missing, pending or expired provider history, timeout,
+invalid acknowledgements and query errors leave `DISPATCHING` unchanged. A
+missing provider record is not proof that delivery did not happen. Terminal
+receipts cannot be overwritten, and reconciliation does not grant reuse or
+create Human approval. `LocalGatewaySink.Lookup` is a synthetic implementation
+for conformance tests, not a qualified external provider.
+
+The file adapter bounds each operation, lock acquisition, dispatch and query
+context to 30 seconds, or the caller's earlier deadline. Adapters must honor
+cancellation; the worker does not abandon a still-running callback in another
+goroutine or release its authorization guard. A provider that ignores context
+requires the service supervisor to fence/terminate that worker. Reopen and
+reconcile the retained attempt before resuming work. This is a bounded workload
+adapter: 10,000 immutable intents and 16 MiB of state. Exhaustion fails closed;
+no automatic deletion of grant consumption or unknown outcomes occurs.
+
+Malformed/ambiguous JSON, invalid event order, inconsistent request digests,
+symlinks, hard links, non-private files and loss of an initialized state file
+fail closed. An error after rename has an unknown durability result and fences
+that handle. Inspect storage health before opening a new handle; query the
+provider rather than inferring that the callback is safe to repeat. No
+checksum or file lock protects against an administrator rolling back both the
+state and lock. Stop/fence all workers before a consistent backup or restore,
+retain the authoritative grant database with the relay files, and reconcile any
+post-backup external effects. Filesystem power-loss behavior, live provider
+identity/idempotency and multi-host failover still require deployment evidence.
+
+## CI mode
 
 `LocalGatewaySink` is a deterministic in-memory gateway for local development.
 It validates the opaque HTTPS session and content references, records the
 dispatch, and returns a provider acknowledgement without contacting a Human or
-an external service. It is safe for protocol tests on a MacBook when only
-synthetic identifiers and content are used.
+an external service. Protocol tests use synthetic identifiers and content. The durable adapter and
+process cut-point tests run on Linux.
 
 Focused checks:
 
@@ -207,14 +267,13 @@ GOWORK=off go test -race -count=1 ./pkg/humanrelay/... ./schemas
 The repository does not yet provide:
 
 - a relay-specific TLS challenge/execute endpoint;
-- a restart-durable relay store and dispatch outbox;
-- provider reconciliation for an attempt left in `DISPATCHING`;
 - an encrypted contact vault;
 - Email, SNS, or telephone provider adapters;
 - delivery receipts, Human read state, or identity proofing;
 - rate limits, abuse handling, retention/deletion policy, or operator UI;
 - a Human-produced exact-content approval bound to `RequestDigest`; or
-- live provider and failover qualification.
+- a selected, authenticated external `ProviderReconciler` adapter and live
+  provider/failover qualification.
 
 Those components should remain outside ASB Core. They may consume an ASB-bound
 projection and opaque reachability grant, but they must not expose direct Human
