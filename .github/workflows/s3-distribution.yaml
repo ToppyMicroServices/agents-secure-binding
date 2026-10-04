@@ -12,7 +12,8 @@ on:
       - 'docs/least-privilege-aws.md'
       - 'docs/least-privilege-execution.md'
       - 'LICENSE'
-  workflow_dispatch:
+  # Downloaded artifacts are inspected and executed only in a PR cache scope.
+  # Release preparation uses the reviewed CLI outside default-branch jobs.
 
 permissions:
   contents: read
@@ -27,9 +28,12 @@ jobs:
       PYTHONDONTWRITEBYTECODE: '1'
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-go@v5
         with:
           go-version: 1.26.6
+          cache: false
       - name: Test archive and signer rejection paths
         run: python3 -m unittest -v scripts/test_package_s3.py
       - name: Retrieve the exact qualified Linux artifact
