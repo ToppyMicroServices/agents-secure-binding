@@ -72,8 +72,10 @@ func (s *MemoryStore) ReconcileDispatch(ctx context.Context, intentID string, pr
 	if err != nil {
 		return record.receipt, err
 	}
-	event := Event{Schema: RelayEventSchemaV1, EventID: id, IntentID: intentID,
-		Status: StatusProviderAcknowledged, At: at, ProviderAckRef: ack.AckRef}
+	event := Event{
+		Schema: RelayEventSchemaV1, EventID: id, IntentID: intentID,
+		Status: StatusProviderAcknowledged, At: at, ProviderAckRef: ack.AckRef,
+	}
 	if err := event.Validate(); err != nil {
 		return record.receipt, ErrDispatchConflict
 	}
@@ -87,8 +89,10 @@ func (s *MemoryStore) ReconcileDispatch(ctx context.Context, intentID string, pr
 }
 
 func dispatchRequest(intent Intent) DispatchRequest {
-	return DispatchRequest{IntentID: intent.IntentID, RelaySessionRef: intent.RelaySessionRef,
-		Channel: intent.Channel, ContentRef: intent.ContentRef, ContentDigest: intent.ContentDigest}
+	return DispatchRequest{
+		IntentID: intent.IntentID, RelaySessionRef: intent.RelaySessionRef,
+		Channel: intent.Channel, ContentRef: intent.ContentRef, ContentDigest: intent.ContentDigest,
+	}
 }
 
 // Lookup returns exact synthetic gateway evidence without sending a message.

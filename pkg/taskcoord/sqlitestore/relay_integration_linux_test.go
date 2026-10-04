@@ -41,7 +41,7 @@ func durableRelayFixture(t *testing.T, directory *Store, path string) (*humanrel
 
 func TestSQLiteAuthorityAndDurableRelayRestartRevocation(t *testing.T) {
 	root := t.TempDir()
-	path, relayPath := filepath.Join(root, "coord.db"), filepath.Join(root, "relay.json")
+	path, relayPath := filepath.Join(root, "coord.db"), filepath.Join(root, "private", "relay.json")
 	directory := openTest(t, path, base.Add(time.Minute))
 	_, commit := durableRelayFixture(t, directory, relayPath)
 	_ = directory.Close()
@@ -65,7 +65,7 @@ func TestSQLiteAuthorityAndDurableRelayRestartRevocation(t *testing.T) {
 
 func TestSQLiteAuthorityAndRelayUnknownReconciliation(t *testing.T) {
 	root := t.TempDir()
-	path, relayPath := filepath.Join(root, "coord.db"), filepath.Join(root, "relay.json")
+	path, relayPath := filepath.Join(root, "coord.db"), filepath.Join(root, "private", "relay.json")
 	directory := openTest(t, path, base.Add(time.Minute))
 	relay, commit := durableRelayFixture(t, directory, relayPath)
 	provider := &durableRelayTestProvider{ambiguous: true}

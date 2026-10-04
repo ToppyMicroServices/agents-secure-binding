@@ -61,7 +61,10 @@ func (d *MemoryReachabilityDirectory) ExportState() ([]byte, error) {
 // the Participant registry from the same durable transaction. Historical grants
 // are checked at their original issue time, without treating them as fresh
 // authorizations. Protect the snapshot from rollback as well as modification.
-func RestoreMemoryReachabilityDirectory(data []byte, participants ParticipantResolver, now func() time.Time) (*MemoryReachabilityDirectory, error) {
+func RestoreMemoryReachabilityDirectory(ctx context.Context, data []byte, participants ParticipantResolver, now func() time.Time) (*MemoryReachabilityDirectory, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	d, err := NewMemoryReachabilityDirectoryWithClock(participants, now)
 	if err != nil || len(data) == 0 {
 		return d, err
@@ -84,7 +87,6 @@ func RestoreMemoryReachabilityDirectory(data []byte, participants ParticipantRes
 			return nil, ErrStoreLimit
 		}
 	}
-	ctx := context.Background()
 	for id, consent := range state.Consents {
 		if id != consent.ConsentID || consent.Validate() != nil {
 			return nil, fmt.Errorf("task coordination: invalid stored consent")

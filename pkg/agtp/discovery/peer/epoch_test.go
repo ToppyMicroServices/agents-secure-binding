@@ -166,7 +166,11 @@ func TestEpochReclamationIsExplicitAndOneTime(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer node.Stop(context.Background())
+	defer func() {
+		if err := node.Stop(context.Background()); err != nil {
+			t.Errorf("stop restored epoch node: %v", err)
+		}
+	}()
 	assertMatchCount(t, node, "generate", 1)
 	state, found, err := node.state.Load()
 	if err != nil || !found || state.Epoch != 8 || state.Version != epochStateVersion {

@@ -44,9 +44,11 @@ func reachabilityGrantFixture(t *testing.T, s *Store) (taskcoord.HumanReachabili
 	if err != nil {
 		t.Fatal(err)
 	}
-	access := taskcoord.AuthenticatedReachabilityAccess{GrantID: grant.GrantID, RequesterParticipantID: grant.RequesterParticipantID,
+	access := taskcoord.AuthenticatedReachabilityAccess{
+		GrantID: grant.GrantID, RequesterParticipantID: grant.RequesterParticipantID,
 		Purpose: grant.Purpose, Capability: grant.Capability, Channel: grant.Channel,
-		ActorID: "gateway:agent", AuthorizationID: "authorization:use", ProofID: "proof:use", VerifierNonce: "nonce:use", IssuedAt: base, ExpiresAt: base.Add(time.Hour)}
+		ActorID: "gateway:agent", AuthorizationID: "authorization:use", ProofID: "proof:use", VerifierNonce: "nonce:use", IssuedAt: base, ExpiresAt: base.Add(time.Hour),
+	}
 	return grant, access
 }
 
@@ -127,7 +129,7 @@ func TestRelayGrantGuardReleasesDatabaseBeforeCallback(t *testing.T) {
 		if _, err := other.db.ExecContext(bounded, "ROLLBACK"); err != nil {
 			return err
 		}
-		short, stop := context.WithTimeout(ctx, 30*time.Millisecond)
+		short, stop := context.WithTimeout(bounded, 30*time.Millisecond)
 		defer stop()
 		err := other.RegisterParticipant(short, taskcoord.Participant{Schema: taskcoord.ParticipantSchemaV1, ParticipantID: "agent:blocked", Kind: taskcoord.ParticipantAgent, IdentityRef: "urn:identity:blocked", Status: taskcoord.ParticipantActive, RegisteredAt: base})
 		if !errors.Is(err, context.DeadlineExceeded) {
@@ -216,7 +218,7 @@ func TestReachabilityRejectsHardLinkAliases(t *testing.T) {
 	}
 	if opened, err := Open(alias); err == nil {
 		_ = opened.Close()
-		t.Fatal("hardlinked database bypassed canonical guard")
+		t.Fatal("hard-linked database bypassed canonical guard")
 	}
 	if err := os.Remove(alias); err != nil {
 		t.Fatal(err)
@@ -226,6 +228,6 @@ func TestReachabilityRejectsHardLinkAliases(t *testing.T) {
 	}
 	if opened, err := Open(path); err == nil {
 		_ = opened.Close()
-		t.Fatal("hardlinked guard accepted")
+		t.Fatal("hard-linked guard accepted")
 	}
 }

@@ -32,8 +32,10 @@ func TestOutboxQuarantinePreservesEvidenceAndRestoresOnlyAuthorizedHistory(t *te
 	if _, err := s.db.ExecContext(ctx, "UPDATE outbox SET document=? WHERE id=?", corrupt, offered.Record.EventID); err != nil {
 		t.Fatal(err)
 	}
-	request := OutboxQuarantine{QuarantineID: "quarantine:one", DeliveryID: offered.Record.EventID,
-		ExpectedDocumentDigest: recoveryDigest(corrupt), ReasonRef: "incident:one"}
+	request := OutboxQuarantine{
+		QuarantineID: "quarantine:one", DeliveryID: offered.Record.EventID,
+		ExpectedDocumentDigest: recoveryDigest(corrupt), ReasonRef: "incident:one",
+	}
 	if err := s.QuarantineOutbox(ctx, request); err != nil {
 		t.Fatal(err)
 	}

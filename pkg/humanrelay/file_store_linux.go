@@ -10,6 +10,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -24,10 +25,12 @@ import (
 
 const relayLockMarker = "asb.human-relay-lock/v1\n"
 
-const relayFileSchema = "asb.human-relay-store/v1"
-const maxRelayStateBytes = 16 << 20
-const maxRelayRecords = 10_000
-const relayOperationTimeout = 30 * time.Second
+const (
+	relayFileSchema       = "asb.human-relay-store/v1"
+	maxRelayStateBytes    = 16 << 20
+	maxRelayRecords       = 10_000
+	relayOperationTimeout = 30 * time.Second
+)
 
 type relayDiskRecord struct {
 	Intent  Intent  `json:"intent"`
@@ -59,8 +62,10 @@ type FileStore struct {
 	afterRename   func() error
 }
 
-var _ Store = (*FileStore)(nil)
-var _ ReconciliationStore = (*FileStore)(nil)
+var (
+	_ Store               = (*FileStore)(nil)
+	_ ReconciliationStore = (*FileStore)(nil)
+)
 
 func OpenFileStore(path string, directory GrantTransaction) (*FileStore, error) {
 	if isNilDependency(directory) {
@@ -82,7 +87,7 @@ func OpenFileStore(path string, directory GrantTransaction) (*FileStore, error) 
 	}
 	info, err := os.Stat(parent)
 	if err != nil || !info.IsDir() || info.Mode().Perm()&0o077 != 0 {
-		return nil, ErrStoreUnavailable
+		return nil, fmt.Errorf("%w: state directory must be private (0700)", ErrStoreUnavailable)
 	}
 	s := &FileStore{path: filepath.Join(parent, filepath.Base(abs)), directory: directory}
 	ctx, cancel := context.WithTimeout(context.Background(), relayOperationTimeout)
@@ -356,9 +361,11 @@ func validateRelayState(state relayDiskState) error {
 			return ErrStoreUnavailable
 		}
 		grants[intent.GrantID] = true
-		digest, err := RequestDigest(RelayIntentRequest{IntentID: intent.IntentID, GrantID: intent.GrantID,
+		digest, err := RequestDigest(RelayIntentRequest{
+			IntentID: intent.IntentID, GrantID: intent.GrantID,
 			RequesterParticipantID: intent.RequesterParticipantID, Purpose: intent.Purpose, Capability: intent.Capability,
-			Channel: intent.Channel, ContentRef: intent.ContentRef, ContentDigest: intent.ContentDigest})
+			Channel: intent.Channel, ContentRef: intent.ContentRef, ContentDigest: intent.ContentDigest,
+		})
 		if err != nil || digest.String() != intent.RequestDigest {
 			return ErrStoreUnavailable
 		}

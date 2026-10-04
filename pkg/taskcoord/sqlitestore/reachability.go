@@ -33,7 +33,7 @@ func (s *Store) runReachability(ctx context.Context, write bool, fn func(*taskco
 		if err := tx.conn.QueryRowContext(ctx, "SELECT state FROM reachability WHERE id=1").Scan(&raw); err != nil {
 			return unavailable(err)
 		}
-		directory, err := taskcoord.RestoreMemoryReachabilityDirectory(raw, tx.MemoryStore, s.now)
+		directory, err := taskcoord.RestoreMemoryReachabilityDirectory(ctx, raw, tx.MemoryStore, s.now)
 		if err != nil {
 			return unavailable(err)
 		}

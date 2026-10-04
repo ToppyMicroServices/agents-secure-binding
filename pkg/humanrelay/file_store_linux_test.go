@@ -13,10 +13,37 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 )
+
+const missingRelayTestCase = "missing"
+
+func TestFileRelayRequiresPrivateImmediateDirectory(t *testing.T) {
+	fixture := newRelayFixture(t)
+	parent := t.TempDir()
+	if err := os.Chmod(parent, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := OpenFileStore(filepath.Join(parent, "relay.json"), fixture.directory); !errors.Is(err, ErrStoreUnavailable) || !strings.Contains(err.Error(), "state directory must be private") {
+		t.Fatalf("non-private immediate directory accepted: %v", err)
+	}
+	// A new dedicated child is created privately without changing its parent.
+	path := filepath.Join(parent, "private", "relay.json")
+	if _, err := OpenFileStore(path, fixture.directory); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(filepath.Dir(path))
+	if err != nil || info.Mode().Perm() != 0o700 {
+		t.Fatalf("state directory mode = %v, error = %v", info, err)
+	}
+	info, err = os.Stat(parent)
+	if err != nil || info.Mode().Perm() != 0o755 {
+		t.Fatalf("opening store changed parent permissions: %v, %v", info, err)
+	}
+}
 
 func openRelayFileTest(t *testing.T, path string, fixture *relayFixture) *FileStore {
 	t.Helper()
@@ -36,7 +63,7 @@ func queueRelayFileTest(t *testing.T, store *FileStore, fixture *relayFixture) {
 
 func TestFileRelayCrashAfterProviderEffectRecoversWithoutRedispatch(t *testing.T) {
 	fixture := newRelayFixture(t)
-	path := filepath.Join(t.TempDir(), "relay.json")
+	path := filepath.Join(t.TempDir(), "private", "relay.json")
 	store := openRelayFileTest(t, path, fixture)
 	queueRelayFileTest(t, store, fixture)
 	cmd := relayChild(path, "crash")
@@ -93,7 +120,7 @@ func TestFileRelayCrashAfterProviderEffectRecoversWithoutRedispatch(t *testing.T
 
 func TestFileRelayConcurrentProcessesReserveOneProviderAttempt(t *testing.T) {
 	fixture := newRelayFixture(t)
-	path := filepath.Join(t.TempDir(), "relay.json")
+	path := filepath.Join(t.TempDir(), "private", "relay.json")
 	queueRelayFileTest(t, openRelayFileTest(t, path, fixture), fixture)
 	a, b := relayChild(path, "dispatch"), relayChild(path, "dispatch")
 	var aOutput, bOutput bytes.Buffer
@@ -166,7 +193,7 @@ func TestFileRelayProcessHelper(t *testing.T) {
 
 func TestFileRelayFailedDispatchCheckpointNeverCallsProvider(t *testing.T) {
 	fixture := newRelayFixture(t)
-	path := filepath.Join(t.TempDir(), "relay.json")
+	path := filepath.Join(t.TempDir(), "private", "relay.json")
 	store := openRelayFileTest(t, path, fixture)
 	queueRelayFileTest(t, store, fixture)
 	store.beforePersist = func(state relayDiskState) error {
@@ -193,7 +220,7 @@ func TestFileRelayRechecksTimeAfterDurableReservation(t *testing.T) {
 	for _, mode := range []string{"expired", "rollback", "zero"} {
 		t.Run(mode, func(t *testing.T) {
 			fixture := newRelayFixture(t)
-			path := filepath.Join(t.TempDir(), "relay.json")
+			path := filepath.Join(t.TempDir(), "private", "relay.json")
 			store := openRelayFileTest(t, path, fixture)
 			queueRelayFileTest(t, store, fixture)
 			at := fixture.now
@@ -228,7 +255,7 @@ func TestFileRelayRechecksTimeAfterDurableReservation(t *testing.T) {
 
 func TestFileRelayPostRenameFailureFencesHandle(t *testing.T) {
 	fixture := newRelayFixture(t)
-	path := filepath.Join(t.TempDir(), "relay.json")
+	path := filepath.Join(t.TempDir(), "private", "relay.json")
 	store := openRelayFileTest(t, path, fixture)
 	queueRelayFileTest(t, store, fixture)
 	store.afterRename = func() error { return ErrStoreUnavailable }
@@ -248,10 +275,10 @@ func TestFileRelayPostRenameFailureFencesHandle(t *testing.T) {
 }
 
 func TestFileRelayReconciliationMissingInvalidAndPrivateErrorsRemainUnknown(t *testing.T) {
-	for _, mode := range []string{"missing", "error", "mismatch", "clock rollback", "timeout"} {
+	for _, mode := range []string{missingRelayTestCase, "error", "mismatch", "clock rollback", "timeout"} {
 		t.Run(mode, func(t *testing.T) {
 			fixture := newRelayFixture(t)
-			path := filepath.Join(t.TempDir(), "relay.json")
+			path := filepath.Join(t.TempDir(), "private", "relay.json")
 			store := openRelayFileTest(t, path, fixture)
 			queueRelayFileTest(t, store, fixture)
 			if _, err := store.CommitAuthorizedDispatch(context.Background(), fixture.request.IntentID, &failingDispatcher{}, time.Now); !errors.Is(err, ErrDispatchUnavailable) {
@@ -259,7 +286,7 @@ func TestFileRelayReconciliationMissingInvalidAndPrivateErrorsRemainUnknown(t *t
 			}
 			provider := relayLookupFunc(func(ctx context.Context, request DispatchRequest) (ProviderAck, bool, error) {
 				switch mode {
-				case "missing":
+				case missingRelayTestCase:
 					return ProviderAck{}, false, nil
 				case "error":
 					return ProviderAck{}, false, errors.New("private-recipient@example.test")
@@ -279,10 +306,10 @@ func TestFileRelayReconciliationMissingInvalidAndPrivateErrorsRemainUnknown(t *t
 				now = func() time.Time { return fixture.now.Add(-time.Minute) }
 			}
 			_, err := store.ReconcileDispatch(ctx, fixture.request.IntentID, provider, now)
-			if mode != "missing" && err == nil {
+			if mode != missingRelayTestCase && err == nil {
 				t.Fatal("invalid observation accepted")
 			}
-			if err != nil && bytes.Contains([]byte(err.Error()), []byte("private-recipient")) {
+			if err != nil && strings.Contains(err.Error(), "private-recipient") {
 				t.Fatal("provider-private error leaked")
 			}
 			_, receipt, err := openRelayFileTest(t, path, fixture).LoadIntent(context.Background(), fixture.request.IntentID)
@@ -294,10 +321,10 @@ func TestFileRelayReconciliationMissingInvalidAndPrivateErrorsRemainUnknown(t *t
 }
 
 func TestFileRelayRejectsCorruptionMissingStateSymlinkAndPermissiveFiles(t *testing.T) {
-	for _, mode := range []string{"duplicate", "unknown", "history", "missing", "symlink", "mode", "lock symlink", "state hardlink", "lock hardlink", "oversize"} {
+	for _, mode := range []string{"duplicate", "unknown", "history", missingRelayTestCase, "symlink", "mode", "lock symlink", "state hardlink", "lock hardlink", "oversize"} {
 		t.Run(mode, func(t *testing.T) {
 			fixture := newRelayFixture(t)
-			path := filepath.Join(t.TempDir(), "relay.json")
+			path := filepath.Join(t.TempDir(), "private", "relay.json")
 			queueRelayFileTest(t, openRelayFileTest(t, path, fixture), fixture)
 			raw, err := os.ReadFile(path)
 			if err != nil {
@@ -320,7 +347,7 @@ func TestFileRelayRejectsCorruptionMissingStateSymlinkAndPermissiveFiles(t *test
 				if err == nil {
 					err = os.WriteFile(path, raw, 0o600)
 				}
-			case "missing":
+			case missingRelayTestCase:
 				err = os.Remove(path)
 			case "symlink":
 				if err := os.Rename(path, path+".target"); err != nil {
@@ -353,7 +380,7 @@ func TestFileRelayRejectsCorruptionMissingStateSymlinkAndPermissiveFiles(t *test
 
 func TestFileRelayLockWaitHonorsCancellation(t *testing.T) {
 	fixture := newRelayFixture(t)
-	path := filepath.Join(t.TempDir(), "relay.json")
+	path := filepath.Join(t.TempDir(), "private", "relay.json")
 	store := openRelayFileTest(t, path, fixture)
 	queueRelayFileTest(t, store, fixture)
 	entered, release, done := make(chan struct{}), make(chan struct{}), make(chan error, 1)

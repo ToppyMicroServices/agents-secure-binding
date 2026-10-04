@@ -34,8 +34,10 @@ func TestReachabilitySnapshotRetainsRevocationAndHistoricalGrants(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	revocation := HumanReachabilityRevocation{Schema: HumanReachabilityRevocationSchemaV1, EventID: "event:revoke", GrantID: grant.GrantID,
-		ParticipantID: human.ParticipantID, ActorID: "actor:human", AuthorizationID: "authorization:revoke", ProofID: "proof:revoke", At: base.Add(6 * time.Minute)}
+	revocation := HumanReachabilityRevocation{
+		Schema: HumanReachabilityRevocationSchemaV1, EventID: "event:revoke", GrantID: grant.GrantID,
+		ParticipantID: human.ParticipantID, ActorID: "actor:human", AuthorizationID: "authorization:revoke", ProofID: "proof:revoke", At: base.Add(6 * time.Minute),
+	}
 	if err := directory.RevokeHumanReachabilityGrant(ctx, revocation); err != nil {
 		t.Fatal(err)
 	}
@@ -46,7 +48,7 @@ func TestReachabilitySnapshotRetainsRevocationAndHistoricalGrants(t *testing.T) 
 	// Expired historical grants must remain restorable; wall-clock rollback
 	// must not resurrect a grant whose revocation has committed.
 	for _, now := range []time.Time{base.Add(24 * time.Hour), base.Add(5 * time.Minute)} {
-		restored, err := RestoreMemoryReachabilityDirectory(raw, registry, func() time.Time { return now })
+		restored, err := RestoreMemoryReachabilityDirectory(ctx, raw, registry, func() time.Time { return now })
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -59,7 +61,7 @@ func TestReachabilitySnapshotRetainsRevocationAndHistoricalGrants(t *testing.T) 
 	}
 	human.Status = ParticipantSuspended
 	current := &mutableParticipantResolver{participants: map[string]Participant{human.ParticipantID: human, agent.ParticipantID: agent}}
-	if restored, err := RestoreMemoryReachabilityDirectory(activeRaw, current, func() time.Time { return base.Add(5 * time.Minute) }); err != nil {
+	if restored, err := RestoreMemoryReachabilityDirectory(ctx, activeRaw, current, func() time.Time { return base.Add(5 * time.Minute) }); err != nil {
 		t.Fatal("current suspension made historical state unreadable", err)
 	} else if _, err := restored.LoadActiveHumanReachabilityGrant(ctx, authenticatedGrantAccess(grant, base)); !errors.Is(err, ErrNotFound) {
 		t.Fatal("historical active projection escaped into current authorization", err)
@@ -81,11 +83,11 @@ func TestReachabilitySnapshotRetainsRevocationAndHistoricalGrants(t *testing.T) 
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := RestoreMemoryReachabilityDirectory(encoded, registry, time.Now); err == nil {
+		if _, err := RestoreMemoryReachabilityDirectory(ctx, encoded, registry, time.Now); err == nil {
 			t.Fatal("corrupt reachability snapshot accepted")
 		}
 	}
-	if _, err := RestoreMemoryReachabilityDirectory([]byte(`{"schema":"x","schema":"asb.reachability-state/v1"}`), registry, time.Now); err == nil {
+	if _, err := RestoreMemoryReachabilityDirectory(ctx, []byte(`{"schema":"x","schema":"asb.reachability-state/v1"}`), registry, time.Now); err == nil {
 		t.Fatal("duplicate JSON keys accepted")
 	}
 	directory.grants = make(map[string]committedReachabilityGrant, 10_001)
