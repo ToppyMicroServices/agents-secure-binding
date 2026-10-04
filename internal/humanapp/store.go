@@ -83,8 +83,15 @@ func OpenStoreContext(ctx context.Context, path string) (*Store, error) {
 	if filepath.VolumeName(abs) != "" && !strings.HasPrefix(databasePath, "/") {
 		databasePath = "/" + databasePath
 	}
-	dsn := (&url.URL{Scheme: "file", Path: databasePath}).String()
-	db, err := sql.Open("sqlite", dsn)
+	dsn := &url.URL{Scheme: "file", Path: databasePath}
+	query := dsn.Query()
+	// database/sql can replace a connection after transaction cancellation.
+	// Reapply connection-local settings before that handle can serve requests.
+	query.Add("_pragma", "busy_timeout(5000)")
+	query.Add("_pragma", "synchronous(FULL)")
+	query.Add("_pragma", "foreign_keys(1)")
+	dsn.RawQuery = query.Encode()
+	db, err := sql.Open("sqlite", dsn.String())
 	if err != nil {
 		return nil, storeError(err)
 	}
@@ -101,9 +108,6 @@ func OpenStoreContext(ctx context.Context, path string) (*Store, error) {
 func (s *Store) initialize(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	if _, err := s.db.ExecContext(ctx, "PRAGMA busy_timeout = 5000"); err != nil {
-		return storeError(err)
-	}
 	var version, applicationID int
 	if err := s.db.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil {
 		return storeError(err)
@@ -147,10 +151,8 @@ func (s *Store) initialize(ctx context.Context) error {
 			return storeError(err)
 		}
 	}
-	for _, pragma := range []string{"PRAGMA journal_mode = WAL", "PRAGMA synchronous = FULL", "PRAGMA foreign_keys = ON"} {
-		if _, err := s.db.ExecContext(ctx, pragma); err != nil {
-			return storeError(err)
-		}
+	if _, err := s.db.ExecContext(ctx, "PRAGMA journal_mode = WAL"); err != nil {
+		return storeError(err)
 	}
 	var check string
 	if err := s.db.QueryRowContext(ctx, "PRAGMA quick_check").Scan(&check); err != nil || check != "ok" {

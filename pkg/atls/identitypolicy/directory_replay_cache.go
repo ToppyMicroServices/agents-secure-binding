@@ -18,7 +18,10 @@ import (
 // atomic file creation. Entries are intentionally retained: a verifier nonce
 // is one-shot even after the proof expires. Deployments that need bounded
 // storage should use a transactional database/Redis adapter with equivalent
-// insert-if-absent semantics and retention policy.
+// insert-if-absent semantics and retention policy. This demo cache does not
+// promise power-loss durability: entries survive an ordinary process restart,
+// but syncing an entry does not establish durable directory metadata on every
+// supported filesystem.
 type DirectoryReplayCache struct {
 	directory string
 }

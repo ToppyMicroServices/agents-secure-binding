@@ -143,7 +143,11 @@ func TestCLI_NewIMAMeasurementsCmd(t *testing.T) {
 
 			cmd.SetArgs(tc.args)
 			err := cmd.Execute()
-			assert.NoError(t, err, "Command execution failed")
+			if len(tc.expectedError) != 0 {
+				assert.ErrorIs(t, err, ErrCommandFailed)
+			} else {
+				assert.NoError(t, err, "Command execution failed")
+			}
 
 			outputStr := output.String()
 

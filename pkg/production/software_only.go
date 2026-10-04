@@ -78,9 +78,16 @@ func (p SoftwareOnlyProfile) Verify(ctx context.Context, req SoftwareOnlyVerifyR
 		return AcceptedIdentity{}, ErrUnexpectedAttestationBinding
 	}
 
-	now := time.Now()
-	if p.Now != nil {
-		now = p.Now()
+	clock := p.Now
+	if clock == nil {
+		clock = time.Now
+	}
+	now := clock()
+	if now.IsZero() {
+		return AcceptedIdentity{}, ErrInvalidCurrentTime
+	}
+	if err := ctx.Err(); err != nil {
+		return AcceptedIdentity{}, err
 	}
 	verified, err := verifyIdentity(
 		ctx,
@@ -107,8 +114,15 @@ func (p SoftwareOnlyProfile) Verify(ctx context.Context, req SoftwareOnlyVerifyR
 		verified.statement.Binding.RequestContextSHA256,
 		verified.statement.Binding.Nonce,
 	}, "\x00")
+	if err := validateAcceptanceTime(ctx, clock(), verified, p.GrantAuthority.ClockSkew, p.BindingAuthority.ClockSkew); err != nil {
+		return AcceptedIdentity{}, err
+	}
 	if err := p.ReplayCache.MarkUsed(replayKey, replayExpiry); err != nil {
 		return AcceptedIdentity{}, fmt.Errorf("commit replay state: %w", err)
+	}
+
+	if err := validateAcceptanceTime(ctx, clock(), verified, p.GrantAuthority.ClockSkew, p.BindingAuthority.ClockSkew); err != nil {
+		return AcceptedIdentity{}, err
 	}
 
 	return AcceptedIdentity{

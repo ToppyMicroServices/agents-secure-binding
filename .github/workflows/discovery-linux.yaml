@@ -3,6 +3,11 @@ name: ASB Discovery Linux
 on:
   push:
     branches: [main, test/asb-linux-discovery]
+  pull_request:
+    paths:
+      - '.github/workflows/discovery-linux.yaml'
+      - 'pkg/agtp/discovery/**'
+      - 'examples/agtp-agent-interaction/**'
   workflow_dispatch:
 
 permissions:

@@ -1,0 +1,66 @@
+name: ASB Debian distribution
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/debian-distribution.yaml'
+      - 'scripts/build-asb-deb.py'
+      - 'scripts/test_build_asb_deb.py'
+      - 'scripts/check-asb-deb-lifecycle.py'
+      - 'docs/asb-linux-distribution.md'
+      - 'docs/asb-debian-packages.md'
+      - 'docs/API_COMPATIBILITY.md'
+      - 'packaging/debian/**'
+      - 'packaging/s3/**'
+      - 'cmd/cli/**'
+      - 'cli/**'
+      - 'cmd/asb-human/**'
+      - 'cmd/asb-leastprivilege*/**'
+      - 'cmd/asb-s3/**'
+      - 'internal/**'
+      - 'pkg/**'
+      - 'go.mod'
+      - 'go.sum'
+      - 'LICENSE'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  packages:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      GOWORK: 'off'
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version: 1.26.6
+      - name: Test Debian builder rejection paths
+        run: python3 scripts/test_build_asb_deb.py
+      - name: Build all explicit candidate components
+        run: |
+          python3 scripts/build-asb-deb.py \
+            --source-commit "$(git rev-parse HEAD)" \
+            --version '0.1.0~preview.1-1' \
+            --maintainer 'ASB CI <ci@example.invalid>' \
+            --output build/debian-candidates --with-human --with-s3
+      - name: Inspect final Debian artifacts and exercise their lifecycle
+        run: |
+          python3 scripts/check-asb-deb-lifecycle.py \
+            --artifacts build/debian-candidates \
+            --output build/debian-lifecycle.json --image ubuntu:24.04
+      - name: Save candidate packages and Linux evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: asb-debian-${{ github.run_id }}
+          path: |
+            build/debian-candidates/
+            build/debian-lifecycle.json
+          if-no-files-found: error
+          retention-days: 90

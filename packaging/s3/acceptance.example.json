@@ -1,0 +1,49 @@
+{
+  "schema": "asb.s3-target-acceptance/v1",
+  "status": "not_run",
+  "candidate": "asb-s3-v0.1.0-rc.1",
+  "archive_sha256": null,
+  "binary_sha256": "2cbe370f759d7f5cb7da2b19b2057d7f26b540bde05b6e330a478eea55420c19",
+  "signature_verified_by": null,
+  "target": {
+    "host_reference": null,
+    "os_version": null,
+    "architecture": null,
+    "systemd_version": null,
+    "filesystem_and_mount_options": null,
+    "storage_durability_contract": null,
+    "aws_cli_version": null,
+    "issuer_reference": null,
+    "projector_unit": null,
+    "backup_destination_reference": null
+  },
+  "owners": {
+    "acceptance": null,
+    "identity_and_certificate_renewal": null,
+    "capacity_alerts": null,
+    "backup_and_restore": null,
+    "uncertain_outcomes": null
+  },
+  "observation": {
+    "started_at": null,
+    "ended_at": null,
+    "workload_and_duration_rationale": null,
+    "resource_budgets_and_alert_response": null,
+    "measurements_reference": null
+  },
+  "checks": {
+    "authorized_read_after_actual_boot": {"status": "not_run", "evidence": null},
+    "expired_identity_denied": {"status": "not_run", "evidence": null},
+    "atomic_renewal_same_process_read": {"status": "not_run", "evidence": null},
+    "maintenance_drain": {"status": "not_run", "evidence": null},
+    "emergency_fence_stays_stopped": {"status": "not_run", "evidence": null},
+    "sealed_backup_off_host_integrity": {"status": "not_run", "evidence": null},
+    "fenced_restore_old_authority_denied": {"status": "not_run", "evidence": null},
+    "unknown_and_receipts_retained": {"status": "not_run", "evidence": null},
+    "capacity_and_renewal_alert_delivery": {"status": "not_run", "evidence": null}
+  },
+  "physical_power_loss_claim": false,
+  "physical_power_loss_evidence": null,
+  "accepted_at": null,
+  "accepted_by": null
+}

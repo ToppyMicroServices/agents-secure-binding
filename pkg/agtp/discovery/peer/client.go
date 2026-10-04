@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net"
 	"net/http"
 	"time"
@@ -25,6 +26,8 @@ import (
 	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/production"
 	"github.com/golang-jwt/jwt/v5"
 )
+
+const maxResponseOverheadBytes int64 = 64 << 10
 
 // RemoteAuthorization contains verifier-specific values for one destination.
 // Identity Grants are issued out of band by the Manager and may be reused
@@ -203,11 +206,18 @@ func requestNonce(ctx context.Context, connection *tls.Conn, reader *bufio.Reade
 }
 
 func exchangeHTTP(connection *tls.Conn, reader *bufio.Reader, request *http.Request, maximum int64) ([]byte, int, error) {
+	if maximum <= 0 || maximum > math.MaxInt64-maxResponseOverheadBytes-1 {
+		return nil, 0, ErrInvalidProtocol
+	}
 	request.Close = false
 	if err := request.Write(connection); err != nil {
 		return nil, 0, err
 	}
-	response, err := http.ReadResponse(reader, request)
+	// ReadResponse itself does not bound headers. Bound the entire response,
+	// including headers and chunk framing, before parsing attacker-sized fields.
+	// Exchanges are sequential, so this reader cannot consume a later response.
+	bounded := bufio.NewReader(io.LimitReader(reader, maximum+maxResponseOverheadBytes+1))
+	response, err := http.ReadResponse(bounded, request)
 	if err != nil {
 		return nil, 0, err
 	}

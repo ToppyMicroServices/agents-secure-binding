@@ -13,6 +13,8 @@ import (
 	"fmt"
 	"io"
 	"time"
+
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/internal/strictjson"
 )
 
 const (
@@ -197,6 +199,9 @@ func (a OutboxAcknowledgement) Validate() error {
 }
 
 func decodeOutboxPayload(raw []byte, target any) error {
+	if err := strictjson.ValidateDocument(raw, MaxOutboxPayloadBytes); err != nil {
+		return fmt.Errorf("%w: invalid outbox payload: %v", ErrInvalidEvent, err)
+	}
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(target); err != nil {

@@ -102,8 +102,10 @@ func TestNewFileHashCmdRun(t *testing.T) {
 			}
 
 			err = cmd.Execute()
-			if err != nil {
-				t.Fatalf("Error executing command: %v", err)
+			if tc.name == "Non-existent file" {
+				assert.ErrorIs(t, err, ErrCommandFailed)
+			} else {
+				assert.NoError(t, err)
 			}
 
 			out := output.String()

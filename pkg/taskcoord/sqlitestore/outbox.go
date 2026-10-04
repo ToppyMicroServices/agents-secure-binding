@@ -13,6 +13,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/internal/strictjson"
 	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/taskcoord"
 )
 
@@ -141,7 +142,9 @@ func (s *Store) PollOutbox(ctx context.Context, request taskcoord.OutboxPoll) (d
 				_ = rows.Close()
 				return unavailable(err)
 			}
-			if len(raw) > 2*taskcoord.MaxOutboxPayloadBytes || json.Unmarshal(raw, &event) != nil || event.EventID != id || event.Validate() != nil {
+			decoder := json.NewDecoder(bytes.NewReader(raw))
+			decoder.DisallowUnknownFields()
+			if strictjson.ValidateDocument(raw, 2*taskcoord.MaxOutboxPayloadBytes) != nil || decoder.Decode(&event) != nil || event.EventID != id || event.Validate() != nil {
 				_ = rows.Close()
 				return taskcoord.ErrStoreUnavailable
 			}

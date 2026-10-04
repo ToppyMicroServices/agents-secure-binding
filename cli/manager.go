@@ -42,23 +42,20 @@ func (c *CLI) NewCreateVMCmd() *cobra.Command {
 		Short:   "Create a new virtual machine",
 		Example: `create-vm`,
 		Args:    cobra.ExactArgs(0),
-		Run: func(cmd *cobra.Command, args []string) {
-			if c.connectErr != nil {
-				printError(cmd, "Failed to connect to manager: %v ❌ ", c.connectErr)
-				return
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if c.managerConnectErr != nil {
+				return printError(cmd, "Failed to connect to manager: %v ❌ ", c.managerConnectErr)
 			}
 			if c.managerClient == nil {
 				if err := c.InitializeManagerClient(cmd); err != nil {
-					printError(cmd, "Failed to connect to manager: %v ❌ ", err)
-					return
+					return printError(cmd, "Failed to connect to manager: %v ❌ ", err)
 				}
 			}
 			defer c.Close()
 
 			createReq, err := loadCerts()
 			if err != nil {
-				printError(cmd, "Error loading certs: %v ❌ ", err)
-				return
+				return printError(cmd, "Error loading certs: %v ❌ ", err)
 			}
 
 			createReq.AgentCvmServerUrl = agentCVMServerUrl
@@ -78,11 +75,11 @@ func (c *CLI) NewCreateVMCmd() *cobra.Command {
 
 			res, err := c.managerClient.CreateVm(cmd.Context(), createReq)
 			if err != nil {
-				printError(cmd, "Error creating virtual machine: %v ❌ ", err)
-				return
+				return printError(cmd, "Error creating virtual machine: %v ❌ ", err)
 			}
 
 			cmd.Println(color.New(color.FgGreen).Sprintf("✅ Virtual machine created successfully with id %s and port %s", res.CvmId, res.ForwardedPort))
+			return nil
 		},
 	}
 
@@ -99,7 +96,7 @@ func (c *CLI) NewCreateVMCmd() *cobra.Command {
 	cmd.Flags().StringVar(&awsRegion, "aws-region", "", "AWS Region")
 	cmd.Flags().StringVar(&aaKbsParams, "aa-kbs-params", "", "Attestation Agent KBS Parameters (e.g. protocol=http,type=kbs,url=http://... or just type=sample)")
 	if err := cmd.MarkFlagRequired(serverURL); err != nil {
-		printError(cmd, "Error marking flag as required: %v ❌ ", err)
+		_ = printError(cmd, "Error marking flag as required: %v ❌ ", err)
 		return cmd
 	}
 
@@ -112,15 +109,13 @@ func (c *CLI) NewRemoveVMCmd() *cobra.Command {
 		Short:   "Remove a virtual machine",
 		Example: `remove-vm <cvm_id>`,
 		Args:    cobra.ExactArgs(1),
-		Run: func(cmd *cobra.Command, args []string) {
-			if c.connectErr != nil {
-				printError(cmd, "Failed to connect to manager: %v ❌ ", c.connectErr)
-				return
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if c.managerConnectErr != nil {
+				return printError(cmd, "Failed to connect to manager: %v ❌ ", c.managerConnectErr)
 			}
 			if c.managerClient == nil {
 				if err := c.InitializeManagerClient(cmd); err != nil {
-					printError(cmd, "Failed to connect to manager: %v ❌ ", err)
-					return
+					return printError(cmd, "Failed to connect to manager: %v ❌ ", err)
 				}
 			}
 			defer c.Close()
@@ -129,11 +124,11 @@ func (c *CLI) NewRemoveVMCmd() *cobra.Command {
 
 			_, err := c.managerClient.RemoveVm(cmd.Context(), &manager.RemoveReq{CvmId: args[0]})
 			if err != nil {
-				printError(cmd, "Error removing virtual machine: %v ❌ ", err)
-				return
+				return printError(cmd, "Error removing virtual machine: %v ❌ ", err)
 			}
 
 			cmd.Println(color.New(color.FgGreen).Sprintf("✅ Virtual machine removed successfully"))
+			return nil
 		},
 	}
 }

@@ -87,7 +87,7 @@ func TestAgentClientIntegration(t *testing.T) {
 			config: clients.AttestedClientConfig{
 				StandardClientConfig: clients.StandardClientConfig{
 					URL:     testServer.listenAddr,
-					Timeout: 1,
+					Timeout: time.Second,
 				},
 			},
 			err: nil,
@@ -98,7 +98,7 @@ func TestAgentClientIntegration(t *testing.T) {
 			config: clients.AttestedClientConfig{
 				StandardClientConfig: clients.StandardClientConfig{
 					URL:     testServer.listenAddr,
-					Timeout: 1,
+					Timeout: time.Second,
 				},
 			},
 			err: errors.New("agent service is unavailable"),
@@ -108,7 +108,7 @@ func TestAgentClientIntegration(t *testing.T) {
 			config: clients.AttestedClientConfig{
 				StandardClientConfig: clients.StandardClientConfig{
 					URL:     testServer.listenAddr,
-					Timeout: 1,
+					Timeout: time.Second,
 				},
 				AttestedTLS: true,
 			},

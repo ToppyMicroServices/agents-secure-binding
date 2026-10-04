@@ -105,7 +105,7 @@ func TestCLI_NewCreateVMCmd(t *testing.T) {
 				// No expectations set as initialization fails before calling any methods
 			},
 			setupCLI: func(cli *CLI) {
-				cli.connectErr = errors.New("connection failed")
+				cli.managerConnectErr = errors.New("connection failed")
 			},
 			setupFiles: func(tmpDir string) error {
 				return nil
@@ -205,6 +205,7 @@ func TestCLI_NewCreateVMCmd(t *testing.T) {
 			err = cmd.Execute()
 
 			if tt.expectError {
+				assert.Error(t, err)
 				if tt.expectedError != "" {
 					assert.Contains(t, buf.String(), tt.expectedError)
 				}
@@ -249,7 +250,7 @@ func TestCLI_NewRemoveVMCmd(t *testing.T) {
 				// No expectations set as initialization fails before calling any methods
 			},
 			setupCLI: func(cli *CLI) {
-				cli.connectErr = errors.New("connection failed")
+				cli.managerConnectErr = errors.New("connection failed")
 			},
 			args:          []string{"vm-123"},
 			expectedError: "Failed to connect to manager: connection failed ❌",
@@ -311,6 +312,7 @@ func TestCLI_NewRemoveVMCmd(t *testing.T) {
 			err := cmd.Execute()
 
 			if tt.expectError {
+				assert.Error(t, err)
 				if tt.expectedError != "" {
 					assert.Contains(t, buf.String(), tt.expectedError)
 				}

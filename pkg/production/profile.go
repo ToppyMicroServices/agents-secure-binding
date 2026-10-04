@@ -29,6 +29,7 @@ var (
 	ErrInvalidAuthority         = errors.New("production: invalid authority policy")
 	ErrInvalidTokenLifetime     = errors.New("production: invalid token lifetime")
 	ErrMissingContext           = errors.New("production: missing context")
+	ErrInvalidCurrentTime       = errors.New("production: invalid current time")
 )
 
 // TrustSnapshot is one fail-closed view of trusted keys and revocation state.
@@ -161,9 +162,16 @@ func (p Profile) Verify(ctx context.Context, req VerifyRequest) (AcceptedIdentit
 		return AcceptedIdentity{}, ErrMissingAttestation
 	}
 
-	now := time.Now()
-	if p.Now != nil {
-		now = p.Now()
+	clock := p.Now
+	if clock == nil {
+		clock = time.Now
+	}
+	now := clock()
+	if now.IsZero() {
+		return AcceptedIdentity{}, ErrInvalidCurrentTime
+	}
+	if err := ctx.Err(); err != nil {
+		return AcceptedIdentity{}, err
 	}
 
 	verified, err := verifyIdentity(
@@ -195,8 +203,26 @@ func (p Profile) Verify(ctx context.Context, req VerifyRequest) (AcceptedIdentit
 		verified.statement.Binding.RequestContextSHA256,
 		verified.statement.Binding.Nonce,
 	}, "\x00")
+	if err := validateAcceptanceTime(ctx, clock(), verified, p.GrantAuthority.ClockSkew, p.BindingAuthority.ClockSkew); err != nil {
+		return AcceptedIdentity{}, err
+	}
+	if err := p.Attestation.Verify(ctx, req.Attestation, req.ExpectedBinding.AttestationBinderSHA256, clock()); err != nil {
+		return AcceptedIdentity{}, fmt.Errorf("recheck attestation: %w", err)
+	}
 	if err := p.ReplayCache.MarkUsed(replayKey, replayExpiry); err != nil {
 		return AcceptedIdentity{}, fmt.Errorf("commit replay state: %w", err)
+	}
+
+	if err := validateAcceptanceTime(ctx, clock(), verified, p.GrantAuthority.ClockSkew, p.BindingAuthority.ClockSkew); err != nil {
+		return AcceptedIdentity{}, err
+	}
+
+	if err := p.Attestation.Verify(ctx, req.Attestation, req.ExpectedBinding.AttestationBinderSHA256, clock()); err != nil {
+		return AcceptedIdentity{}, fmt.Errorf("recheck attestation: %w", err)
+	}
+
+	if err := validateAcceptanceTime(ctx, clock(), verified, p.GrantAuthority.ClockSkew, p.BindingAuthority.ClockSkew); err != nil {
+		return AcceptedIdentity{}, err
 	}
 
 	return AcceptedIdentity{
@@ -216,9 +242,10 @@ func (p Profile) Verify(ctx context.Context, req VerifyRequest) (AcceptedIdentit
 }
 
 type verifiedIdentity struct {
-	grant     identitypolicy.VerifiedGrant
-	statement identitypolicy.VerifiedSessionBindingStatement
-	assertion identitypolicy.Assertion
+	verifiedAt time.Time
+	grant      identitypolicy.VerifiedGrant
+	statement  identitypolicy.VerifiedSessionBindingStatement
+	assertion  identitypolicy.Assertion
 }
 
 func verifyIdentity(
@@ -255,14 +282,19 @@ func verifyIdentity(
 		return verifiedIdentity{}, fmt.Errorf("verify session binding: %w", err)
 	}
 
-	assertion, err := identitypolicy.NewAssertionFromSessionBinding(grant, statement, now)
+	// The authenticated JWT parsers above own iat, nbf, and exp validation
+	// under each authority's configured skew. These lower-level comparators
+	// have no skew setting, so omit their duplicate time checks while retaining
+	// every authority, policy, and session-binding comparison. Signed times are
+	// never rewritten; commit-time freshness is checked separately below.
+	assertion, err := identitypolicy.NewAssertionFromSessionBinding(grant, statement, time.Time{})
 	if err != nil {
 		return verifiedIdentity{}, fmt.Errorf("bind grant to session: %w", err)
 	}
-	if err := policy.ValidateAssertion(assertion, expectedBinding, now); err != nil {
+	if err := policy.ValidateAssertion(assertion, expectedBinding, time.Time{}); err != nil {
 		return verifiedIdentity{}, fmt.Errorf("verify expected identity: %w", err)
 	}
-	return verifiedIdentity{grant: grant, statement: statement, assertion: assertion}, nil
+	return verifiedIdentity{verifiedAt: now, grant: grant, statement: statement, assertion: assertion}, nil
 }
 
 func (p Profile) jwtOptions(ctx context.Context, authority AuthorityPolicy, now time.Time) (clients.JWTVerifyOptions, error) {
@@ -349,4 +381,27 @@ func identityReplayExpiry(verified verifiedIdentity, grantSkew, bindingSkew time
 		verified.grant.ExpiresAt.Add(grantSkew),
 		verified.statement.Binding.ExpiresAt.Add(bindingSkew),
 	)
+}
+
+// validateAcceptanceTime runs on both sides of a potentially slow replay commit.
+// A consumed nonce stays consumed if the commit crosses a deadline; no identity
+// outside its configured freshness window may escape to the application.
+func validateAcceptanceTime(ctx context.Context, now time.Time, verified verifiedIdentity, grantSkew, bindingSkew time.Duration) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	// nbf is validated by the JWT parser and is not retained in these
+	// projections. JWT dates are absolute wall times: strip monotonic data
+	// before checking regression so a wall-clock correction cannot make a
+	// once-valid nbf future during admission.
+	if now.IsZero() || now.UTC().Before(verified.verifiedAt.UTC()) {
+		return ErrInvalidCurrentTime
+	}
+	if verified.grant.IssuedAt.After(now.Add(grantSkew)) || verified.statement.Binding.IssuedAt.After(now.Add(bindingSkew)) {
+		return identitypolicy.ErrFutureAssertion
+	}
+	if !now.Before(verified.grant.ExpiresAt.Add(grantSkew)) || !now.Before(verified.statement.Binding.ExpiresAt.Add(bindingSkew)) {
+		return identitypolicy.ErrExpiredAssertion
+	}
+	return nil
 }

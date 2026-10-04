@@ -17,9 +17,9 @@ these repository-local requirements or create an IETF conformance claim.
 | Profile ID | Purpose | Dependencies | Current maturity |
 | --- | --- | --- | --- |
 | `asb.human-coordination.core/v1` | Participants, Assignments, Interactions, delegation, and optional reachability | none | Developer Preview |
-| `asb.human-coordination.task-action/v1` | Immutable Assignment-to-Action binding and independent execution lifecycle | core | Developer Preview; reference Store |
+| `asb.human-coordination.task-action/v1` | Immutable Assignment-to-Action binding and independent execution lifecycle | core | Developer Preview; bounded single-host SQLite Store |
 | `asb.human-coordination.relay/v1` | One consent-scoped Agent-to-Human gateway delivery intent | core | Developer Preview; local gateway only |
-| `asb.human-coordination.http/v1` | TLS 1.3/mTLS challenge and execute ingress for Human operations | core | Developer Preview |
+| `asb.human-coordination.http/v1` | TLS 1.3/mTLS challenge, execute, and authorized outcome recovery for Human operations | core | Developer Preview |
 | `asb.human-coordination.production/v1` | Capability-specific deployment and qualification overlay | core; a declaration separately names each selected profile | Unavailable |
 
 Task–Action, relay, Human matching, and production are capabilities, not
@@ -45,6 +45,10 @@ Each requirement has one stable ID in both languages. Translation changes do
 not create a new requirement. An incompatible semantic change requires a new
 profile version or requirement ID; an implementation must not silently reuse a
 v1 ID for different behavior.
+
+The durable Store implementation mapped by `CORE-009`, `TA-008`, and `TA-009`
+is the [single-host SQLite adapter](taskcoord-sqlite-store.md). These statuses
+describe implemented behavior, not multi-host failover or deployment qualification.
 
 ## Human assurance vocabulary
 
@@ -132,7 +136,7 @@ an external profile without mapped tests.
 | `ASB-HC-CORE-006` | implemented | Preserve questions, responses, corrections, withdrawals, and lineage in append-only Interaction history. | 質問、回答、訂正、撤回とlineageをappend-onlyなInteraction履歴として保持する。 |
 | `ASB-HC-CORE-007` | implemented | Allow authorized Interaction appends after Assignment terminal state without mutating its snapshot or revision. | Assignment terminal後も認証済みInteraction追記を許可し、snapshotとrevisionは変更しない。 |
 | `ASB-HC-CORE-008` | implemented | Keep reachability grants opaque, scoped, revocable, and revalidate current consent and Participant state before use. | reachability grantをopaque、scoped、revocableにし、利用前にconsentとParticipantの現在状態を再検証する。 |
-| `ASB-HC-CORE-009` | reference-only | A durable Store atomically provides revision CAS, exact deduplication, immutable state, and required outbox writes. | durable Storeはrevision CAS、exact deduplication、immutable state、必要なoutbox writeをatomicに提供する。 |
+| `ASB-HC-CORE-009` | implemented | A durable Store atomically provides revision CAS, exact deduplication, immutable state, and required outbox writes. | durable Storeはrevision CAS、exact deduplication、immutable state、必要なoutbox writeをatomicに提供する。 |
 | `ASB-HC-CORE-010` | reference-only | Bind realm as verifier-local context and namespace; do not accept a caller-controlled realm field. | realmをverifier-local contextとnamespaceとして束縛し、caller-controlled realm fieldを受理しない。 |
 | `ASB-HC-CORE-011` | implemented | Exclude Humans from Agent discovery; optional matching returns opaque bounded candidates without direct contacts. | HumanをAgent discoveryから除外し、任意matchingでは直接連絡先を含まないopaqueでboundedなcandidateだけを返す。 |
 
@@ -147,8 +151,8 @@ an external profile without mapped tests.
 | `ASB-HC-TA-005` | implemented | Release the executor lease while waiting and resume only with the required current authenticated evidence. | WAITING中はexecutor leaseを解放し、必要な現在の認証済みevidenceでのみresumeする。 |
 | `ASB-HC-TA-006` | implemented | Orphan on lease expiry without claiming failure; use higher fencing or reconciliation for takeover. | lease expiryを失敗と断定せずORPHANEDにし、takeoverには上位fencingまたはreconciliationを用いる。 |
 | `ASB-HC-TA-007` | implemented | Use current topology and satisfaction state for dependency wait/resume; keep other waits as external escape paths. | dependency wait/resumeでは現在のtopologyとsatisfactionを使い、他のwaitはexternal escape pathとして扱う。 |
-| `ASB-HC-TA-008` | reference-only | A production Store supplies multi-record atomicity, strict durable schemas, event reapplication, and restart durability. | production Storeはmulti-record atomicity、strict durable schema、event再適用、restart durabilityを提供する。 |
-| `ASB-HC-TA-009` | reference-only | Keep acceptance business identity, exact proof-attempt identity, and the first canonical result separate; recover the exact attempt after expiry, never create state with an expired proof, and require reconciliation for a different proof. | acceptanceのbusiness identity、exact proof-attempt identity、最初のcanonical resultを分離し、exact attemptは期限後も回収し、expired proofでは新規stateを作らず、異なるproofにはreconciliationを要求する。 |
+| `ASB-HC-TA-008` | implemented | A production Store supplies multi-record atomicity, strict durable schemas, event reapplication, and restart durability. | production Storeはmulti-record atomicity、strict durable schema、event再適用、restart durabilityを提供する。 |
+| `ASB-HC-TA-009` | implemented | Keep acceptance business identity, exact proof-attempt identity, and the first canonical result separate; recover the exact attempt after expiry, never create state with an expired proof, and require reconciliation for a different proof. | acceptanceのbusiness identity、exact proof-attempt identity、最初のcanonical resultを分離し、exact attemptは期限後も回収し、expired proofでは新規stateを作らず、異なるproofにはreconciliationを要求する。 |
 
 ## Relay profile matrix
 
@@ -167,7 +171,7 @@ an external profile without mapped tests.
 
 | ID | Status | English | 日本語 |
 | --- | --- | --- | --- |
-| `ASB-HC-HTTP-001` | implemented | Expose only the documented POST challenge (`201`) and execute (`200`) operations; return structured errors elsewhere. | 文書化したPOST challenge (`201`)とexecute (`200`)だけを公開し、他はstructured errorにする。 |
+| `ASB-HC-HTTP-001` | implemented | Expose POST challenge (`201`), execute (`200`), and recover (`200`, with a durable Store and fresh recovery authorization); return structured errors elsewhere. | POST challenge (`201`)、execute (`200`)、recover（durable Storeとfreshなrecovery認可がある場合に`200`）を公開し、他はstructured errorにする。 |
 | `ASB-HC-HTTP-002` | implemented | Terminate verified TLS 1.3/mTLS and derive Actor and session bindings from the accepted connection. | verified TLS 1.3/mTLSを終端し、accepted connectionからActorとsession bindingを導出する。 |
 | `ASB-HC-HTTP-003` | implemented | Bind a challenge to one connection, digest, nonce, expiry, and execute attempt; never replace a live challenge on ID collision; reject cross-connection use. | challengeを一つのconnection、digest、nonce、expiry、execute attemptへ束縛し、ID衝突でlive challengeを置換せず、別connection利用を拒否する。 |
 | `ASB-HC-HTTP-004` | implemented | Require JSON and the endpoint-specific bounded strict schema; reject duplicate, unknown, trailing, and opposite envelopes. | JSONとendpoint固有のbounded strict schemaを要求し、duplicate、unknown、trailing、opposite envelopeを拒否する。 |
@@ -188,7 +192,7 @@ an external profile without mapped tests.
 | `ASB-HC-PROD-005` | reference-only | Supply durable grant-scoped relay serialization and provider idempotency. | durableなgrant-scoped relay serializationとprovider idempotencyを提供する。 |
 | `ASB-HC-PROD-006` | unqualified | Qualify the selected live Redis/Valkey service for persistence, replication, failover, backup, recovery, and unknown writes. | 選択したlive Redis/Valkeyをpersistence、replication、failover、backup、recovery、unknown writeについてqualificationする。 |
 | `ASB-HC-PROD-007` | unqualified | Complete live operational qualification for every selected ingress, replay, outbox, recovery, and provider boundary. | 選択したingress、replay、outbox、recovery、provider boundaryごとにlive operational qualificationを完了する。 |
-| `ASB-HC-PROD-008` | unimplemented | Supply missing production Task–Action, relay/provider recovery, and durable outcome-reconciliation adapters when selected. | 選択時に不足しているproduction Task–Action、relay/provider recovery、durable outcome reconciliation adapterを提供する。 |
+| `ASB-HC-PROD-008` | unimplemented | Supply and qualify each selected adapter. Single-host SQLite Task–Action and Human outcome recovery exist; production relay/provider recovery remains unimplemented. | 選択した各adapterを提供しqualificationする。単一host向けSQLite Task–ActionとHuman outcome recoveryは実装済みだが、production relay/provider recoveryは未実装である。 |
 
 The detailed deployment gates and current unavailable decision are in
 [`human-coordination-production-v1.md`](human-coordination-production-v1.md).

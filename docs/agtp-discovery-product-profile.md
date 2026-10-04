@@ -23,6 +23,10 @@ profile; local integration checks do not establish multi-host qualification.
   snapshot is committed, Agent search fails closed and `/healthz` returns 503.
 - Request bytes, live records, tombstones, peers, and per-peer request rate are
   bounded. Audit JSONL rotates at a configured byte limit.
+- At most 64 accepted TCP connections enter TLS; further connections wait in
+  the kernel backlog. Peer responses are bounded before HTTP header parsing to
+  the configured body limit plus 64 KiB for headers and framing. The body limit
+  defaults to 1 MiB, and connection I/O retains the configured timeout.
 - `/healthz` and `/metrics` are available through the same mTLS listener;
   persistence and audit failures have dedicated counters.
 - In the LAN/VPC profile, all HTTP routes also require a source address in the

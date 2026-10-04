@@ -27,10 +27,9 @@ func (cli *CLI) NewAlgorithmCmd() *cobra.Command {
 		Short:   "Upload an algorithm binary",
 		Example: "algo <algo_file> <private_key_file_path>",
 		Args:    cobra.ExactArgs(2),
-		Run: func(cmd *cobra.Command, args []string) {
-			if cli.connectErr != nil {
-				printError(cmd, "Failed to connect to agent: %v ❌ ", cli.connectErr)
-				return
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := cli.ensureAgentSDK(cmd); err != nil {
+				return printError(cmd, "Failed to connect to agent: %v ❌ ", err)
 			}
 
 			algorithmFile := args[0]
@@ -39,8 +38,7 @@ func (cli *CLI) NewAlgorithmCmd() *cobra.Command {
 
 			algorithm, err := os.Open(algorithmFile)
 			if err != nil {
-				printError(cmd, "Error reading algorithm file: %v ❌ ", err)
-				return
+				return printError(cmd, "Error reading algorithm file: %v ❌ ", err)
 			}
 
 			defer algorithm.Close()
@@ -49,34 +47,31 @@ func (cli *CLI) NewAlgorithmCmd() *cobra.Command {
 			if requirementsFile != "" {
 				req, err = os.Open(requirementsFile)
 				if err != nil {
-					printError(cmd, "Error reading requirments file: %v ❌ ", err)
-					return
+					return printError(cmd, "Error reading requirments file: %v ❌ ", err)
 				}
 				defer req.Close()
 			}
 
 			privKeyFile, err := os.ReadFile(args[1])
 			if err != nil {
-				printError(cmd, "Error reading private key file: %v ❌ ", err)
-				return
+				return printError(cmd, "Error reading private key file: %v ❌ ", err)
 			}
 
 			pemBlock, _ := pem.Decode(privKeyFile)
 
 			privKey, err := decodeKey(pemBlock)
 			if err != nil {
-				printError(cmd, "Error decoding private key: %v ❌ ", err)
-				return
+				return printError(cmd, "Error decoding private key: %v ❌ ", err)
 			}
 
 			ctx := metadata.NewOutgoingContext(cmd.Context(), metadata.New(make(map[string]string)))
 
 			if err := cli.agentSDK.Algo(addAlgoMetadata(ctx), algorithm, req, privKey); err != nil {
-				printError(cmd, "Failed to upload algorithm due to error: %v ❌ ", err)
-				return
+				return printError(cmd, "Failed to upload algorithm due to error: %v ❌ ", err)
 			}
 
 			cmd.Println(color.New(color.FgGreen).Sprint("Successfully uploaded algorithm! ✔ "))
+			return nil
 		},
 	}
 

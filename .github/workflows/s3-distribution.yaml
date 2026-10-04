@@ -1,0 +1,80 @@
+name: ASB S3 distribution
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/s3-distribution.yaml'
+      - 'scripts/package-s3.py'
+      - 'scripts/test_package_s3.py'
+      - 'packaging/s3/**'
+      - 'docs/*s3*.md'
+      - 'docs/asb-linux-distribution.md'
+      - 'docs/least-privilege-aws.md'
+      - 'docs/least-privilege-execution.md'
+      - 'LICENSE'
+  # Downloaded artifacts are inspected and executed only in a PR cache scope.
+  # Release preparation uses the reviewed CLI outside default-branch jobs.
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  distribution:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      GOWORK: 'off'
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version: 1.26.6
+          cache: false
+      - name: Test archive and signer rejection paths
+        run: python3 -m unittest -v scripts/test_package_s3.py
+      - name: Retrieve the exact qualified Linux artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh run download 36711947746 --repo ToppyMicroServices/agents-secure-binding \
+            --name asb-s3-linux-36711947746 --dir "$RUNNER_TEMP/s3-reference"
+      - name: Package and verify the candidate twice
+        run: |
+          mkdir -p build/s3-distribution
+          archive=build/s3-distribution/asb-s3-v0.1.0-rc.1-linux-amd64.tar.gz
+          python3 scripts/package-s3.py create --binary "$RUNNER_TEMP/s3-reference/asb-s3" --output "$archive"
+          python3 scripts/package-s3.py create --binary "$RUNNER_TEMP/s3-reference/asb-s3" --output "$RUNNER_TEMP/repeated.tar.gz"
+          cmp "$archive" "$RUNNER_TEMP/repeated.tar.gz"
+          python3 scripts/package-s3.py verify "$archive" > build/s3-distribution/verification.json
+          sha256sum "$archive" > build/s3-distribution/SHA256SUMS
+      - name: Exercise the final distribution on Linux without AWS
+        run: |
+          archive=build/s3-distribution/asb-s3-v0.1.0-rc.1-linux-amd64.tar.gz
+          tar -xzf "$archive" -C "$RUNNER_TEMP"
+          bundle="$RUNNER_TEMP/asb-s3-v0.1.0-rc.1"
+          "$bundle/bin/asb-s3" init-store --directory "$RUNNER_TEMP/distribution-journal" > "$RUNNER_TEMP/init.json"
+          mkdir -m 700 "$RUNNER_TEMP/distribution-backup"
+          "$bundle/bin/asb-s3" backup --directory "$RUNNER_TEMP/distribution-journal" \
+            --output "$RUNNER_TEMP/distribution-backup/snapshot.sqlite" > "$RUNNER_TEMP/backup.json"
+          "$bundle/bin/asb-s3" restore --directory "$RUNNER_TEMP/distribution-restored" \
+            --input "$RUNNER_TEMP/distribution-backup/snapshot.sqlite" \
+            --sha256 "$(jq -r .sha256 "$RUNNER_TEMP/backup.json")" > "$RUNNER_TEMP/restore.json"
+          test "$(jq -r .namespace "$RUNNER_TEMP/init.json")" != "$(jq -r .namespace "$RUNNER_TEMP/restore.json")"
+          "$bundle/bin/asb-s3" check --directory "$RUNNER_TEMP/distribution-restored"
+          sudo install -m 0755 "$bundle/bin/asb-s3" /usr/local/bin/asb-s3
+          systemd-analyze verify "$bundle/packaging/s3/asb-s3.service"
+          jq -n --arg binary "$(sha256sum "$bundle/bin/asb-s3" | cut -d ' ' -f1)" \
+            --arg archive "$(sha256sum "$archive" | cut -d ' ' -f1)" \
+            '{platform:"ubuntu-24.04-amd64",archive_sha256:$archive,binary_sha256:$binary,archive_roundtrip:true,init_backup_restore:true,namespace_rotated:true,integrity_check:true,unit_syntax:true,aws_retested:false,organization_deployment_qualified:false}' \
+            > build/s3-distribution/linux-check.json
+      - name: Save the unsigned candidate for release review
+        uses: actions/upload-artifact@v4
+        with:
+          name: asb-s3-distribution-${{ github.run_id }}
+          path: build/s3-distribution/
+          if-no-files-found: error
+          retention-days: 90

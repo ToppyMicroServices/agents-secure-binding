@@ -22,25 +22,22 @@ func (cli *CLI) NewResultsCmd() *cobra.Command {
 		Short:   "Retrieve computation result file",
 		Example: "result <private_key_file_path> --filename my_results.zip --output-dir /path/to/directory",
 		Args:    cobra.ExactArgs(1),
-		Run: func(cmd *cobra.Command, args []string) {
-			if cli.connectErr != nil {
-				printError(cmd, "Failed to connect to agent: %v ❌ ", cli.connectErr)
-				return
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := cli.ensureAgentSDK(cmd); err != nil {
+				return printError(cmd, "Failed to connect to agent: %v ❌ ", err)
 			}
 
 			cmd.Println("⏳ Retrieving computation result file")
 
 			privKeyFile, err := os.ReadFile(args[0])
 			if err != nil {
-				printError(cmd, "Error reading private key file: %v ❌ ", err)
-				return
+				return printError(cmd, "Error reading private key file: %v ❌ ", err)
 			}
 
 			var outputPath string
 			if outputDir != "" {
 				if err := os.MkdirAll(outputDir, 0o755); err != nil {
-					printError(cmd, "Error creating output directory: %v ❌ ", err)
-					return
+					return printError(cmd, "Error creating output directory: %v ❌ ", err)
 				}
 				outputPath = filepath.Join(outputDir, filename)
 			} else {
@@ -56,24 +53,22 @@ func (cli *CLI) NewResultsCmd() *cobra.Command {
 
 			privKey, err := decodeKey(pemBlock)
 			if err != nil {
-				printError(cmd, "Error decoding private key: %v ❌ ", err)
-				return
+				return printError(cmd, "Error decoding private key: %v ❌ ", err)
 			}
 
 			resultFile, err := os.Create(outputPath)
 			if err != nil {
-				printError(cmd, "Error creating result file: %v ❌ ", err)
-				return
+				return printError(cmd, "Error creating result file: %v ❌ ", err)
 			}
 			defer resultFile.Close()
 
 			if err = cli.agentSDK.Result(cmd.Context(), privKey, resultFile); err != nil {
-				printError(cmd, "Error retrieving computation result: %v ❌ ", err)
-				return
+				return printError(cmd, "Error retrieving computation result: %v ❌ ", err)
 			}
 
 			cmd.Println(color.New(color.FgGreen).Sprintf("Computation result retrieved and saved successfully! ✔"))
 			cmd.Println(color.New(color.FgCyan).Sprintf("📁 Location: %s", absPath))
+			return nil
 		},
 	}
 
