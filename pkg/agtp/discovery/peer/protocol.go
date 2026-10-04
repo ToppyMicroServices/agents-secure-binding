@@ -14,11 +14,13 @@ import (
 
 const (
 	ProtocolVersion = 1
-	NoncePath       = "/v1/peer/nonce"
-	ReplicatePath   = "/v1/peer/replicate"
-	FindNodePath    = "/v1/peer/find-node"
-	HealthPath      = "/healthz"
-	MetricsPath     = "/metrics"
+	// EpochProtocolVersion isolates explicitly configured reclamation epochs.
+	EpochProtocolVersion = 2
+	NoncePath            = "/v1/peer/nonce"
+	ReplicatePath        = "/v1/peer/replicate"
+	FindNodePath         = "/v1/peer/find-node"
+	HealthPath           = "/healthz"
+	MetricsPath          = "/metrics"
 
 	IdentityGrantHeader  = "ASB-Identity-Grant"
 	SessionBindingHeader = "ASB-Session-Binding"
@@ -41,6 +43,7 @@ var (
 
 // ReplicateRequest exchanges Presence and ANS digests and deltas.
 type ReplicateRequest struct {
+	Epoch      uint64                  `json:"epoch,omitempty"`
 	Protocol   int                     `json:"protocol"`
 	Sender     discovery.NodeInfo      `json:"sender"`
 	Digest     discovery.Digest        `json:"digest"`
@@ -51,6 +54,7 @@ type ReplicateRequest struct {
 
 // ReplicateResponse returns state newer than the requester's digest.
 type ReplicateResponse struct {
+	Epoch      uint64                  `json:"epoch,omitempty"`
 	Protocol   int                     `json:"protocol"`
 	Digest     discovery.Digest        `json:"digest"`
 	Delta      discovery.Delta         `json:"delta"`
@@ -60,6 +64,7 @@ type ReplicateResponse struct {
 
 // FindNodeRequest performs one authenticated DHT lookup hop.
 type FindNodeRequest struct {
+	Epoch    uint64             `json:"epoch,omitempty"`
 	Protocol int                `json:"protocol"`
 	Sender   discovery.NodeInfo `json:"sender"`
 	Target   string             `json:"target"`
@@ -68,6 +73,7 @@ type FindNodeRequest struct {
 
 // FindNodeResponse contains the receiver's nearest trusted peers.
 type FindNodeResponse struct {
+	Epoch    uint64               `json:"epoch,omitempty"`
 	Protocol int                  `json:"protocol"`
 	Peers    []discovery.NodeInfo `json:"peers"`
 }
@@ -124,4 +130,12 @@ func actionScope(action Action) string {
 
 func nodeResource(nodeID string) string {
 	return "agtp-node:" + nodeID
+}
+
+// protocolForEpoch preserves v1 wire messages when epoch reclamation is disabled.
+func protocolForEpoch(epoch uint64) int {
+	if epoch != 0 {
+		return EpochProtocolVersion
+	}
+	return ProtocolVersion
 }

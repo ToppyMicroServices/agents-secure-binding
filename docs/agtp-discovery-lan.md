@@ -107,8 +107,9 @@ the Linux service or establish network reachability.
 Before qualifying a particular deployment, check convergence and authenticated
 lookup across its hosts, then withdrawal during a temporary peer partition and
 recovery after restarting a node with its own persistent files. Record those
-results separately from local tests. The existing receiver-local tombstone
-retention limits still apply; see the
+results separately from local tests. The default v1 receiver-local tombstone
+retention limits still apply. An opt-in epoch profile requires a coordinated
+population reset and re-announcement; see the
 [product profile](agtp-discovery-product-profile.md#trust-and-compatibility-boundary).
 
 Agent search continues to query each node's locally converged Presence records.

@@ -34,8 +34,8 @@ Withdrawal retention is receiver policy. A tombstone is retained for at least
 without a finite lease produces an indefinite suppression marker. Since the
 reference store is in memory, “indefinite” disables time-based GC but does not
 survive process restart on its own. The peer service persists these markers.
-Its receiver-local retention and cluster-wide reclamation limits are described
-in the [product profile](agtp-discovery-product-profile.md).
+Its receiver-local retention limits and optional coordinated epoch reclamation
+are described in the [product profile](agtp-discovery-product-profile.md).
 
 ## Files
 

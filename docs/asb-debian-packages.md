@@ -93,6 +93,124 @@ approval app after installation. `agents-secure-binding-cli --help` may create
 its existing per-user cache directory. Neither that cache nor application state
 belongs to the package file list, so package removal must preserve it.
 
-An apt repository, signing-key distribution, release approval and ongoing update
-channel are not created by these scripts. Publish only the reviewed bytes after
-their Linux checks and the selected component qualification have passed.
+## Prepare an authenticated apt snapshot
+
+`scripts/asb-apt-repository.py` prepares repository metadata and signs a local
+snapshot. It does not publish it or install trust on a client. It requires
+Python, `dpkg-deb`, GnuPG and `gpgv` on Linux. The signing input must match a
+successful lifecycle record for those exact package bytes, source and version.
+A successful record is evidence for review, not an independent release approval.
+
+```sh
+created=$(date +%s)
+expires=$((created + 604800))
+python3 scripts/asb-apt-repository.py prepare \
+  --artifacts build/debian-candidates --lifecycle build/debian-lifecycle.json \
+  --created "$created" --expires "$expires" --output build/apt-snapshot
+python3 scripts/asb-apt-repository.py sign \
+  --repository build/apt-snapshot \
+  --gnupg-home /absolute/private/asb-release-gnupg \
+  --signer APPROVED_EXACT_SIGNING_KEY_FINGERPRINT
+python3 scripts/asb-apt-repository.py verify \
+  --repository build/apt-snapshot --keyring /absolute/approved/asb-archive.gpg \
+  --signer APPROVED_EXACT_SIGNING_KEY_FINGERPRINT
+```
+
+Replace the key paths and fingerprint with the approved release key. The
+fingerprint is the complete uppercase 40-character fingerprint of the exact
+signing key or subkey. The signer requires an explicit private GnuPG home; it
+never selects a default identity or replaces existing signatures. Production
+key custody, offline backup, access approval and revocation remain operator
+choices. CI generates unrelated one-day test keys in a temporary home and
+destroys that home after the check. It never uses a personal or production key.
+
+The unsigned `Packages`, compressed index, SHA-256 by-hash objects and `Release`
+are deterministic for the supplied packages and times. OpenPGP signatures have
+their own creation times. Metadata validity is capped at seven days, and signing
+and verification reject expired or future-dated metadata. Renewal requires a
+fresh reviewed snapshot before expiry; an outage beyond that date deliberately
+blocks apt updates. Choose a shorter window if the publishing operation can
+reliably renew it. Do not disable expiry checks to mask an outage.
+
+The verifier requires both `InRelease` and `Release.gpg` to match the exact
+`Release`, an independently selected signing fingerprint, the complete package
+inventory and deterministic metadata. It rejects changed packages, extra files,
+symlinks, duplicate JSON fields, unknown signers and invalid signatures. The
+manifest's lifecycle hash binds the supplied evidence bytes; it does not attest
+to a trusted builder or prove wider product qualification.
+
+## Configure a client and rotate keys
+
+After selecting a real HTTPS destination, generate a deb822 source:
+
+```sh
+python3 scripts/asb-apt-repository.py source \
+  --uri https://YOUR_APPROVED_APT_HOST/asb >asb.sources
+```
+
+An administrator installs the approved, fingerprint-checked public keyring as
+`/etc/apt/keyrings/asb-archive.gpg` with mode `0644`, and the reviewed source as
+`/etc/apt/sources.list.d/asb.sources`. Export OpenPGP public key bytes with
+`gpg --export-options export-minimal --export`; a GnuPG keybox is not an apt
+keyring. Directories must also be searchable by `_apt`. The generated source
+uses `Signed-By` for this repository and enables date and expiry checks. It does
+not add trust globally or set `Trusted: yes`. These choices follow Debian's
+[apt-secure documentation](https://manpages.debian.org/trixie/apt/apt-secure.8.en.html)
+and [source configuration](https://manpages.debian.org/trixie/apt/sources.list.5.en.html).
+
+For planned rotation, deliver an A+B public keyring through the organization's
+authenticated configuration channel while A still signs current metadata. Check
+both fingerprints against the approved record. After clients have that keyring,
+publish a fresh B-signed snapshot. Verify their update results, then replace the
+keyring with B alone. The Linux check proves that A-only clients reject B before
+the overlap, that A+B clients can upgrade with B, and that B-only clients reject
+A afterwards. Clients that missed the overlap need an authenticated keyring
+update; do not recover by disabling signature checks. If A is compromised, an
+A-signed delivery alone cannot authenticate B: use the independent recovery
+channel and remove A promptly.
+
+Publish immutable package/by-hash objects before the corresponding signed
+metadata, and retain objects referenced by any unexpired snapshot. The current
+helper deliberately refuses to update an existing snapshot in place. The
+selected host must provide atomic metadata replacement, HTTPS, access logging
+without credentials, rollback recovery and monitoring before public delivery is
+qualified. After publication, retrieve the current snapshot's declared files
+and both signatures into a fresh directory, then use the same verifier. Retained
+older objects belong to older snapshots and are outside that verification set;
+passing the accumulated mirror directory to the strict snapshot verifier will
+reject those extra files. An old but still valid signed index can be replayed within its validity window;
+this tooling does not provide a client-side monotonic release counter. Normal
+apt upgrade does not automatically downgrade installed packages, but that does
+not protect a fresh client from such a replay.
+
+## Exercise apt authentication and upgrades on Linux
+
+The Debian workflow builds revisions `0.1.0~preview.1-1` and
+`0.1.0~preview.1-2` from the same source, exercises both lifecycle gates, and runs:
+
+```sh
+python3 scripts/test_asb_apt_repository.py
+python3 scripts/check-asb-apt.py \
+  --initial build/debian-candidates --initial-lifecycle build/debian-lifecycle.json \
+  --upgrade build/debian-upgrade --upgrade-lifecycle build/debian-upgrade-lifecycle.json \
+  --output build/apt-lifecycle.json --image ubuntu:24.04
+```
+
+A disposable Linux container with network access disabled installs from signed
+local repository snapshots. It checks a version upgrade, preserves a real Human
+receipt/database and their file modes, and recovers the receipt afterwards. It
+also requires apt and the independent verifier to reject unsigned metadata,
+unknown or retired keys, signature/index/package changes, expired metadata and
+future-dated metadata. Each rejected apt update starts with an empty list/cache,
+so stale successful results cannot satisfy the negative check. The report
+records exact package hashes, image identity, test key fingerprints and phases.
+Its adjacent `apt-lifecycle.evidence` directory preserves the signed metadata
+and public test keyrings with recorded hashes. Combine each metadata tree with
+its matching candidate packages at the manifest's pool paths to repeat signature
+and byte verification before metadata expiry; the private test keys are not kept.
+
+This is a same-source Debian revision transition, not a database-schema migration
+or a test of a live HTTPS host. The S3 state check uses an operator marker. No
+service is activated, and no host packages or AWS resources are changed. The
+production key, authenticated client key distribution, hosting destination and
+post-publication verification remain unqualified until selected and exercised.

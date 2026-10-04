@@ -101,6 +101,45 @@ deduplication/fencing evidence. Limits fail closed; there is no automatic
 destructive compaction. Each transaction validates stored history, so this
 adapter targets bounded workloads rather than high throughput.
 
+Schema version 2 adds durable reachability authority and an outbox recovery
+audit. Existing version-1 databases migrate transactionally when opened. Keep a
+consistent backup and stop all old writers before deployment. Older binaries
+do not participate in the new grant guard; do not run them against the upgraded
+database. The upgrade does not delete authorization or delivery history.
+
+### Poison-record recovery
+
+A malformed outbox event makes a poll fail before granting any leases. Recovery
+is an explicit, trusted operator action; the normal consumer never discards or
+automatically repairs it. Keep outbox access inside the backend boundary.
+
+1. Preserve a consistent backup and inspect the affected row in a private
+   environment. Record its exact SHA-256 and an opaque incident reference.
+2. Call `QuarantineOutbox` with a fresh quarantine ID, the delivery ID, expected
+   corrupt-document digest and reason reference. The adapter rejects a valid
+   document, an acknowledged row, a current lease or changed bytes. Expired
+   worker capabilities are cleared while used lease IDs remain reserved.
+3. The row and original corrupt bytes remain in the database and recovery audit.
+   Polling can deliver other records while this row remains explicitly pending
+   recovery; quarantine is not delivery success or cancellation.
+4. Recover replacement bytes from a trusted backup. `RestoreQuarantinedOutbox`
+   checks schema and payload bindings, then proves that replay into a detached
+   copy of authoritative TaskCoord history changes no state. A syntactically
+   valid but new or changed authorization cannot pass. The restored event keeps
+   its original EventID and requires a fresh worker lease. Consumers still
+   deduplicate that EventID.
+5. Confirm the retained original digest, restoration timestamp and replacement
+   digest in `outbox_quarantine`. Do not delete the evidence or rerun an external
+   effect to resolve a missing acknowledgement. A corrupt authoritative state
+   snapshot cannot be repaired through this API; fence writers and use the
+   backup/restore procedure above.
+
+Recovery metadata is private operator evidence, not a public projection. Audit
+records are bounded to 100,000 and are never automatically compacted. Repeated
+quarantine/restore operations use new quarantine IDs and retain prior evidence.
+Actual bytes, lease ownership, acknowledgement state and historical mutation
+bindings are compared inside the same SQL write transaction.
+
 A storage/commit error may have an unknown outcome. Recover by stable operation
 or event identity. Do not infer that an external effect is safe to repeat.
 Outbox publication is at-least-once: consumers deduplicate EventID. A replaced or
@@ -117,6 +156,8 @@ the real TLS/ASB plus SQLite recovery tests. Tests exercise:
   revocation/START orderings, dependency wait/resume and normal completion;
 - subprocess termination before/after commit, injected state/outbox write errors,
   callback rollback, ignored replay failure and corrupt stored state;
+- poison-row quarantine, unchanged authorized-history restoration, stale-worker
+  fencing and retained recovery evidence;
 - lease expiry and unknown-outcome reconciliation, outbox fencing, consistent
   backup/restore, and exact response-byte retention.
 

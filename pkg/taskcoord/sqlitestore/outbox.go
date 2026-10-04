@@ -122,7 +122,7 @@ func (s *Store) PollOutbox(ctx context.Context, request taskcoord.OutboxPoll) (d
 	}
 	now := s.now().UTC()
 	var ready bool
-	if err := s.db.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM outbox WHERE acknowledged=0 AND expires<=?)", now.UnixNano()).Scan(&ready); err != nil {
+	if err := s.db.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM outbox WHERE acknowledged=0 AND expires<=? AND NOT EXISTS(SELECT 1 FROM outbox_quarantine q WHERE q.delivery_id=outbox.id AND q.restored_at=0))", now.UnixNano()).Scan(&ready); err != nil {
 		return nil, unavailable(err)
 	}
 	if !ready {
@@ -130,7 +130,7 @@ func (s *Store) PollOutbox(ctx context.Context, request taskcoord.OutboxPoll) (d
 	}
 	err = s.runOutboxWrite(ctx, func(conn *sql.Conn) error {
 		now = s.now().UTC()
-		rows, err := conn.QueryContext(ctx, "SELECT id,document FROM outbox WHERE acknowledged=0 AND expires<=? ORDER BY rowid LIMIT ?", now.UnixNano(), request.Limit)
+		rows, err := conn.QueryContext(ctx, "SELECT id,document FROM outbox WHERE acknowledged=0 AND expires<=? AND NOT EXISTS(SELECT 1 FROM outbox_quarantine q WHERE q.delivery_id=outbox.id AND q.restored_at=0) ORDER BY rowid LIMIT ?", now.UnixNano(), request.Limit)
 		if err != nil {
 			return unavailable(err)
 		}

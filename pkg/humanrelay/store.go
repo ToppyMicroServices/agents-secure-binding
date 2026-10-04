@@ -11,7 +11,7 @@ import (
 )
 
 // GrantTransaction is the TaskCoord authorization transaction needed by the
-// reference MemoryStore. It must serialize queue and dispatch authorization
+// relay stores. It must serialize queue and dispatch authorization
 // with grant/consent revocation and Participant status.
 type GrantTransaction interface {
 	taskcoord.HumanReachabilityRelayTransaction
@@ -45,7 +45,7 @@ type Store interface {
 // SessionDispatcher sends an opaque relay-session request to a configured
 // Human gateway. It is consumed only by the trusted Worker, never by an
 // Agent-facing route. Implementations must deduplicate by
-// DispatchRequest.IntentID. The callback runs under the reference store's
+// DispatchRequest.IntentID and honor context cancellation. The callback runs under the store's
 // grant-scoped dispatch guard and must not re-enter the Store or reachability
 // directory. Errors may contain provider-private routing data and must remain
 // worker-private.

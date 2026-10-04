@@ -7,6 +7,9 @@ on:
       - 'scripts/build-asb-deb.py'
       - 'scripts/test_build_asb_deb.py'
       - 'scripts/check-asb-deb-lifecycle.py'
+      - 'scripts/asb-apt-repository.py'
+      - 'scripts/test_asb_apt_repository.py'
+      - 'scripts/check-asb-apt.py'
       - 'docs/asb-linux-distribution.md'
       - 'docs/asb-debian-packages.md'
       - 'docs/API_COMPATIBILITY.md'
@@ -30,7 +33,7 @@ permissions:
 jobs:
   packages:
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 30
     env:
       GOWORK: 'off'
       PYTHONDONTWRITEBYTECODE: '1'
@@ -42,7 +45,9 @@ jobs:
         with:
           go-version: 1.26.6
       - name: Test Debian builder rejection paths
-        run: python3 scripts/test_build_asb_deb.py
+        run: |
+          python3 scripts/test_build_asb_deb.py
+          python3 scripts/test_asb_apt_repository.py
       - name: Build all explicit candidate components
         run: |
           python3 scripts/build-asb-deb.py \
@@ -55,6 +60,22 @@ jobs:
           python3 scripts/check-asb-deb-lifecycle.py \
             --artifacts build/debian-candidates \
             --output build/debian-lifecycle.json --image ubuntu:24.04
+      - name: Build the next Debian revision from the same reviewed source
+        run: |
+          python3 scripts/build-asb-deb.py \
+            --source-commit "$(git rev-parse HEAD)" \
+            --version '0.1.0~preview.1-2' \
+            --maintainer 'ASB CI <ci@example.invalid>' \
+            --output build/debian-upgrade --with-human --with-s3
+          python3 scripts/check-asb-deb-lifecycle.py \
+            --artifacts build/debian-upgrade \
+            --output build/debian-upgrade-lifecycle.json --image ubuntu:24.04
+      - name: Check signed apt delivery and key rotation with ephemeral keys
+        run: |
+          python3 scripts/check-asb-apt.py \
+            --initial build/debian-candidates --initial-lifecycle build/debian-lifecycle.json \
+            --upgrade build/debian-upgrade --upgrade-lifecycle build/debian-upgrade-lifecycle.json \
+            --output build/apt-lifecycle.json --image ubuntu:24.04
       - name: Save candidate packages and Linux evidence
         uses: actions/upload-artifact@v4
         with:
@@ -62,5 +83,9 @@ jobs:
           path: |
             build/debian-candidates/
             build/debian-lifecycle.json
+            build/debian-upgrade/
+            build/debian-upgrade-lifecycle.json
+            build/apt-lifecycle.json
+            build/apt-lifecycle.evidence/
           if-no-files-found: error
           retention-days: 90

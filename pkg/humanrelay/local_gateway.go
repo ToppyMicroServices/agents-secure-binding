@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-// LocalGatewaySink is a Mac/CI-safe Human gateway inbox. It records only the
+// LocalGatewaySink is a synthetic in-process Human gateway inbox. It records only the
 // opaque relay session and content reference; it has no Human/contact fields.
 type LocalGatewaySink struct {
 	mu       sync.RWMutex
