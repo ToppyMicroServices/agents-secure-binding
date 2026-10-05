@@ -27,7 +27,7 @@ The following are separate claims:
 | Task Participant and TaskCoord state | `asb.human-coordination.core/v1` | Reference behavior; Redis/Valkey protocol tests; bounded single-host SQLite adapter with restart and multiprocess tests |
 | Human TLS ingress | `asb.human-coordination.http/v1` | TLS 1.3/mTLS and all four operation recovery paths tested with SQLite |
 | Task–Action binding | `asb.human-coordination.task-action/v1` | Reference Store and single-host SQLite implementation of the complete Store interface |
-| Agent-to-Human relay | `asb.human-coordination.relay/v1` | In-process Store and local gateway sink only |
+| Agent-to-Human relay | `asb.human-coordination.relay/v1` | Bounded Linux file Store, durable SQLite reachability authority, cross-process dispatch guard and read-only reconciliation; synthetic provider tests only |
 | Production overlay | `asb.human-coordination.production/v1` | Unavailable; live qualification and production adapters are incomplete |
 
 The separate [local approval application](local-human-approval.md) implements
@@ -140,8 +140,33 @@ deployment's operational qualification.
   and
 - failure, retry, revocation, and provider-outage exercises.
 
-`LocalGatewaySink` is a local test boundary. It is not a qualified Email, SNS,
-telephone, or messaging provider adapter.
+The [Linux relay file Store](agent-to-human-relay-v1.md#linux-durable-relay-and-provider-recovery)
+and [SQLite reachability authority](taskcoord-sqlite-store.md) implement the
+single-host persistence and dispatch boundary. Linux tests cover competing
+processes, process death after a synthetic provider effect, restart, revocation,
+unknown outcomes and exact-request reconciliation. They do not establish an
+external provider's authentication, idempotency or history-retention behavior.
+`LocalGatewaySink` remains a synthetic in-process adapter; no Email, SNS,
+telephone or messaging provider adapter is supplied.
+The [SES candidate qualification plan](asb-email-relay-qualification.md) records
+the proposed email adapter and the evidence still needed before a live claim.
+
+Before a live relay exercise, select the Linux host and private local storage,
+service entrypoint and identity, provider account/region and adapter version,
+authentication method, opaque test route and permitted test content. Record the
+provider's idempotency key scope and lifetime, authenticated lookup semantics,
+acknowledgement retention, timeout/rate limits and authorized fault window.
+Provider-private contact resolution and credentials stay in the gateway's
+protected configuration, outside Agent-visible requests and evidence reports.
+A missing lookup record must remain unknown; a test must never resend merely
+to discover whether the original delivery occurred.
+
+The repository currently supplies programmatic relay APIs, not a relay service
+binary or provider-facing deployment. An actual-host run therefore needs that
+selected application composition as well as the library and provider adapter.
+Preserve the exact source/binary hashes, host/storage facts and bounded test
+observations in the deployment declaration. Signing a source-test report does
+not add missing service-installation or provider evidence.
 
 The `mac-human-coordination-e2e` target composes these reference boundaries in
 one deterministic process and emits a self-limiting evidence report. Its

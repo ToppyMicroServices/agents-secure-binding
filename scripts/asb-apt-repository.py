@@ -253,14 +253,17 @@ def verify(args: argparse.Namespace) -> dict:
         for signature, detached in (("InRelease", False), ("Release.gpg", True)):
             (home / signature).write_bytes(read(args.repository / DIST / signature))
             (home / "Release").write_bytes(release)
-            plain = home / "verified-release"
-            command = ["gpgv", "--homedir", str(home), "--keyring", str(home / "keyring.gpg"), "--status-fd", "1"]
+            command = ["gpgv", "--homedir", str(home), "--keyring", str(home / "keyring.gpg"), "--status-fd", "2"]
             if not detached:
-                command.extend(["--output", str(plain)])
+                command.extend(["--output", "-"])
             command.append(str(home / signature))
             if detached:
                 command.append(str(home / "Release"))
-            status = execute(*command).decode()
+            # Keep authenticated plaintext separate from status/diagnostics.
+            # stdout also avoids GnuPG versions that leave named output in a
+            # temporary .part file instead of the requested destination.
+            checked = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True, timeout=120)
+            status = checked.stderr.decode()
             forbidden = ("BADSIG", "ERRSIG", "EXPSIG", "EXPKEYSIG", "REVKEYSIG", "KEYEXPIRED", "SIGEXPIRED")
             if any(f"[GNUPG:] {word} " in status for word in forbidden):
                 raise ValueError("expired, revoked or invalid repository signature")
@@ -268,7 +271,7 @@ def verify(args: argparse.Namespace) -> dict:
             if len(valid) != 1 or valid[0][0] not in allowed or valid[0][7] not in ("8", "9", "10"):
                 raise ValueError("signature lacks one approved exact signer and SHA-2 digest")
             identities.append(valid[0][0])
-            if not detached and read(plain) != release:
+            if not detached and checked.stdout != release:
                 raise ValueError("InRelease and Release content differ")
         if identities[0] != identities[1]:
             raise ValueError("repository signatures use different keys")

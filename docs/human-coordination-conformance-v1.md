@@ -18,7 +18,7 @@ these repository-local requirements or create an IETF conformance claim.
 | --- | --- | --- | --- |
 | `asb.human-coordination.core/v1` | Participants, Assignments, Interactions, delegation, and optional reachability | none | Developer Preview |
 | `asb.human-coordination.task-action/v1` | Immutable Assignment-to-Action binding and independent execution lifecycle | core | Developer Preview; bounded single-host SQLite Store |
-| `asb.human-coordination.relay/v1` | One consent-scoped Agent-to-Human gateway delivery intent | core | Developer Preview; local gateway only |
+| `asb.human-coordination.relay/v1` | One consent-scoped Agent-to-Human gateway delivery intent | core | Developer Preview; bounded Linux durability and synthetic gateway |
 | `asb.human-coordination.http/v1` | TLS 1.3/mTLS challenge, execute, and authorized outcome recovery for Human operations | core | Developer Preview |
 | `asb.human-coordination.production/v1` | Capability-specific deployment and qualification overlay | core; a declaration separately names each selected profile | Unavailable |
 
@@ -49,6 +49,9 @@ v1 ID for different behavior.
 The durable Store implementation mapped by `CORE-009`, `TA-008`, and `TA-009`
 is the [single-host SQLite adapter](taskcoord-sqlite-store.md). These statuses
 describe implemented behavior, not multi-host failover or deployment qualification.
+The relay behavior mapped by `RLY-004` and `RLY-005` uses the Linux FileStore
+with SQLite grant authority. Its process-crash and reconciliation tests use
+synthetic providers; live-provider qualification remains open.
 
 ## Human assurance vocabulary
 
@@ -161,8 +164,8 @@ an external profile without mapped tests.
 | `ASB-HC-RLY-001` | implemented | Authorize one exact relay intent with a fresh ASB proof and one-shot replay consumption. | 一つのexact relay intentをfresh ASB proofとone-shot replay消費で認可する。 |
 | `ASB-HC-RLY-002` | implemented | Atomically bind at most one intent to an exact active grant and recheck scope, consent, expiry, and Participants; the grant is not exact-content Human approval. | exactでactiveなgrant一件に最大一件のintentをatomicに束縛し、scope、consent、expiry、Participantを再検証する。grantをHumanによるexact-content承認と扱わない。 |
 | `ASB-HC-RLY-003` | implemented | Omit Human identity, consent, approval, session, provider, and direct-contact data from Agent-visible records. | Agent向けrecordからHuman identity、consent、approval、session、provider、直接連絡先を除外する。 |
-| `ASB-HC-RLY-004` | reference-only | Serialize final dispatch authorization with revocation, persist `DISPATCHING` before callback, and use `CANCELED` only when no callback occurred. | final dispatch authorizationとrevocationを直列化し、callback前に`DISPATCHING`を保存し、callbackなしの場合だけ`CANCELED`とする。 |
-| `ASB-HC-RLY-005` | reference-only | Permit at most one provider call across workers and keep unknown outcomes in `DISPATCHING` without blind retry. | worker間でprovider callを最大一回にし、unknown outcomeをblind retryせず`DISPATCHING`に保つ。 |
+| `ASB-HC-RLY-004` | implemented | Serialize final dispatch authorization with revocation, persist `DISPATCHING` before callback, and use `CANCELED` only when no callback occurred. | final dispatch authorizationとrevocationを直列化し、callback前に`DISPATCHING`を保存し、callbackなしの場合だけ`CANCELED`とする。 |
+| `ASB-HC-RLY-005` | implemented | Permit at most one provider call across workers and keep unknown outcomes in `DISPATCHING` without blind retry. | worker間でprovider callを最大一回にし、unknown outcomeをblind retryせず`DISPATCHING`に保つ。 |
 | `ASB-HC-RLY-006` | implemented | Derive and validate relay event IDs from the versioned status-and-intent transcript. | versioned status-and-intent transcriptからrelay event IDを導出・検証する。 |
 | `ASB-HC-RLY-007` | implemented | Treat provider acknowledgement as transport state, never as Human receipt, approval, completion, or lifecycle mutation. | provider acknowledgementをtransport stateだけとして扱い、Humanの受領、承認、完了、lifecycle mutationとは解釈しない。 |
 | `ASB-HC-RLY-008` | unimplemented | A production relay needs durable state, fenced dispatch, provider reconciliation, a protected contact vault, abuse controls, and qualified adapters. | production relayにはdurable state、fenced dispatch、provider reconciliation、保護されたcontact vault、abuse control、qualified adapterが必要である。 |
@@ -192,7 +195,7 @@ an external profile without mapped tests.
 | `ASB-HC-PROD-005` | reference-only | Supply durable grant-scoped relay serialization and provider idempotency. | durableなgrant-scoped relay serializationとprovider idempotencyを提供する。 |
 | `ASB-HC-PROD-006` | unqualified | Qualify the selected live Redis/Valkey service for persistence, replication, failover, backup, recovery, and unknown writes. | 選択したlive Redis/Valkeyをpersistence、replication、failover、backup、recovery、unknown writeについてqualificationする。 |
 | `ASB-HC-PROD-007` | unqualified | Complete live operational qualification for every selected ingress, replay, outbox, recovery, and provider boundary. | 選択したingress、replay、outbox、recovery、provider boundaryごとにlive operational qualificationを完了する。 |
-| `ASB-HC-PROD-008` | unimplemented | Supply and qualify each selected adapter. Single-host SQLite Task–Action and Human outcome recovery exist; production relay/provider recovery remains unimplemented. | 選択した各adapterを提供しqualificationする。単一host向けSQLite Task–ActionとHuman outcome recoveryは実装済みだが、production relay/provider recoveryは未実装である。 |
+| `ASB-HC-PROD-008` | unimplemented | Supply and qualify each selected adapter. SQLite Task–Action and Human outcome recovery and bounded Linux relay recovery exist; live-provider adapters remain unimplemented. | 選択した各adapterを提供しqualificationする。SQLite Task–Action、Human outcome recovery、bounded Linux relay recoveryは実装済みだが、実provider adapterは未実装である。 |
 
 The detailed deployment gates and current unavailable decision are in
 [`human-coordination-production-v1.md`](human-coordination-production-v1.md).

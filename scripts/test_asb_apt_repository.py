@@ -5,6 +5,7 @@ import argparse
 import importlib.util
 from pathlib import Path
 import tempfile
+import subprocess
 import unittest
 from unittest.mock import patch
 
@@ -126,10 +127,12 @@ class AptRepositoryTest(unittest.TestCase):
             authenticated_release = content[str(apt.DIST / "Release")]
             original_inspect = apt.inspect_repository
 
-            def authenticated_copy(*command):
+            def authenticated_copy(command, **kwargs):
+                self.assertEqual(command[command.index("--status-fd") + 1], "2")
                 if "--output" in command:
-                    Path(command[command.index("--output") + 1]).write_bytes(authenticated_release)
-                return (f"[GNUPG:] VALIDSIG {identity} 2026-01-01 0 0 4 0 22 8 01 {identity}\n").encode()
+                    self.assertEqual(command[command.index("--output") + 1], "-")
+                status = (f"[GNUPG:] VALIDSIG {identity} 2026-01-01 0 0 4 0 22 8 01 {identity}\n").encode()
+                return subprocess.CompletedProcess(command, 0, authenticated_release, status)
 
             def swap_after_authentication(path):
                 # A publisher replaces a self-consistent Release and manifest
@@ -140,7 +143,7 @@ class AptRepositoryTest(unittest.TestCase):
                     (root / name).write_bytes(data)
                 return original_inspect(path)
 
-            with patch.object(apt, "execute", side_effect=authenticated_copy), patch.object(apt, "inspect_repository", side_effect=swap_after_authentication):
+            with patch.object(apt.subprocess, "run", side_effect=authenticated_copy), patch.object(apt, "inspect_repository", side_effect=swap_after_authentication):
                 with self.assertRaisesRegex(ValueError, "authenticated Release differs"):
                     apt.verify(argparse.Namespace(repository=root, keyring=keyring, signer=[identity]))
 

@@ -49,12 +49,23 @@ wrong-signer claim files. Unsigned passing and failed bundles remain verifiable
 as non-claim evidence without `--trusted-signer`; their `qualificationClaim`
 stays false.
 
+Before verification or signing, the report must contain exactly the checks
+declared in the bundled profile, with matching commands, required flags, and
+timeouts. Each result must bind its own output logs. A passing report must
+record an allowed target OS and exit status zero for every required check.
+This checks internal consistency; the signature still relies on the operator
+to select an appropriate profile and attest to the recorded execution.
+Signing uses the file digests checked at the start, with only the intentional
+claim-field change. It does not adopt modified logs by rehashing them into the
+signature; an intervening change makes the final bundle check fail.
+
 The checked-in profiles are intentionally narrow:
 
 - `local-human-preview` exercises the local Human application on the recorded
   macOS, Linux, or Windows runtime.
-- `linux-service` requires a Linux target with systemd and checks the dedicated
-  service-user units.
+- `linux-service` requires Linux, validates the systemd unit files, and runs the
+  computation-runner tests. It does not install or start a service or prove
+  execution under a dedicated service user.
 - `windows-runner` must run on Windows. A macOS/Linux cross-build does not pass
   this profile.
 

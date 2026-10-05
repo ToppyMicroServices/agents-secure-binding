@@ -611,14 +611,18 @@
             "en": "Dispatch MUST serialize its final authorization check with revocation, persist DISPATCHING before a provider callback, and persist CANCELED with no callback when revocation wins.",
             "ja": "dispatchはfinal authorization checkをrevocationと直列化し、provider callback前にDISPATCHINGを永続化し、revocationが勝った場合はcallbackなしでCANCELEDを永続化しなければならない。"
           },
-          "status": "reference-only",
+          "status": "implemented",
           "capability": "relay-dispatch",
           "optional_capability": true,
           "tests": [
             {"format": "go-test", "package": "./pkg/humanrelay", "name": "TestDispatchCancelsWithoutProviderCallAfterReachabilityWithdrawal"},
-            {"format": "go-test", "package": "./pkg/humanrelay", "name": "TestDispatchGateBlocksRevocationThroughProviderAcknowledgement"}
+            {"format": "go-test", "package": "./pkg/humanrelay", "name": "TestDispatchGateBlocksRevocationThroughProviderAcknowledgement"},
+            {"format": "go-test", "package": "./pkg/humanrelay", "name": "TestFileRelayFailedDispatchCheckpointNeverCallsProvider"},
+            {"format": "go-test", "package": "./pkg/taskcoord/sqlitestore", "name": "TestSQLiteAuthorityAndDurableRelayRestartRevocation"},
+            {"format": "go-test", "package": "./pkg/taskcoord/sqlitestore", "name": "TestRelayGrantGuardReleasesDatabaseBeforeCallback"},
+            {"format": "go-test", "package": "./pkg/taskcoord/sqlitestore", "name": "TestRelayGrantGuardProcessCrash"}
           ],
-          "evidence": ["pkg/humanrelay/service.go", "pkg/humanrelay/memory_store.go", "pkg/taskcoord/reachability_store.go"]
+          "evidence": ["pkg/humanrelay/service.go", "pkg/humanrelay/memory_store.go", "pkg/humanrelay/file_store_linux.go", "pkg/taskcoord/reachability_store.go", "pkg/taskcoord/sqlitestore/reachability.go", "pkg/taskcoord/sqlitestore/reachability_lock_linux.go"]
         },
         {
           "id": "ASB-HC-RLY-005",
@@ -626,14 +630,17 @@
             "en": "Concurrent workers MUST call the provider at most once for an intent, and an unknown provider outcome MUST remain DISPATCHING and MUST NOT be retried blindly.",
             "ja": "並行workerは一つのintentについてproviderを最大一回だけcallしなければならず、unknown provider outcomeはDISPATCHINGのまま保持してblind retryしてはならない。"
           },
-          "status": "reference-only",
+          "status": "implemented",
           "capability": "relay-dispatch",
           "optional_capability": true,
           "tests": [
             {"format": "go-test", "package": "./pkg/humanrelay", "name": "TestConcurrentDispatchWorkersCallProviderExactlyOnce"},
-            {"format": "go-test", "package": "./pkg/humanrelay", "name": "TestProviderFailureLeavesUnknownDispatchTerminal"}
+            {"format": "go-test", "package": "./pkg/humanrelay", "name": "TestProviderFailureLeavesUnknownDispatchTerminal"},
+            {"format": "go-test", "package": "./pkg/humanrelay", "name": "TestFileRelayConcurrentProcessesReserveOneProviderAttempt"},
+            {"format": "go-test", "package": "./pkg/humanrelay", "name": "TestFileRelayCrashAfterProviderEffectRecoversWithoutRedispatch"},
+            {"format": "go-test", "package": "./pkg/taskcoord/sqlitestore", "name": "TestSQLiteAuthorityAndRelayUnknownReconciliation"}
           ],
-          "evidence": ["pkg/humanrelay/service.go", "pkg/humanrelay/store.go"]
+          "evidence": ["pkg/humanrelay/service.go", "pkg/humanrelay/store.go", "pkg/humanrelay/file_store_linux.go", "pkg/humanrelay/reconcile.go"]
         },
         {
           "id": "ASB-HC-RLY-006",
@@ -934,8 +941,8 @@
         {
           "id": "ASB-HC-PROD-008",
           "normative": {
-            "en": "A deployment selecting Task-Action, relay delivery, or cross-proof Human-ingress reconciliation MUST supply the corresponding production Store, restart-durable dispatch and provider recovery, or durable outcome journal. Single-host SQLite Task-Action and Human outcome adapters exist; production relay and provider-recovery adapters remain unimplemented, and every selected adapter still requires deployment qualification.",
-            "ja": "Task-Action、relay delivery、cross-proof Human-ingress reconciliationを選択するdeploymentは、それぞれproduction Store、restart-durable dispatchとprovider recovery、durable outcome journalを提供しなければならない。単一host向けSQLite Task-ActionとHuman outcome adapterは実装済みだが、production relayとprovider recovery adapterは未実装であり、選択した各adapterには引き続きdeployment qualificationが必要である。"
+            "en": "A deployment selecting Task-Action, relay delivery, or cross-proof Human-ingress reconciliation MUST supply the corresponding production Store, restart-durable dispatch and provider recovery, or durable outcome journal. Single-host SQLite Task-Action and Human outcome adapters and a bounded Linux relay store with read-only provider reconciliation exist; live-provider adapters remain unimplemented, and every selected adapter still requires deployment qualification.",
+            "ja": "Task-Action、relay delivery、cross-proof Human-ingress reconciliationを選択するdeploymentは、それぞれproduction Store、restart-durable dispatchとprovider recovery、durable outcome journalを提供しなければならない。単一host向けSQLite Task-ActionとHuman outcome adapter、およびread-only provider reconciliation付きのbounded Linux relay storeは実装済みだが、実provider adapterは未実装であり、選択した各adapterには引き続きdeployment qualificationが必要である。"
           },
           "status": "unimplemented",
           "capability": "missing-production-adapters",
