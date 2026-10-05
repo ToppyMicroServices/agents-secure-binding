@@ -1,0 +1,89 @@
+name: ASB unsigned apt release preparation
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/apt-release-prepare.yaml'
+      - 'scripts/prepare-asb-apt-release.py'
+      - 'scripts/test_prepare_asb_apt_release.py'
+      - 'scripts/asb-apt-repository.py'
+      - 'docs/asb-apt-publication.md'
+  workflow_dispatch:
+    inputs:
+      qualification_run_id:
+        description: 'Successful ASB Debian distribution run containing the reviewed packages'
+        required: true
+        type: string
+      source_commit:
+        description: 'Full source commit from that run, already merged into main'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - run: python3 scripts/test_prepare_asb_apt_release.py
+
+  prepare:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'ToppyMicroServices/agents-secure-binding'
+    needs: checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: read
+    env:
+      QUALIFICATION_RUN_ID: ${{ inputs.qualification_run_id }}
+      SOURCE_COMMIT: ${{ inputs.source_commit }}
+      GH_TOKEN: ${{ github.token }}
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Validate input before requesting qualification metadata
+        run: |
+          python3 - <<'PY'
+          import os, re
+          if not re.fullmatch(r'[1-9][0-9]{0,18}', os.environ['QUALIFICATION_RUN_ID']):
+              raise SystemExit('Invalid qualification run ID')
+          if not re.fullmatch(r'[0-9a-f]{40}', os.environ['SOURCE_COMMIT']):
+              raise SystemExit('Use the full reviewed source commit')
+          PY
+          mkdir -m 700 "$RUNNER_TEMP/qualification"
+      - name: Read the source workflow and immutable artifact identity
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$QUALIFICATION_RUN_ID" > "$RUNNER_TEMP/qualification/run.json"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$QUALIFICATION_RUN_ID/artifacts?per_page=100" > "$RUNNER_TEMP/qualification/artifacts.json"
+          python3 scripts/prepare-asb-apt-release.py authorize \
+            --run "$RUNNER_TEMP/qualification/run.json" --artifacts "$RUNNER_TEMP/qualification/artifacts.json" \
+            --run-id "$QUALIFICATION_RUN_ID" --source-commit "$SOURCE_COMMIT" \
+            --publisher-commit "$GITHUB_SHA" --checkout "$GITHUB_WORKSPACE" \
+            --output "$RUNNER_TEMP/qualification/authorization.json"
+      - name: Download only the authorized artifact
+        run: |
+          artifact_id=$(jq -er '.artifact.id' "$RUNNER_TEMP/qualification/authorization.json")
+          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$artifact_id/zip" > "$RUNNER_TEMP/qualification/artifact.zip"
+      - name: Prepare fresh unsigned metadata from the qualified package bytes
+        run: |
+          python3 scripts/prepare-asb-apt-release.py prepare \
+            --run "$RUNNER_TEMP/qualification/run.json" --artifacts "$RUNNER_TEMP/qualification/artifacts.json" \
+            --run-id "$QUALIFICATION_RUN_ID" --source-commit "$SOURCE_COMMIT" \
+            --publisher-commit "$GITHUB_SHA" --checkout "$GITHUB_WORKSPACE" \
+            --archive "$RUNNER_TEMP/qualification/artifact.zip" --output "$RUNNER_TEMP/asb-apt-prepared"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: asb-apt-unsigned-${{ github.run_id }}
+          path: ${{ runner.temp }}/asb-apt-prepared/
+          retention-days: 7
+          if-no-files-found: error
