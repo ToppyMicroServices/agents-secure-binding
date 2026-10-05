@@ -33,7 +33,7 @@ SERVICE_RESULTS = {"success", "resources", "timeout", "exit-code", "signal", "co
 EXIT_CODES = {"exited", "killed", "dumped", "unknown"}
 EXIT_SIGNALS = {"HUP", "INT", "QUIT", "ILL", "ABRT", "BUS", "FPE", "KILL", "SEGV", "PIPE", "ALRM", "TERM", "unknown"}
 EXEC_ERRORS = {"none", "missing", "permission", "exec-format", "text-file-busy", "io", "no-memory", "other", "unavailable"}
-BOOT_PHASES = {"mounts", "directories", "config-copy", "binary-copy", "binary-verify", "unit-start", "complete"}
+BOOT_PHASES = {"installation-guard", "mounts", "directories", "config-copy", "binary-copy", "binary-verify", "installation-sync", "unit-start", "complete"}
 BOOT_ERRORS = {"none", "permission", "missing", "timeout", "command-failed", "verification-failed"}
 DIAGNOSTIC_PATHS = {"/", "/usr", "/usr/local", "/usr/local/bin", "/usr/local/bin/asb-interaction"}
 EXIT_MARKER = """#!/bin/sh
@@ -100,6 +100,14 @@ def valid_path_metadata(value: object) -> bool:
     return True
 
 
+def valid_binary_metadata(value: object) -> bool:
+    if not isinstance(value, dict) or set(value) != {"sha256", "static_elf", "read_error"}:
+        return False
+    digest_value = value.get("sha256")
+    return (isinstance(digest_value, str) and (digest_value == "" or (len(digest_value) == 64 and all(c in "0123456789abcdef" for c in digest_value)))
+            and type(value.get("static_elf")) is bool and value.get("read_error") in {"none", "missing", "permission", "io", "too-large", "not-needed"})
+
+
 def process_markers(share: Path, role: str) -> dict:
     """Copy only fixed diagnostic fields; never report guest error text."""
     result = {}
@@ -111,10 +119,10 @@ def process_markers(share: Path, role: str) -> dict:
             value = read_json(path)
             if name == "bootstrap":
                 fields = {"phase", "passed", "category", "input_mount", "evidence_mount", "config_copied", "binary_copied",
-                          "binary_sha256", "binary_static_elf", "paths"}
+                          "binary_sha256", "binary_static_elf", "installation_synced", "paths"}
                 binary_hash = value.get("binary_sha256")
                 if (set(value) != fields or value.get("phase") not in BOOT_PHASES or value.get("category") not in BOOT_ERRORS
-                        or any(type(value.get(key)) is not bool for key in ("passed", "input_mount", "evidence_mount", "config_copied", "binary_copied", "binary_static_elf"))
+                        or any(type(value.get(key)) is not bool for key in ("passed", "input_mount", "evidence_mount", "config_copied", "binary_copied", "binary_static_elf", "installation_synced"))
                         or not isinstance(binary_hash, str) or (binary_hash != "" and (len(binary_hash) != 64 or any(c not in "0123456789abcdef" for c in binary_hash)))
                         or not valid_path_metadata(value.get("paths"))
                         or (value["passed"] and (value["phase"] != "complete" or value["category"] != "none"))):
@@ -123,13 +131,14 @@ def process_markers(share: Path, role: str) -> dict:
                 continue
             if name == "service-exit":
                 status = value.get("exit_status")
-                if (set(value) != {"result", "exit_code", "exit_status", "exec_error", "paths"}
+                if (set(value) != {"result", "exit_code", "exit_status", "exec_error", "paths", "binary"}
                         or value.get("result") not in SERVICE_RESULTS or value.get("exit_code") not in EXIT_CODES
                         or not isinstance(status, str) or len(status) > 8
                         or not (status in EXIT_SIGNALS or (status.isascii() and status.isdecimal() and int(status) <= 255))
-                        or value.get("exec_error") not in EXEC_ERRORS or not valid_path_metadata(value.get("paths"))):
+                        or value.get("exec_error") not in EXEC_ERRORS or not valid_path_metadata(value.get("paths"))
+                        or not valid_binary_metadata(value.get("binary"))):
                     raise ValueError("invalid service marker")
-                result[name] = {key: value[key] for key in ("result", "exit_code", "exit_status", "exec_error", "paths")}
+                result[name] = {key: value[key] for key in ("result", "exit_code", "exit_status", "exec_error", "paths", "binary")}
                 continue
             expected = {"role", "pid", "stage"} | ({"passed", "category"} if name == "stopped" else set())
             if (set(value) != expected or value.get("role") != role or type(value.get("pid")) is not int
@@ -181,6 +190,12 @@ class Lab:
         self.sequence = 0
         self.acceleration = "kvm" if os.access("/dev/kvm", os.R_OK | os.W_OK) else "tcg"
         self.guest_acceleration: dict[str, str] = {}
+        self.start_counts = dict.fromkeys(ROLES, 0)
+        self.restart_counts = dict.fromkeys(ROLES, 0)
+        self.checkpoints = []
+
+    def checkpoint(self, name: str, role: str | None = None) -> None:
+        self.checkpoints.append({"name": name, "role": role, "elapsed_seconds": round(time.monotonic() - self.started, 3)})
 
     def run(self, *args: str, timeout: int = 120) -> bytes:
         remaining = self.deadline - time.monotonic()
@@ -262,6 +277,7 @@ class Lab:
 
     def start(self, role: str) -> None:
         self.stage, self.active_role = "start-guest", role
+        self.start_counts[role] += 1
         guest = self.root / role
         for name in ("ready.json", "request.json", "response.json", "stopped.json", "stage.json", "service-exit.json"):
             (guest / "evidence" / name).unlink(missing_ok=True)
@@ -304,7 +320,7 @@ class Lab:
                 installation = process_markers(self.root / role / "evidence", role).get("bootstrap", {})
                 if installation.get("passed") is True:
                     if (installation.get("binary_sha256") != digest(self.binary) or installation.get("binary_static_elf") is not True
-                            or any(installation.get(field) is not True for field in ("input_mount", "evidence_mount", "config_copied", "binary_copied"))):
+                            or any(installation.get(field) is not True for field in ("input_mount", "evidence_mount", "config_copied", "binary_copied", "installation_synced"))):
                         raise ValueError("guest installation does not match the qualified static binary")
                     return
             time.sleep(0.2)
@@ -344,10 +360,13 @@ class Lab:
 
     def crash_restart(self, role: str) -> None:
         self.stage, self.active_role = "force-stop-guest-for-restart", role
+        self.restart_counts[role] += 1
+        self.checkpoint("force-stop", role)
         self.processes[role].kill()
         self.processes[role].wait(timeout=10)
         self.start(role)
         self.ready(role)
+        self.checkpoint("restart-ready", role)
 
     def drain(self, role: str) -> dict:
         observation = self.command(role, "stop")
@@ -386,13 +405,14 @@ class Lab:
             except OSError:
                 pass
             guests[role] = {"qemu_exit_status": process.poll(),
+                            "start_count": self.start_counts[role], "forced_restart_count": self.restart_counts[role],
                             "acceleration": self.guest_acceleration.get(role),
                             "ready_file_present": (guest / "evidence/ready.json").is_file(),
                             "serial_categories": {name: any(token in tail for token in tokens) for name, tokens in categories.items()},
                             "bootstrap_failure_phases": sorted(phase for phase in BOOT_PHASES if b"asb_vm_bootstrap_failure:" + phase.encode() in tail),
                             "process_markers": process_markers(guest / "evidence", role)}
         return {"stage": self.stage, "role": self.active_role,
-                "elapsed_seconds": round(time.monotonic() - self.started, 3), "guests": guests}
+                "elapsed_seconds": round(time.monotonic() - self.started, 3), "guests": guests, "checkpoints": self.checkpoints}
 
     def cleanup(self) -> bool:
         passed = True
@@ -428,6 +448,7 @@ def qualify(lab: Lab) -> dict:
         lab.start(role)
     for role in ROLES:
         lab.ready(role)
+    lab.checkpoint("initial-guests-ready")
     initial = {role: lab.command(role, "status") for role in ROLES}
     if len({v["boot_id"] for v in initial.values()}) != 3 or len({v["machine_id_sha256"] for v in initial.values()}) != 3:
         raise ValueError("guest kernel or machine identities are not distinct")
@@ -437,16 +458,19 @@ def qualify(lab: Lab) -> dict:
         raise ValueError("cross-VM authenticated task evidence is incomplete")
     if task.get("result", {}).get("pid") != initial["agent-b"]["pid"]:
         raise ValueError("task result does not identify the observed Agent B guest process")
+    lab.checkpoint("authenticated-task-passed")
     lab.command("relay", "gossip")
     baseline = {role: lab.command(role, "status") for role in ROLES}
     if any(v["records"] != 1 for v in baseline.values()):
         raise ValueError("cross-VM live population failed to converge")
+    lab.checkpoint("initial-gossip-converged")
     lab.stage, lab.active_role = "partition-guest-network", "agent-b"
     lab.run("ip", "link", "set", lab.taps[2], "down")
     withdrawn = lab.command("agent-b", "withdraw")
     stale = lab.command("agent-a", "status")
     if withdrawn["records"] != 0 or withdrawn["tombstones"] != 1 or stale["records"] != 1:
         raise ValueError("partitioned withdrawal did not preserve the intended states")
+    lab.checkpoint("partitioned-withdrawal-passed")
     lab.crash_restart("agent-b")
     recovered_b = lab.command("agent-b", "status")
     if recovered_b["boot_id"] == withdrawn["boot_id"] or recovered_b["machine_id_sha256"] != withdrawn["machine_id_sha256"] or recovered_b["records"] != 0 or recovered_b["tombstones"] != 1:

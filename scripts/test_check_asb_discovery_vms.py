@@ -92,7 +92,8 @@ class VMHarnessGuards(unittest.TestCase):
             share = root / "agent-b/evidence"
             share.mkdir(parents=True)
             vm.write_json(share / "service-exit.json", {"result": "exit-code", "exit_code": "exited", "exit_status": "203",
-                                                      "exec_error": "missing", "paths": {"/usr/local/bin/asb-interaction": {"exists": False}}})
+                                                      "exec_error": "missing", "paths": {"/usr/local/bin/asb-interaction": {"exists": False}},
+                                                      "binary": {"sha256": "", "static_elf": False, "read_error": "missing"}})
             lab = vm.Lab(root, root / "binary")
             with self.assertRaisesRegex(RuntimeError, "exited before completion"):
                 lab.reject_stopped("agent-b")
@@ -115,7 +116,8 @@ class VMHarnessGuards(unittest.TestCase):
             share = root / "agent-b/evidence"
             share.mkdir(parents=True)
             vm.write_json(share / "stopped.json", {"role": "agent-b", "pid": 41, "stage": "control", "passed": True, "category": "none"})
-            vm.write_json(share / "service-exit.json", {"result": "success", "exit_code": "exited", "exit_status": "0", "exec_error": "none", "paths": {}})
+            vm.write_json(share / "service-exit.json", {"result": "success", "exit_code": "exited", "exit_status": "0", "exec_error": "none", "paths": {},
+                                                      "binary": {"sha256": "", "static_elf": False, "read_error": "not-needed"}})
             lab = vm.Lab(root, root / "binary")
             lab.reject_stopped("agent-b", allow_success=True)
             with self.assertRaises(RuntimeError):
@@ -140,7 +142,7 @@ class VMHarnessGuards(unittest.TestCase):
 
     def test_failed_bootstrap_install_cannot_fall_through_to_service_start(self):
         markers = []
-        with patch.object(guest, "mounted", return_value=True), patch.object(guest, "publish", side_effect=lambda _, value: markers.append(dict(value))), \
+        with patch.object(guest, "installation_complete", return_value=False), patch.object(guest, "mounted", return_value=True), patch.object(guest, "publish", side_effect=lambda _, value: markers.append(dict(value))), \
              patch.object(guest, "path_metadata", return_value={}), patch.object(guest.subprocess, "run", side_effect=subprocess.CalledProcessError(1, "install")) as run, \
              patch("sys.stdout", new=io.StringIO()):
             self.assertEqual(guest.bootstrap("a" * 64), 1)
@@ -156,7 +158,8 @@ class VMHarnessGuards(unittest.TestCase):
             share.mkdir(parents=True)
             marker = {"phase": "binary-verify", "passed": False, "category": "verification-failed", "input_mount": True,
                       "evidence_mount": True, "config_copied": True, "binary_copied": True, "binary_sha256": "a" * 64,
-                      "binary_static_elf": False, "paths": {"/usr/local/bin/asb-interaction": {"exists": True, "mode": 0o755, "uid": 0, "gid": 0, "symlink": False}}}
+                      "binary_static_elf": False, "installation_synced": False,
+                      "paths": {"/usr/local/bin/asb-interaction": {"exists": True, "mode": 0o755, "uid": 0, "gid": 0, "symlink": False}}}
             vm.write_json(share / "bootstrap.json", marker)
             lab = vm.Lab(root, root / "binary")
             with self.assertRaisesRegex(RuntimeError, "bootstrap failed at binary-verify"):
@@ -164,6 +167,37 @@ class VMHarnessGuards(unittest.TestCase):
             marker["paths"] = {"/private-unreported-token": {"exists": False}}
             vm.write_json(share / "bootstrap.json", marker)
             self.assertEqual(vm.process_markers(share, "agent-b"), {"bootstrap": {"invalid": True}})
+
+    def test_initial_setup_is_synced_after_enable_and_before_start(self):
+        order = []
+        metadata = {str(guest.BINARY): {"exists": True, "mode": 0o755, "uid": 0, "gid": 0, "symlink": False}}
+        expected = guest.hashlib.sha256(b"test ELF fixture").hexdigest()
+        with patch.object(guest, "installation_complete", return_value=False), patch.object(guest, "mounted", return_value=True), patch.object(guest, "publish"), \
+             patch.object(guest, "path_metadata", return_value=metadata), patch.object(guest.Path, "open", side_effect=lambda *_: io.BytesIO(b"test ELF fixture")), \
+             patch.object(guest.os, "stat", return_value=Mock(st_mode=0o600, st_uid=17)), \
+             patch.object(guest.pwd, "getpwnam", return_value=Mock(pw_uid=17)), patch.object(guest, "static_elf", return_value=True), \
+             patch.object(guest.subprocess, "run", side_effect=lambda args, **_: order.append(args)), \
+             patch.object(guest, "sync_installation", side_effect=lambda: order.append("sync")), \
+             patch.object(guest, "persist_installation_receipt", side_effect=lambda _: order.append("receipt")):
+            self.assertEqual(guest.bootstrap(expected), 0)
+        self.assertLess(order.index(("/usr/bin/systemctl", "enable", "asb-vm.service")), order.index("sync"))
+        self.assertLess(order.index("sync"), order.index("receipt"))
+        self.assertLess(order.index("receipt"), order.index(("/usr/bin/systemctl", "start", "asb-vm.service")))
+
+    def test_completed_installation_cannot_copy_sync_or_start_again(self):
+        with patch.object(guest, "installation_complete", return_value=True), \
+             patch.object(guest, "mounted", side_effect=AssertionError("must return before bootstrap work")), \
+             patch.object(guest, "sync_installation", side_effect=AssertionError("must not flush ASB state")), \
+             patch.object(guest.subprocess, "run", side_effect=AssertionError("must not copy or start")):
+            self.assertEqual(guest.bootstrap("a" * 64), 0)
+
+    def test_restart_records_fault_without_syncing_guest_state(self):
+        lab = vm.Lab(Path("/nonexistent"), Path("/nonexistent/binary"))
+        lab.processes = {"agent-b": Mock()}
+        with patch.object(lab, "start"), patch.object(lab, "ready"), patch.object(lab, "run", side_effect=AssertionError("fault must not flush state")):
+            lab.crash_restart("agent-b")
+        self.assertEqual(lab.restart_counts["agent-b"], 1)
+        self.assertEqual([item["name"] for item in lab.checkpoints], ["force-stop", "restart-ready"])
 
 
 if __name__ == "__main__":

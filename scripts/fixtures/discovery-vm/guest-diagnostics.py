@@ -12,8 +12,9 @@ import subprocess
 import tempfile
 
 BINARY = Path("/usr/local/bin/asb-interaction")
+INSTALLATION_RECEIPT = Path("/var/lib/asb-vm-bootstrap-complete")
 PATHS = ("/", "/usr", "/usr/local", "/usr/local/bin", str(BINARY))
-PHASES = {"mounts", "directories", "config-copy", "binary-copy", "binary-verify", "unit-start", "complete"}
+PHASES = {"installation-guard", "mounts", "directories", "config-copy", "binary-copy", "binary-verify", "installation-sync", "unit-start", "complete"}
 EXEC_ERRORS = {"none", "missing", "permission", "exec-format", "text-file-busy", "io", "no-memory", "other", "unavailable"}
 
 
@@ -58,6 +59,67 @@ def static_elf(payload):
     return 1 in types and 3 not in types
 
 
+def inspect_binary():
+    record = {"sha256": "", "static_elf": False, "read_error": "none"}
+    try:
+        with BINARY.open("rb") as stream:
+            payload = stream.read(128 * 1024 * 1024 + 1)
+        if len(payload) > 128 * 1024 * 1024:
+            record["read_error"] = "too-large"
+        else:
+            record.update(sha256=hashlib.sha256(payload).hexdigest(), static_elf=static_elf(payload))
+    except FileNotFoundError:
+        record["read_error"] = "missing"
+    except PermissionError:
+        record["read_error"] = "permission"
+    except OSError:
+        record["read_error"] = "io"
+    return record
+
+
+def sync_installation():
+    # Persist the lab installation before ASB runs. Never call this at fault
+    # injection: ASB must make its own later state changes durable.
+    files = (BINARY, Path("/etc/asb-vm/config.json"), Path("/etc/systemd/system/asb-vm.service"),
+             Path("/usr/local/libexec/asb-vm-diagnostics.py"), Path("/usr/local/bin/asb-vm-exit-marker"))
+    for path in files:
+        with path.open("rb") as stream:
+            os.fsync(stream.fileno())
+    for path in {item.parent for item in files}:
+        descriptor = os.open(path, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+    os.sync()  # Includes the initial systemd enablement and cloud-init setup.
+
+
+def installation_complete(expected):
+    try:
+        descriptor = os.open(INSTALLATION_RECEIPT, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except FileNotFoundError:
+        return False
+    with os.fdopen(descriptor, "rb") as stream:
+        metadata = os.fstat(stream.fileno())
+        if (not stat.S_ISREG(metadata.st_mode) or stat.S_IMODE(metadata.st_mode) != 0o600
+                or metadata.st_uid != 0 or metadata.st_gid != 0 or stream.read(66) != (expected + "\n").encode()):
+            raise ValueError("invalid installation receipt")
+    return True
+
+
+def persist_installation_receipt(expected):
+    descriptor = os.open(INSTALLATION_RECEIPT, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(descriptor, "wb") as stream:
+        stream.write((expected + "\n").encode())
+        stream.flush()
+        os.fsync(stream.fileno())
+    descriptor = os.open(INSTALLATION_RECEIPT.parent, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
 def journal_exec_error(raw):
     # Match only systemd's invocation failures for this fixed executable.
     # Payloads and all other journal text are discarded without being emitted.
@@ -98,12 +160,14 @@ def exit_marker():
         except (OSError, subprocess.SubprocessError):
             pass
     publish("service-exit", {"result": result, "exit_code": code, "exit_status": status,
-                             "exec_error": category, "paths": path_metadata()})
+                             "exec_error": category, "paths": path_metadata(),
+                             "binary": inspect_binary() if status == "203" else {"sha256": "", "static_elf": False, "read_error": "not-needed"}})
 
 
 def bootstrap(expected):
-    record = {"phase": "mounts", "passed": False, "category": "none", "input_mount": False, "evidence_mount": False,
-              "config_copied": False, "binary_copied": False, "binary_sha256": "", "binary_static_elf": False, "paths": {}}
+    record = {"phase": "installation-guard", "passed": False, "category": "none", "input_mount": False, "evidence_mount": False,
+              "config_copied": False, "binary_copied": False, "binary_sha256": "", "binary_static_elf": False,
+              "installation_synced": False, "paths": {}}
 
     def phase(name):
         record["phase"] = name
@@ -113,6 +177,9 @@ def bootstrap(expected):
         subprocess.run(arguments, check=True, timeout=30, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     try:
+        if installation_complete(expected):
+            return 0  # No copy, sync, enable or start after a guest restart.
+        record["phase"] = "mounts"
         record["input_mount"] = mounted("/mnt/asb-input", "asb-input", True)
         record["evidence_mount"] = mounted("/evidence", "asb-evidence", False)
         if not record["input_mount"] or not record["evidence_mount"]:
@@ -138,9 +205,14 @@ def bootstrap(expected):
         if (len(payload) > 128 * 1024 * 1024 or record["binary_sha256"] != expected or not record["binary_static_elf"]
                 or metadata != {"exists": True, "mode": 0o755, "uid": 0, "gid": 0, "symlink": False}):
             raise ValueError("binary-verification")
-        phase("unit-start")
         run("/usr/bin/systemctl", "daemon-reload")
-        run("/usr/bin/systemctl", "enable", "--now", "asb-vm.service")
+        run("/usr/bin/systemctl", "enable", "asb-vm.service")
+        phase("installation-sync")
+        sync_installation()
+        persist_installation_receipt(expected)
+        record["installation_synced"] = True
+        phase("unit-start")
+        run("/usr/bin/systemctl", "start", "asb-vm.service")
         record["passed"] = True
         phase("complete")
         return 0

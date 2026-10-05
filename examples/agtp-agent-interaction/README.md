@@ -165,8 +165,14 @@ The explicit lab mode generates isolated credentials with fixed 25-minute
 grants and leases; the ordinary example's lifetimes remain unchanged. Each VM
 receives its own private keys and peer public identities. A local shared
 directory carries bounded harness commands. It exposes no remote control API,
-is trusted by the lab, and is cleared before every boot. This control protocol
-is not a production job queue and has no durable exactly-once claim.
+is trusted by the lab. Command and process markers are cleared before each boot;
+the initial installation receipt is retained. This control protocol is not a
+production job queue and has no durable exactly-once claim.
+
+The initial installation is flushed to disk before ASB starts. No extra flush
+is performed before a forced termination: ASB must persist its later state
+changes itself. Failure evidence distinguishes initial boot from restart and
+records the executable hash and format when systemd cannot execute it.
 
 The run checks the authenticated DHT/gossip/task interaction, then disconnects
 B's virtual network interface and withdraws B's registration. It forcibly
