@@ -6,6 +6,7 @@ on:
       - '.github/workflows/discovery-vms.yaml'
       - 'scripts/check-asb-discovery-vms.py'
       - 'scripts/test_check_asb_discovery_vms.py'
+      - 'scripts/fixtures/discovery-vm/**'
       - 'examples/agtp-agent-interaction/**'
       - 'pkg/agtp/discovery/**'
   workflow_dispatch:

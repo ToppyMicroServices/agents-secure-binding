@@ -32,19 +32,13 @@ SERVICE_RESULTS = {"success", "resources", "timeout", "exit-code", "signal", "co
                    "start-limit-hit", "oom-kill", "exec-condition", "other"}
 EXIT_CODES = {"exited", "killed", "dumped", "unknown"}
 EXIT_SIGNALS = {"HUP", "INT", "QUIT", "ILL", "ABRT", "BUS", "FPE", "KILL", "SEGV", "PIPE", "ALRM", "TERM", "unknown"}
+EXEC_ERRORS = {"none", "missing", "permission", "exec-format", "text-file-busy", "io", "no-memory", "other", "unavailable"}
+BOOT_PHASES = {"mounts", "directories", "config-copy", "binary-copy", "binary-verify", "unit-start", "complete"}
+BOOT_ERRORS = {"none", "permission", "missing", "timeout", "command-failed", "verification-failed"}
+DIAGNOSTIC_PATHS = {"/", "/usr", "/usr/local", "/usr/local/bin", "/usr/local/bin/asb-interaction"}
 EXIT_MARKER = """#!/bin/sh
 set -eu
-result=${SERVICE_RESULT:-other}
-case "$result" in success|resources|timeout|exit-code|signal|core-dump|watchdog|start-limit-hit|oom-kill|exec-condition) ;; *) result=other;; esac
-code=${EXIT_CODE:-unknown}
-case "$code" in exited|killed|dumped) ;; *) code=unknown;; esac
-status=${EXIT_STATUS:-unknown}
-case "$status" in ''|*[!0-9]*)
-  case "$status" in HUP|INT|QUIT|ILL|ABRT|BUS|FPE|KILL|SEGV|PIPE|ALRM|TERM) ;; *) status=unknown;; esac;;
-esac
-printf '{"result":"%s","exit_code":"%s","exit_status":"%s"}\\n' "$result" "$code" "$status" > /evidence/.service-exit.tmp
-chmod 0644 /evidence/.service-exit.tmp
-mv /evidence/.service-exit.tmp /evidence/service-exit.json
+exec /usr/bin/python3 -I /usr/local/libexec/asb-vm-diagnostics.py exit
 """
 
 
@@ -90,23 +84,52 @@ def read_json(path: Path) -> dict:
     return value
 
 
+def valid_path_metadata(value: object) -> bool:
+    if not isinstance(value, dict) or not set(value) <= DIAGNOSTIC_PATHS:
+        return False
+    for metadata in value.values():
+        if not isinstance(metadata, dict):
+            return False
+        if metadata == {"exists": False}:
+            continue
+        if (set(metadata) != {"exists", "mode", "uid", "gid", "symlink"} or metadata.get("exists") is not True
+                or type(metadata.get("symlink")) is not bool
+                or any(type(metadata.get(key)) is not int or not 0 <= metadata[key] <= maximum
+                       for key, maximum in (("mode", 0o7777), ("uid", 2 ** 32 - 1), ("gid", 2 ** 32 - 1)))):
+            return False
+    return True
+
+
 def process_markers(share: Path, role: str) -> dict:
     """Copy only fixed diagnostic fields; never report guest error text."""
     result = {}
-    for name in ("stage", "stopped", "service-exit"):
+    for name in ("stage", "stopped", "service-exit", "bootstrap"):
         path = share / (name + ".json")
         if not path.exists():
             continue
         try:
             value = read_json(path)
+            if name == "bootstrap":
+                fields = {"phase", "passed", "category", "input_mount", "evidence_mount", "config_copied", "binary_copied",
+                          "binary_sha256", "binary_static_elf", "paths"}
+                binary_hash = value.get("binary_sha256")
+                if (set(value) != fields or value.get("phase") not in BOOT_PHASES or value.get("category") not in BOOT_ERRORS
+                        or any(type(value.get(key)) is not bool for key in ("passed", "input_mount", "evidence_mount", "config_copied", "binary_copied", "binary_static_elf"))
+                        or not isinstance(binary_hash, str) or (binary_hash != "" and (len(binary_hash) != 64 or any(c not in "0123456789abcdef" for c in binary_hash)))
+                        or not valid_path_metadata(value.get("paths"))
+                        or (value["passed"] and (value["phase"] != "complete" or value["category"] != "none"))):
+                    raise ValueError("invalid bootstrap marker")
+                result[name] = {key: value[key] for key in fields}
+                continue
             if name == "service-exit":
                 status = value.get("exit_status")
-                if (set(value) != {"result", "exit_code", "exit_status"}
+                if (set(value) != {"result", "exit_code", "exit_status", "exec_error", "paths"}
                         or value.get("result") not in SERVICE_RESULTS or value.get("exit_code") not in EXIT_CODES
                         or not isinstance(status, str) or len(status) > 8
-                        or not (status in EXIT_SIGNALS or (status.isascii() and status.isdecimal() and int(status) <= 255))):
+                        or not (status in EXIT_SIGNALS or (status.isascii() and status.isdecimal() and int(status) <= 255))
+                        or value.get("exec_error") not in EXEC_ERRORS or not valid_path_metadata(value.get("paths"))):
                     raise ValueError("invalid service marker")
-                result[name] = {key: value[key] for key in ("result", "exit_code", "exit_status")}
+                result[name] = {key: value[key] for key in ("result", "exit_code", "exit_status", "exec_error", "paths")}
                 continue
             expected = {"role", "pid", "stage"} | ({"passed", "category"} if name == "stopped" else set())
             if (set(value) != expected or value.get("role") != role or type(value.get("pid")) is not int
@@ -223,18 +246,17 @@ class Lab:
             unit = ("[Unit]\nDescription=ASB disposable qualification node\nRequiresMountsFor=/evidence\nWants=network-online.target\nAfter=network-online.target\n"
                     "[Service]\nUser=asb\nGroup=asb\nWorkingDirectory=/var/lib/asb-vm\nKillSignal=SIGINT\nTimeoutStopSec=10\n"
                     f"ExecStart=/usr/local/bin/asb-interaction --role {role} --config /etc/asb-vm/config.json --ready /evidence/ready.json --control-dir /evidence\n"
-                    "ExecStopPost=/usr/local/bin/asb-vm-exit-marker\n"
+                    "ExecStopPost=+/usr/local/bin/asb-vm-exit-marker\n"
                     "Restart=no\n[Install]\nWantedBy=multi-user.target\n")
             cloud = {"users": [{"name": "asb", "system": True, "lock_passwd": True}], "ssh_pwauth": False,
                 "package_update": False, "package_upgrade": False,
                 "mounts": [["asb-input", "/mnt/asb-input", "9p", "trans=virtio,version=9p2000.L,ro", "0", "0"],
                            ["asb-evidence", "/evidence", "9p", "trans=virtio,version=9p2000.L", "0", "0"]],
                 "write_files": [{"path": "/etc/systemd/system/asb-vm.service", "permissions": "0644", "content": unit},
-                                {"path": "/usr/local/bin/asb-vm-exit-marker", "permissions": "0755", "content": EXIT_MARKER}],
-                "runcmd": [["install", "-d", "-m", "0700", "-o", "asb", "-g", "asb", "/var/lib/asb-vm", "/etc/asb-vm"],
-                           ["install", "-m", "0600", "-o", "asb", "-g", "asb", "/mnt/asb-input/config.json", "/etc/asb-vm/config.json"],
-                           ["install", "-m", "0755", "/mnt/asb-input/asb-interaction", "/usr/local/bin/asb-interaction"],
-                           ["systemctl", "daemon-reload"], ["systemctl", "enable", "--now", "asb-vm.service"]]}
+                                {"path": "/usr/local/bin/asb-vm-exit-marker", "permissions": "0755", "owner": "root:root", "content": EXIT_MARKER},
+                                {"path": "/usr/local/libexec/asb-vm-diagnostics.py", "permissions": "0644", "owner": "root:root",
+                                 "content": Path(__file__).with_name("fixtures").joinpath("discovery-vm/guest-diagnostics.py").read_text()}],
+                "runcmd": [["/bin/sh", "-ec", "exec /usr/bin/python3 -I /usr/local/libexec/asb-vm-diagnostics.py bootstrap --sha256 " + digest(self.binary)]]}
             (guest / "user-data").write_text("#cloud-config\n" + json.dumps(cloud))
             self.run("cloud-localds", "--network-config=" + str(guest / "network-config"), str(guest / "seed.img"), str(guest / "user-data"), str(guest / "meta-data"))
 
@@ -279,7 +301,12 @@ class Lab:
                 record = read_json(path)
                 if record.get("role") != role or not isinstance(record.get("pid"), int) or record["pid"] <= 0:
                     raise ValueError("guest readiness identity mismatch")
-                return
+                installation = process_markers(self.root / role / "evidence", role).get("bootstrap", {})
+                if installation.get("passed") is True:
+                    if (installation.get("binary_sha256") != digest(self.binary) or installation.get("binary_static_elf") is not True
+                            or any(installation.get(field) is not True for field in ("input_mount", "evidence_mount", "config_copied", "binary_copied"))):
+                        raise ValueError("guest installation does not match the qualified static binary")
+                    return
             time.sleep(0.2)
         raise TimeoutError("guest readiness exceeded 300 seconds")
 
@@ -287,11 +314,13 @@ class Lab:
         markers = process_markers(self.root / role / "evidence", role)
         if any(value.get("invalid") for value in markers.values()):
             raise ValueError("invalid guest process diagnostic")
+        if "bootstrap" in markers and markers["bootstrap"]["category"] != "none":
+            raise RuntimeError("guest bootstrap failed at " + markers["bootstrap"]["phase"] + " (" + markers["bootstrap"]["category"] + ")")
         if "stopped" in markers and not (allow_success and markers["stopped"]["passed"]):
             stopped = markers["stopped"]
             raise RuntimeError("guest service stopped at " + stopped["stage"] + " (" + stopped["category"] + ")")
         if "service-exit" in markers and not (allow_success and markers["service-exit"]["result"] == "success"):
-            raise RuntimeError("guest service exited before completion (" + markers["service-exit"]["result"] + ")")
+            raise RuntimeError("guest service exited before completion (" + markers["service-exit"]["result"] + ", " + markers["service-exit"]["exec_error"] + ")")
 
     def command(self, role: str, action: str) -> dict:
         self.stage, self.active_role = "guest-command-" + action, role
@@ -360,6 +389,7 @@ class Lab:
                             "acceleration": self.guest_acceleration.get(role),
                             "ready_file_present": (guest / "evidence/ready.json").is_file(),
                             "serial_categories": {name: any(token in tail for token in tokens) for name, tokens in categories.items()},
+                            "bootstrap_failure_phases": sorted(phase for phase in BOOT_PHASES if b"asb_vm_bootstrap_failure:" + phase.encode() in tail),
                             "process_markers": process_markers(guest / "evidence", role)}
         return {"stage": self.stage, "role": self.active_role,
                 "elapsed_seconds": round(time.monotonic() - self.started, 3), "guests": guests}

@@ -1,9 +1,11 @@
 """Guards for the disposable VM harness; no guests or network mutation."""
 
 import importlib.util
+import io
 import json
 from pathlib import Path
 import subprocess
+import struct
 import tempfile
 import unittest
 from unittest.mock import Mock, patch
@@ -11,6 +13,9 @@ from unittest.mock import Mock, patch
 spec = importlib.util.spec_from_file_location("discovery_vms", Path(__file__).with_name("check-asb-discovery-vms.py"))
 vm = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(vm)
+guest_spec = importlib.util.spec_from_file_location("vm_guest", Path(__file__).parent / "fixtures/discovery-vm/guest-diagnostics.py")
+guest = importlib.util.module_from_spec(guest_spec)
+guest_spec.loader.exec_module(guest)
 
 
 class VMHarnessGuards(unittest.TestCase):
@@ -86,7 +91,8 @@ class VMHarnessGuards(unittest.TestCase):
             root = Path(temporary)
             share = root / "agent-b/evidence"
             share.mkdir(parents=True)
-            vm.write_json(share / "service-exit.json", {"result": "exit-code", "exit_code": "exited", "exit_status": "203"})
+            vm.write_json(share / "service-exit.json", {"result": "exit-code", "exit_code": "exited", "exit_status": "203",
+                                                      "exec_error": "missing", "paths": {"/usr/local/bin/asb-interaction": {"exists": False}}})
             lab = vm.Lab(root, root / "binary")
             with self.assertRaisesRegex(RuntimeError, "exited before completion"):
                 lab.reject_stopped("agent-b")
@@ -109,11 +115,55 @@ class VMHarnessGuards(unittest.TestCase):
             share = root / "agent-b/evidence"
             share.mkdir(parents=True)
             vm.write_json(share / "stopped.json", {"role": "agent-b", "pid": 41, "stage": "control", "passed": True, "category": "none"})
-            vm.write_json(share / "service-exit.json", {"result": "success", "exit_code": "exited", "exit_status": "0"})
+            vm.write_json(share / "service-exit.json", {"result": "success", "exit_code": "exited", "exit_status": "0", "exec_error": "none", "paths": {}})
             lab = vm.Lab(root, root / "binary")
             lab.reject_stopped("agent-b", allow_success=True)
             with self.assertRaises(RuntimeError):
                 lab.reject_stopped("agent-b")
+
+    def test_guest_exec_errno_classification_never_returns_journal_text(self):
+        self.assertEqual(guest.EXEC_ERRORS, vm.EXEC_ERRORS)
+        self.assertEqual(guest.PHASES, vm.BOOT_PHASES)
+        for text, expected in ((b"No such file or directory", "missing"), (b"Permission denied", "permission"),
+                               (b"Exec format error", "exec-format"), (b"Text file busy", "text-file-busy"), (b"Input/output error", "io")):
+            raw = b"private-token\nFailed at step EXEC spawning /usr/local/bin/asb-interaction: " + text
+            self.assertEqual(guest.journal_exec_error(raw), expected)
+        self.assertEqual(guest.journal_exec_error(b"private-token: Permission denied"), "unavailable")
+
+    def test_static_elf_probe_rejects_interpreter_and_truncated_headers(self):
+        header = struct.pack("<16sHHIQQQIHHHHHH", b"\x7fELF\x02\x01\x01" + b"\0" * 9,
+                             2, 62, 1, 0, 64, 0, 0, 64, 56, 1, 0, 0, 0)
+        static = header + struct.pack("<I", 1) + b"\0" * 52
+        self.assertTrue(guest.static_elf(static))
+        for invalid in (b"", static[:90], header + struct.pack("<I", 3) + b"\0" * 52):
+            self.assertFalse(guest.static_elf(invalid))
+
+    def test_failed_bootstrap_install_cannot_fall_through_to_service_start(self):
+        markers = []
+        with patch.object(guest, "mounted", return_value=True), patch.object(guest, "publish", side_effect=lambda _, value: markers.append(dict(value))), \
+             patch.object(guest, "path_metadata", return_value={}), patch.object(guest.subprocess, "run", side_effect=subprocess.CalledProcessError(1, "install")) as run, \
+             patch("sys.stdout", new=io.StringIO()):
+            self.assertEqual(guest.bootstrap("a" * 64), 1)
+        self.assertEqual(run.call_count, 1)
+        self.assertEqual(run.call_args.args[0][0], "/usr/bin/install")
+        self.assertEqual(markers[-1]["phase"], "directories")
+        self.assertEqual(markers[-1]["category"], "command-failed")
+
+    def test_bootstrap_failure_is_early_and_unknown_paths_are_never_published(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            share = root / "agent-b/evidence"
+            share.mkdir(parents=True)
+            marker = {"phase": "binary-verify", "passed": False, "category": "verification-failed", "input_mount": True,
+                      "evidence_mount": True, "config_copied": True, "binary_copied": True, "binary_sha256": "a" * 64,
+                      "binary_static_elf": False, "paths": {"/usr/local/bin/asb-interaction": {"exists": True, "mode": 0o755, "uid": 0, "gid": 0, "symlink": False}}}
+            vm.write_json(share / "bootstrap.json", marker)
+            lab = vm.Lab(root, root / "binary")
+            with self.assertRaisesRegex(RuntimeError, "bootstrap failed at binary-verify"):
+                lab.reject_stopped("agent-b")
+            marker["paths"] = {"/private-unreported-token": {"exists": False}}
+            vm.write_json(share / "bootstrap.json", marker)
+            self.assertEqual(vm.process_markers(share, "agent-b"), {"bootstrap": {"invalid": True}})
 
 
 if __name__ == "__main__":
