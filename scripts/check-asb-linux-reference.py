@@ -82,12 +82,14 @@ def require(condition, reason):
 
 def bounded_command(command, timeout=30, limit=4 << 20):
     """Bound output and time, and reap the child process group on every exit."""
-    with subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+    with subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                           start_new_session=True) as child:
         output = bytearray()
+        total = 0
         try:
             with selectors.DefaultSelector() as selector:
-                selector.register(child.stdout, selectors.EVENT_READ)
+                selector.register(child.stdout, selectors.EVENT_READ, True)
+                selector.register(child.stderr, selectors.EVENT_READ, False)
                 deadline = time.monotonic() + timeout
                 while selector.get_map():
                     require(time.monotonic() < deadline, "command timed out")
@@ -96,8 +98,10 @@ def bounded_command(command, timeout=30, limit=4 << 20):
                         if not block:
                             selector.unregister(key.fileobj)
                         else:
-                            output.extend(block)
-                            require(len(output) <= limit, "command output limit exceeded")
+                            total += len(block)
+                            require(total <= limit, "command output limit exceeded")
+                            if key.data:
+                                output.extend(block)
                 require(child.wait(timeout=max(0.1, deadline - time.monotonic())) == 0,
                         "required command failed")
         finally:
@@ -215,7 +219,10 @@ def validate_offline(directory, commit, installed):
 
 
 def passed_go_tests(raw, expected):
-    events = [json.loads(line) for line in raw.splitlines()]
+    try:
+        events = [json.loads(line) for line in raw.splitlines()]
+    except (ValueError, UnicodeError) as error:
+        raise EvidenceError("Go test event stream is not valid JSON") from error
     require(events and all(isinstance(event, dict) and event.get("Action") != "fail" for event in events),
             "Go tests failed")
     passed = {(event.get("Package"), event.get("Test")) for event in events if event.get("Action") == "pass"}

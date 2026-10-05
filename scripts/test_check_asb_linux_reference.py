@@ -4,6 +4,7 @@ import copy
 import hashlib
 import importlib.util
 import json
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -15,6 +16,15 @@ SPEC.loader.exec_module(REFERENCE)
 
 
 class ReferenceEvidenceTest(unittest.TestCase):
+    def test_command_keeps_diagnostics_out_of_json_and_bounds_both_streams(self):
+        command = [sys.executable, "-c", "import sys; print('go: downloading fixture', file=sys.stderr); print('{\"Action\":\"pass\"}')"]
+        raw = REFERENCE.bounded_command(command)
+        self.assertEqual(json.loads(raw), {"Action": "pass"})
+        with self.assertRaisesRegex(REFERENCE.EvidenceError, "output limit"):
+            REFERENCE.bounded_command([sys.executable, "-c", "import sys; sys.stderr.write('x' * 4096)"], limit=1024)
+        with self.assertRaisesRegex(REFERENCE.EvidenceError, "not valid JSON"):
+            REFERENCE.passed_go_tests(b"not-json\n", {})
+
     def environment(self):
         return {
             "GITHUB_ACTIONS": "true", "RUNNER_ENVIRONMENT": "github-hosted",
