@@ -185,32 +185,72 @@ not protect a fresh client from such a replay.
 
 ## Exercise apt authentication and upgrades on Linux
 
-The Debian workflow builds revisions `0.1.0~preview.1-1` and
-`0.1.0~preview.1-2` from the same source, exercises both lifecycle gates, and runs:
+The Debian workflow builds `0.1.0~preview.1-1` from the previous merged revision
+`b8fd28939a7385a1dab66317d085d58755df0209`, using that revision's builder in a
+separate clean checkout. It builds `0.1.0~preview.1-2` from the candidate checkout.
+The gate requires the initial commit to be an ancestor of the candidate, distinct
+source trees, matching package provenance and different Human executable hashes.
+Both candidates must pass their Linux package lifecycle checks before the
+upgrade runs. A full-history candidate checkout is required for the ancestry
+check. The earlier same-source package-revision test is historical evidence;
+it does not satisfy this gate.
+
+For a matching local Linux setup, place the clean historical checkout at
+`build/upgrade-baseline`, build its candidates with an absolute output path,
+and run:
 
 ```sh
 python3 scripts/test_asb_apt_repository.py
+python3 scripts/test_check_asb_apt.py
 python3 scripts/check-asb-apt.py \
   --initial build/debian-candidates --initial-lifecycle build/debian-lifecycle.json \
   --upgrade build/debian-upgrade --upgrade-lifecycle build/debian-upgrade-lifecycle.json \
+  --initial-source b8fd28939a7385a1dab66317d085d58755df0209 \
+  --upgrade-source "$(git rev-parse HEAD)" \
+  --source-checkout "$PWD" --initial-checkout "$PWD/build/upgrade-baseline" \
   --output build/apt-lifecycle.json --image ubuntu:24.04
 ```
 
 A disposable Linux container with network access disabled installs from signed
-local repository snapshots. It checks a version upgrade, preserves a real Human
-receipt/database and their file modes, and recovers the receipt afterwards. It
-also requires apt and the independent verifier to reject unsigned metadata,
+local repository snapshots. The old executable creates a real Human receipt
+and database. The gate checks the installed executable's SHA-256 against its
+package inventory both before and after the upgrade, preserves the state and
+file modes, and recovers the old receipt with the new executable. The current
+Human database remains schema 1; this is not a Human schema-migration test.
+Source commits and executable hashes can differ solely because of build
+provenance even when the Human implementation is unchanged. The report records
+whether `cmd/asb-human` or `internal/humanapp` changed and makes no broader
+behavior-change claim from a binary hash alone.
+
+A separate test-only probe exercises changed TaskCoord storage code. The same
+`scripts/fixtures/taskcoord-upgrade/main.go` is compiled against each clean
+module checkout, with `GOWORK=off` and source-directory checks. The old probe
+creates a real schema-1 database through that revision's public APIs, including
+an Assignment and its immutable retry history. The new probe opens that database
+through the candidate APIs, requires schema 2 and the new reachability/quarantine
+tables, and verifies unchanged Participant, Assignment and state-blob hashes.
+This demonstrates the selected TaskCoord schema 1→2 migration. It is separate
+from the packaged Human application's database and does not certify other
+migration paths. Both probes are synthetic authorization fixtures; no external
+Human approval or provider is involved.
+
+The gate also requires apt and the independent verifier to reject unsigned metadata,
 unknown or retired keys, signature/index/package changes, expired metadata and
 future-dated metadata. Each rejected apt update starts with an empty list/cache,
 so stale successful results cannot satisfy the negative check. The report
-records exact package hashes, image identity, test key fingerprints and phases.
+records exact source commits/trees, package and executable hashes, the observed
+database versions, image identity, test key fingerprints and phases. Probe source,
+implementation-file and binary hashes identify both builds; the probe has
+`buildvcs=false` and is explicitly a test helper, not a distribution executable.
 Its adjacent `apt-lifecycle.evidence` directory preserves the signed metadata
-and public test keyrings with recorded hashes. Combine each metadata tree with
+and public test keyrings with recorded hashes, along with both probe binaries,
+their shared source and build record. Combine each metadata tree with
 its matching candidate packages at the manifest's pool paths to repeat signature
 and byte verification before metadata expiry; the private test keys are not kept.
 
-This is a same-source Debian revision transition, not a database-schema migration
-or a test of a live HTTPS host. The S3 state check uses an operator marker. No
-service is activated, and no host packages or AWS resources are changed. The
+This does not test a live HTTPS host, every previous release or a running-process
+upgrade. Processes are stopped before package replacement and reopened afterwards.
+The S3 state check uses an operator marker. No service is activated, and no host
+packages or AWS resources are changed. The
 production key, authenticated client key distribution, hosting destination and
 post-publication verification remain unqualified until selected and exercised.

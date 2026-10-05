@@ -1,0 +1,145 @@
+name: ASB apt Pages publication
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/apt-pages.yaml'
+      - 'scripts/asb-apt-pages.py'
+      - 'scripts/test_asb_apt_pages.py'
+      - 'scripts/asb-apt-repository.py'
+      - 'packaging/debian/archive-signers.json'
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Reviewed release tag containing asb-apt-site.tar (apt-preview-...)'
+        required: true
+        type: string
+      archive_sha256:
+        description: 'Independently reviewed SHA-256 of the whole tar archive'
+        required: true
+        type: string
+      source_commit:
+        description: 'Full source commit qualified by Linux package tests'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: asb-apt-pages-${{ github.event_name }}
+  cancel-in-progress: false
+
+jobs:
+  checks:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - run: python3 scripts/test_asb_apt_pages.py
+
+  prepare:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'ToppyMicroServices/agents-secure-binding'
+    needs: checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      RELEASE_TAG: ${{ inputs.release_tag }}
+      ARCHIVE_SHA256: ${{ inputs.archive_sha256 }}
+      SOURCE_COMMIT: ${{ inputs.source_commit }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Require reviewed inputs and a configured public trust anchor
+        run: |
+          python3 - <<'PY'
+          import os, re
+          from pathlib import Path
+          for key, pattern in [('RELEASE_TAG', r'apt-preview-[a-zA-Z0-9._-]{1,80}'), ('ARCHIVE_SHA256', r'[0-9a-f]{64}'), ('SOURCE_COMMIT', r'[0-9a-f]{40}')]:
+              if not re.fullmatch(pattern, os.environ[key]):
+                  raise SystemExit('Invalid publication input: ' + key)
+          if not Path('packaging/debian/archive-signers.json').is_file():
+              raise SystemExit('Production signing key has not been configured')
+          PY
+          test "$(git cat-file -t "$SOURCE_COMMIT")" = commit
+          git merge-base --is-ancestor "$SOURCE_COMMIT" HEAD
+      - name: Download only the reviewed signed archive
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --pattern asb-apt-site.tar --dir "$RUNNER_TEMP/reviewed"
+      - name: Verify final publication bytes against the committed public key policy
+        run: |
+          python3 scripts/asb-apt-pages.py unpack \
+            --policy packaging/debian/archive-signers.json --source-commit "$SOURCE_COMMIT" \
+            --archive "$RUNNER_TEMP/reviewed/asb-apt-site.tar" --sha256 "$ARCHIVE_SHA256" \
+            --output "$RUNNER_TEMP/site"
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: ${{ runner.temp }}/site
+      - uses: actions/upload-artifact@v4
+        with:
+          name: asb-reviewed-site
+          path: ${{ runner.temp }}/reviewed/asb-apt-site.tar
+          retention-days: 7
+          if-no-files-found: error
+
+  deploy:
+    needs: prepare
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Publish the verified artifact
+        id: deployment
+        uses: actions/deploy-pages@v4
+
+  verify-publication:
+    needs: deploy
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      ARCHIVE_SHA256: ${{ inputs.archive_sha256 }}
+      SOURCE_COMMIT: ${{ inputs.source_commit }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: asb-reviewed-site
+          path: ${{ runner.temp }}/reviewed
+      - name: Reverify the archived bytes
+        run: |
+          mkdir -p evidence
+          python3 scripts/asb-apt-pages.py unpack \
+            --policy packaging/debian/archive-signers.json --source-commit "$SOURCE_COMMIT" \
+            --archive "$RUNNER_TEMP/reviewed/asb-apt-site.tar" --sha256 "$ARCHIVE_SHA256" \
+            --output "$RUNNER_TEMP/site" > evidence/archive.json
+      - name: Compare every published file over HTTPS
+        run: |
+          for attempt in 1 2 3 4 5; do
+            if python3 scripts/asb-apt-pages.py verify-live \
+              --policy packaging/debian/archive-signers.json --source-commit "$SOURCE_COMMIT" \
+              --site "$RUNNER_TEMP/site" > "evidence/https-$attempt.json" 2> "evidence/https-$attempt.log"; then
+              exit 0
+            fi
+            if [ "$attempt" -lt 5 ]; then sleep 15; fi
+          done
+          exit 1
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: asb-publication-evidence
+          path: evidence/
+          retention-days: 90
+          if-no-files-found: error

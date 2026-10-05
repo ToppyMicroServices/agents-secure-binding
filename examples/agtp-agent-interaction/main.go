@@ -20,11 +20,13 @@ import (
 )
 
 type commandOptions struct {
-	role   string
-	config string
-	ready  string
-	result string
-	report string
+	role       string
+	config     string
+	ready      string
+	result     string
+	report     string
+	prepareVM  string
+	controlDir string
 }
 
 type interactionEvidence struct {
@@ -62,6 +64,9 @@ func runCommand(args []string, out io.Writer) error {
 	if err != nil {
 		return err
 	}
+	if opts.prepareVM != "" {
+		return prepareVMConfigs(opts.prepareVM)
+	}
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
 	if opts.role != "" {
@@ -90,6 +95,8 @@ func runCommand(args []string, out io.Writer) error {
 func parseOptions(args []string) (commandOptions, error) {
 	var opts commandOptions
 	flags := flag.NewFlagSet("agtp-agent-interaction", flag.ContinueOnError)
+	flags.StringVar(&opts.prepareVM, "prepare-vm-dir", "", "prepare private ephemeral credentials for the fixed three-VM Linux qualification lab")
+	flags.StringVar(&opts.controlDir, "control-dir", "", "private local qualification control directory (Linux lab only)")
 	flags.StringVar(&opts.report, "report", "", "write the non-secret interaction evidence as JSON")
 	flags.StringVar(&opts.role, "role", "", "internal child role: agent-a, agent-b, or relay")
 	flags.StringVar(&opts.config, "config", "", "internal generated role configuration")
@@ -101,19 +108,39 @@ func parseOptions(args []string) (commandOptions, error) {
 	if flags.NArg() != 0 {
 		return opts, errors.New("unexpected positional arguments")
 	}
-	if opts.role == "" && (opts.config != "" || opts.ready != "" || opts.result != "") {
+	if opts.prepareVM != "" {
+		if opts.role != "" || opts.config != "" || opts.ready != "" || opts.result != "" || opts.report != "" || opts.controlDir != "" {
+			return opts, errors.New("VM preparation cannot run a role or report")
+		}
+		return opts, nil
+	}
+	if opts.role == "" && (opts.controlDir != "" || opts.config != "" || opts.ready != "" || opts.result != "") {
 		return opts, errors.New("child flags require a role")
 	}
 	if opts.role != "" && (opts.config == "" || opts.ready == "" || opts.report != "") {
 		return opts, errors.New("child requires config and readiness paths, without report")
 	}
-	if opts.role == roleAgentA && opts.result == "" {
+	if opts.role == roleAgentA && opts.result == "" && opts.controlDir == "" {
 		return opts, errors.New("agent-a requires a result path")
 	}
 	return opts, nil
 }
 
 func runProcessRole(ctx context.Context, opts commandOptions) (runErr error) {
+	stage := vmStageConfig
+	advance := func(next string) error {
+		stage = next
+		return writeVMStage(opts.controlDir, opts.role, stage)
+	}
+	if opts.controlDir != "" {
+		// Registered before resource defers, so the marker observes both drains.
+		defer func() {
+			runErr = errors.Join(runErr, writeJSONFile(filepath.Join(opts.controlDir, "stopped.json"), vmStopped(opts.role, stage, runErr)))
+		}()
+	}
+	if err := advance(vmStageConfig); err != nil {
+		return err
+	}
 	config, err := readConfig(opts.config)
 	if err != nil {
 		return err
@@ -121,7 +148,17 @@ func runProcessRole(ctx context.Context, opts commandOptions) (runErr error) {
 	if config.Self.Role != opts.role {
 		return errors.New("role does not match configured identity")
 	}
-	node, err := startDiscovery(ctx, config)
+	if config.VMQualification != (opts.controlDir != "") {
+		return errors.New("VM qualification configuration requires its explicit control mode")
+	}
+	lease := 10 * time.Minute
+	if opts.controlDir != "" {
+		lease = vmLabTTL
+	}
+	if err := advance(vmStageDiscovery); err != nil {
+		return err
+	}
+	node, err := startDiscoveryWithLease(ctx, config, lease)
 	if err != nil {
 		return err
 	}
@@ -131,6 +168,9 @@ func runProcessRole(ctx context.Context, opts commandOptions) (runErr error) {
 		runErr = errors.Join(runErr, node.Stop(stopCtx))
 	}()
 	if opts.role == roleAgentB {
+		if err := advance(vmStageTaskServer); err != nil {
+			return err
+		}
 		stop, err := startTaskServer(ctx, config)
 		if err != nil {
 			return err
@@ -141,8 +181,17 @@ func runProcessRole(ctx context.Context, opts commandOptions) (runErr error) {
 			runErr = errors.Join(runErr, stop(stopCtx))
 		}()
 	}
+	if err := advance(vmStageReady); err != nil {
+		return err
+	}
 	if err := writeJSONFile(opts.ready, processReady{Role: opts.role, PID: os.Getpid()}); err != nil {
 		return err
+	}
+	if opts.controlDir != "" {
+		if err := advance(vmStageControl); err != nil {
+			return err
+		}
+		return runVMControl(ctx, node, config, opts.controlDir)
 	}
 	if opts.role != roleAgentA {
 		select {

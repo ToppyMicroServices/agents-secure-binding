@@ -19,7 +19,7 @@ cloud qualification retain their existing separate status.
 | Bounded automatic execution | Prior mandate, finite-model verification, authenticated execution and a single-host durable journal | This is a separate application profile, not the generic Human Coordination transaction owner |
 | TaskCoord | Redis/Valkey mutation/outbox adapter; shared SQLite Human mutation, replay, outcome and outbox transactions | Managed-backend and delivery-provider qualification remain separate |
 | Task–Action binding | Shared SQLite implementation of the complete Store contract, using current TaskCoord Assignments in the same transaction | External execution dispatch still requires an application adapter and qualification |
-| Human relay | Scoped contact, dispatch/revocation ordering and unknown-provider-outcome rules | Reference store and local sink; durable provider reconciliation is not implemented |
+| Human relay | Scoped contact, Linux file persistence, SQLite reachability authority and read-only reconciliation of unknown provider outcomes | Bounded single-host implementation; the included provider is synthetic, and selected-provider/deployment qualification remains open |
 | Required CI | Main's required `product-security` status and a separate bounded Human red-team job | The required job previously omitted `strictjson`, `operationjournal` and independent Python transcript checks; this work connects them through the shared Make target |
 | Research evaluation | Separate component regression pilot and a proposed comparison protocol | No single integrated human-decision/delegation/effect experiment or participant study |
 

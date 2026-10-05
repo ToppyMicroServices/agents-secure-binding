@@ -115,7 +115,7 @@ func TestLinuxNamespaceInteraction(t *testing.T) {
 		config := configs[role]
 		config.Self.Node.Endpoint = addresses[role] + ":9443"
 		config.AllowedCIDRs = []string{"10.203.0.11/32", "10.203.0.12/32", "10.203.0.13/32"}
-		config.Target.Endpoint = "https://10.203.0.13:9444"
+		config.Target.Endpoint = vmTaskEndpoint
 		configs[role] = config
 	}
 	for _, role := range roles {
@@ -131,7 +131,7 @@ func TestLinuxNamespaceInteraction(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !evidence.Passed || !evidence.DistinctProcesses || !evidence.DistinctTLSKeys || !evidence.Discovery.DHTFound || evidence.Discovery.PeerCount != 2 || evidence.Discovery.Endpoint != "https://10.203.0.13:9444" || evidence.Result.Sum != 31 || evidence.Result.Executions != 1 || evidence.WithoutProofStatus != 401 || evidence.AuthorizedStatus != 200 {
+	if !evidence.Passed || !evidence.DistinctProcesses || !evidence.DistinctTLSKeys || !evidence.Discovery.DHTFound || evidence.Discovery.PeerCount != 2 || evidence.Discovery.Endpoint != vmTaskEndpoint || evidence.Result.Sum != 31 || evidence.Result.Executions != 1 || evidence.WithoutProofStatus != 401 || evidence.AuthorizedStatus != 200 {
 		t.Fatalf("unexpected namespace interaction evidence: %+v", evidence)
 	}
 	evidence.NetworkScope = "single Linux host; three separate network namespaces over a private bridge"

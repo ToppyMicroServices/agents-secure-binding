@@ -1,7 +1,7 @@
 {
   "profileVersion": 1,
   "id": "linux-service",
-  "claim": "Dedicated-user systemd service installation on the recorded Linux target",
+  "claim": "Static systemd unit validation and computation-runner tests on the recorded Linux target",
   "targetOs": ["linux"],
   "checks": [
     {

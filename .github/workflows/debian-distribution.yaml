@@ -9,7 +9,12 @@ on:
       - 'scripts/check-asb-deb-lifecycle.py'
       - 'scripts/asb-apt-repository.py'
       - 'scripts/test_asb_apt_repository.py'
+      - 'scripts/asb-apt-pages.py'
+      - 'scripts/test_asb_apt_pages.py'
+      - 'scripts/check-asb-apt-pages.py'
       - 'scripts/check-asb-apt.py'
+      - 'scripts/test_check_asb_apt.py'
+      - 'scripts/fixtures/taskcoord-upgrade/**'
       - 'docs/asb-linux-distribution.md'
       - 'docs/asb-debian-packages.md'
       - 'docs/API_COMPATIBILITY.md'
@@ -37,9 +42,19 @@ jobs:
     env:
       GOWORK: 'off'
       PYTHONDONTWRITEBYTECODE: '1'
+      ASB_UPGRADE_BASE: 'b8fd28939a7385a1dab66317d085d58755df0209'
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Check out the immutable previous merged source
+        uses: actions/checkout@v4
+        with:
+          repository: ToppyMicroServices/agents-secure-binding
+          ref: b8fd28939a7385a1dab66317d085d58755df0209
+          path: build/upgrade-baseline
           persist-credentials: false
       - uses: actions/setup-go@v5
         with:
@@ -48,19 +63,23 @@ jobs:
         run: |
           python3 scripts/test_build_asb_deb.py
           python3 scripts/test_asb_apt_repository.py
-      - name: Build all explicit candidate components
+          python3 scripts/test_check_asb_apt.py
+          python3 scripts/test_asb_apt_pages.py
+      - name: Build the previous source with its own reviewed builder
         run: |
-          python3 scripts/build-asb-deb.py \
-            --source-commit "$(git rev-parse HEAD)" \
+          test "$(git -C build/upgrade-baseline rev-parse HEAD)" = "$ASB_UPGRADE_BASE"
+          git merge-base --is-ancestor "$ASB_UPGRADE_BASE" HEAD
+          python3 build/upgrade-baseline/scripts/build-asb-deb.py \
+            --source-commit "$ASB_UPGRADE_BASE" \
             --version '0.1.0~preview.1-1' \
             --maintainer 'ASB CI <ci@example.invalid>' \
-            --output build/debian-candidates --with-human --with-s3
+            --output "$GITHUB_WORKSPACE/build/debian-candidates" --with-human --with-s3
       - name: Inspect final Debian artifacts and exercise their lifecycle
         run: |
           python3 scripts/check-asb-deb-lifecycle.py \
             --artifacts build/debian-candidates \
             --output build/debian-lifecycle.json --image ubuntu:24.04
-      - name: Build the next Debian revision from the same reviewed source
+      - name: Build the next Debian revision from the candidate source
         run: |
           python3 scripts/build-asb-deb.py \
             --source-commit "$(git rev-parse HEAD)" \
@@ -75,7 +94,11 @@ jobs:
           python3 scripts/check-asb-apt.py \
             --initial build/debian-candidates --initial-lifecycle build/debian-lifecycle.json \
             --upgrade build/debian-upgrade --upgrade-lifecycle build/debian-upgrade-lifecycle.json \
+            --initial-source "$ASB_UPGRADE_BASE" --upgrade-source "$(git rev-parse HEAD)" \
+            --source-checkout "$GITHUB_WORKSPACE" --initial-checkout "$GITHUB_WORKSPACE/build/upgrade-baseline" \
             --output build/apt-lifecycle.json --image ubuntu:24.04
+      - name: Inspect the final Pages archive with the ephemeral CI public key
+        run: python3 scripts/check-asb-apt-pages.py --build build
       - name: Save candidate packages and Linux evidence
         uses: actions/upload-artifact@v4
         with:
@@ -87,5 +110,6 @@ jobs:
             build/debian-upgrade-lifecycle.json
             build/apt-lifecycle.json
             build/apt-lifecycle.evidence/
+            build/apt-pages/
           if-no-files-found: error
           retention-days: 90

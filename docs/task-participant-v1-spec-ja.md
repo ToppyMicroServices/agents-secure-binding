@@ -460,7 +460,8 @@ Schema検証はbounded TLS ingressのchallenge／execute envelopeとCI fixture�
   公開error bodyを対象にしたresponse Schema;
 - atomic state/outbox commitとbounded leaseを持つRedis/Valkey TaskCoord adapter候補;
 - 有効なreachability grantを一つのopaque relay intentへ変換するAgent-to-Human
-  profileとMac/CI用in-process gateway sink;
+  profile、Linux用bounded file Store、SQLite reachability authority、read-only
+  provider reconciliation（同梱gateway sinkはsynthetic）;
 - immutable bindingとstate-preserving projectionによる別packageのAction
   lifecycleとの[統合](task-action-lifecycle-v1-spec-ja.md)。
 
@@ -486,7 +487,7 @@ interactionの監査recordへ保存する。legacyまたはtrusted-internal reco
 - production用shared nonce replay adapter;
 - 暗号化contact vault;
 - Email/SNS/TEL providerと実配送;
-- relay専用TLS challenge／execute endpointとrestart-durable relay Store;
+- relay専用TLS challenge／execute endpoint、service deploymentと実provider adapter;
 - production Action binding Storeとnetwork Action ingress;
 - rate limit、abuse monitoring、retention/deletion運用;
 - Participant status変更のaudit log。

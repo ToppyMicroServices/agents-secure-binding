@@ -69,12 +69,32 @@ def write_private_atomic(path: Path, data: bytes) -> None:
         temporary.unlink(missing_ok=True)
 
 
+def load_json_object(data: bytes) -> dict:
+    def unique_fields(pairs: list[tuple[str, object]]) -> dict:
+        value = {}
+        for key, item in pairs:
+            if key in value:
+                raise ValueError(f"duplicate JSON field: {key}")
+            value[key] = item
+        return value
+
+    def reject_constant(value: str) -> None:
+        raise ValueError(f"invalid JSON constant: {value}")
+
+    value = json.loads(data.decode("utf-8"), object_pairs_hook=unique_fields, parse_constant=reject_constant)
+    if not isinstance(value, dict):
+        raise ValueError("JSON document must be an object")
+    return value
+
+
 def load_profile_bytes(data: bytes) -> dict:
-    profile = json.loads(data.decode("utf-8"))
+    if len(data) > MAX_PROFILE_BYTES:
+        raise ValueError("profile is too large")
+    profile = load_json_object(data)
     required = {"profileVersion", "id", "claim", "targetOs", "checks"}
-    if set(profile) != required or profile["profileVersion"] != 1:
+    if set(profile) != required or type(profile["profileVersion"]) is not int or profile["profileVersion"] != 1:
         raise ValueError("profile must contain only the version-1 fields")
-    if not re.fullmatch(r"[a-z0-9][a-z0-9._-]{1,63}", profile["id"]):
+    if not isinstance(profile["id"], str) or not re.fullmatch(r"[a-z0-9][a-z0-9._-]{1,63}", profile["id"]):
         raise ValueError("invalid profile id")
     if not isinstance(profile["claim"], str) or not profile["claim"].strip():
         raise ValueError("profile claim must be non-empty")
@@ -84,7 +104,7 @@ def load_profile_bytes(data: bytes) -> dict:
         raise ValueError("checks must be a non-empty list")
     seen = set()
     for check in profile["checks"]:
-        if set(check) - {"id", "required", "command", "timeoutSeconds", "environment"}:
+        if not isinstance(check, dict) or set(check) - {"id", "required", "command", "timeoutSeconds", "environment"}:
             raise ValueError("check contains unknown fields")
         check_id = check.get("id")
         if not isinstance(check_id, str) or not re.fullmatch(r"[a-z0-9][a-z0-9._-]{1,63}", check_id) or check_id in seen:
@@ -94,7 +114,7 @@ def load_profile_bytes(data: bytes) -> dict:
         if not isinstance(command, list) or not command or not all(isinstance(item, str) and item for item in command):
             raise ValueError(f"check {check_id} must use a non-empty argument array")
         timeout = check.get("timeoutSeconds")
-        if not isinstance(timeout, int) or timeout < 1 or timeout > 3600:
+        if type(timeout) is not int or timeout < 1 or timeout > 3600:
             raise ValueError(f"check {check_id} has an invalid timeout")
         if not isinstance(check.get("required"), bool):
             raise ValueError(f"check {check_id} must declare required")
@@ -329,6 +349,62 @@ def read_regular_file_once(path: Path) -> bytes:
     return data
 
 
+def validate_report_checks(report: dict, declared: dict, files: dict[str, bytes]) -> None:
+    checks = report.get("checks")
+    environment = report.get("environment")
+    if not isinstance(checks, list) or len(checks) != len(declared["checks"]):
+        raise ValueError("report checks do not match the profile")
+    if not isinstance(environment, dict) or not isinstance(environment.get("os"), str):
+        raise ValueError("report must record the target OS")
+    os_allowed = environment["os"] in {name.lower() for name in declared["targetOs"]}
+    if report["status"] == "passed" and not os_allowed:
+        raise ValueError("passing report target OS is outside the profile")
+    definitions = {check["id"]: check for check in declared["checks"]}
+    seen = set()
+    bound_files = {"qa-report.json", "profile.json", CHECKSUMS_NAME, SIGNATURE_NAME}
+    for check in checks:
+        if not isinstance(check, dict) or not isinstance(check.get("id"), str):
+            raise ValueError("invalid qualification check")
+        check_id = check["id"]
+        definition = definitions.get(check_id)
+        if definition is None or check_id in seen:
+            raise ValueError("report contains an unknown or duplicate check")
+        seen.add(check_id)
+        if (not isinstance(check.get("required"), bool)
+                or type(check.get("timeoutSeconds")) is not int
+                or any(check.get(field) != definition[field] for field in ("required", "command", "timeoutSeconds"))):
+            raise ValueError("report check definition does not match the profile")
+        status = check.get("status")
+        if not isinstance(status, str) or status not in {"passed", "failed", "unavailable"}:
+            raise ValueError("invalid qualification check status")
+        return_code = check.get("returnCode")
+        if return_code is not None and type(return_code) is not int:
+            raise ValueError("invalid qualification return code")
+        if status == "passed" and return_code != 0:
+            raise ValueError("passing check must record exit status zero")
+        if status == "unavailable" and return_code is not None:
+            raise ValueError("unavailable check must not record an exit status")
+        if not isinstance(check.get("secretMaterialDetected"), bool):
+            raise ValueError("check must record secret detection status")
+        if type(check.get("durationMilliseconds")) is not int or check["durationMilliseconds"] < 0:
+            raise ValueError("invalid qualification check duration")
+        if not os_allowed and status != "unavailable":
+            raise ValueError("checks outside the target OS must be unavailable")
+        for field in ("stdout", "stderr"):
+            name = check.get(field)
+            if not os_allowed and name is None:
+                continue
+            if name != f"{check_id}.{field}.log" or name not in files:
+                raise ValueError("check must bind its own output logs")
+            bound_files.add(name)
+        if definition["required"] and report["status"] == "passed" and status != "passed":
+            raise ValueError("passing report contains an incomplete required check")
+        if check["secretMaterialDetected"] and report["status"] == "passed":
+            raise ValueError("passing report contains detected secret material")
+    if set(files) - bound_files:
+        raise ValueError("bundle contains files outside the declared checks")
+
+
 def read_bundle(bundle: Path) -> tuple[dict, dict[str, str], bytes | None, bytes]:
     entries = list(bundle.iterdir())
     if len(entries) > 2 * MAX_CHECKS + 4:
@@ -354,27 +430,23 @@ def read_bundle(bundle: Path) -> tuple[dict, dict[str, str], bytes | None, bytes
     for name, digest in expected.items():
         if sha256_bytes(files[name]).removeprefix("sha256:") != digest:
             raise ValueError(f"digest mismatch: {name}")
-    report = json.loads(files["qa-report.json"].decode("utf-8"))
-    if report.get("documentType") != "asb.qualification-report" or report.get("version") != REPORT_VERSION or report.get("status") not in {"passed", "failed"} or not isinstance(report.get("qualificationClaim"), bool):
+    report = load_json_object(files["qa-report.json"])
+    if report.get("documentType") != "asb.qualification-report" or type(report.get("version")) is not int or report.get("version") != REPORT_VERSION or report.get("status") not in ("passed", "failed") or not isinstance(report.get("qualificationClaim"), bool):
         raise ValueError("invalid qualification report")
     profile = report.get("profile")
     source = report.get("source")
     checks = report.get("checks")
     if not isinstance(profile, dict) or not isinstance(source, dict) or not isinstance(checks, list):
         raise ValueError("invalid qualification report structure")
+    if (any(not isinstance(source.get(field), str) or not re.fullmatch(r"(?:[0-9a-f]{40}|[0-9a-f]{64})", source[field]) for field in ("commit", "tree"))
+            or not isinstance(source.get("dirty"), bool) or not isinstance(source.get("stable"), bool)):
+        raise ValueError("report must bind a source commit, tree and status")
     if "profile.json" not in files or profile.get("sha256") != sha256_bytes(files["profile.json"]):
         raise ValueError("profile digest mismatch")
-    for check in checks:
-        if not isinstance(check, dict) or not isinstance(check.get("required"), bool):
-            raise ValueError("invalid qualification check")
-        for field in ("stdout", "stderr"):
-            name = check.get(field)
-            if name is not None and name not in expected:
-                raise ValueError("check references an unbound log")
-        if check.get("required") and report["status"] == "passed" and check.get("status") != "passed":
-            raise ValueError("passing report contains an incomplete required check")
-        if check.get("secretMaterialDetected") and report["status"] == "passed":
-            raise ValueError("passing report contains detected secret material")
+    declared = load_profile_bytes(files["profile.json"])
+    if any(profile.get(field) != declared[field] for field in ("id", "claim")):
+        raise ValueError("report profile description does not match the profile")
+    validate_report_checks(report, declared, files)
     if report["status"] == "failed" and report["qualificationClaim"]:
         raise ValueError("failed report cannot contain a qualification claim")
     if report["status"] == "passed" and (source.get("dirty") is not False or source.get("stable") is not True):
@@ -423,7 +495,7 @@ def verify_signature(signature_data: bytes, sums_data: bytes, trusted_signer: st
 
 def sign_bundle(args: argparse.Namespace) -> int:
     bundle = args.bundle.resolve()
-    report, _, signature_data, _ = read_bundle(bundle)
+    report, checked_digests, signature_data, checked_sums = read_bundle(bundle)
     if signature_data is not None or report["qualificationClaim"]:
         raise ValueError("bundle is already claimed or signed")
     source = report["source"]
@@ -439,6 +511,8 @@ def sign_bundle(args: argparse.Namespace) -> int:
     sums_path = bundle / CHECKSUMS_NAME
     old_report = report_path.read_bytes()
     old_sums = sums_path.read_bytes()
+    if sha256_bytes(old_report).removeprefix("sha256:") != checked_digests["qa-report.json"] or old_sums != checked_sums:
+        raise ValueError("bundle changed before qualification signing")
     signature_path = bundle / SIGNATURE_NAME
     descriptor, temporary_name = tempfile.mkstemp(prefix=f".{SIGNATURE_NAME}.", dir=bundle)
     os.close(descriptor)
@@ -446,8 +520,11 @@ def sign_bundle(args: argparse.Namespace) -> int:
     temporary_signature.unlink()
     try:
         report["qualificationClaim"] = True
-        write_private_atomic(report_path, canonical_json(report))
-        signed_sums = write_checksums(bundle)
+        claimed_report = canonical_json(report)
+        write_private_atomic(report_path, claimed_report)
+        checked_digests["qa-report.json"] = sha256_bytes(claimed_report).removeprefix("sha256:")
+        signed_sums = "".join(f"{digest}  {name}\n" for name, digest in sorted(checked_digests.items())).encode("utf-8")
+        write_private_atomic(sums_path, signed_sums)
         completed = subprocess.run(
             [gpg_executable(), "--batch", "--no-auto-key-retrieve", "--local-user", fingerprint,
              "--armor", "--detach-sign", "--output", str(temporary_signature)],
@@ -458,7 +535,7 @@ def sign_bundle(args: argparse.Namespace) -> int:
         os.chmod(temporary_signature, 0o600)
         os.replace(temporary_signature, signature_path)
         final_report, _, final_signature, final_sums = read_bundle(bundle)
-        if not final_report["qualificationClaim"] or final_signature is None:
+        if not final_report["qualificationClaim"] or final_signature is None or final_sums != signed_sums:
             raise ValueError("signed qualification bundle is incomplete")
         verify_signature(final_signature, final_sums, fingerprint)
     except Exception:

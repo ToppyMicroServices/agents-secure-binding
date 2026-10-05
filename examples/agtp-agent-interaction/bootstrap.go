@@ -27,6 +27,10 @@ import (
 // bootstrapDemo prepares separate process credentials. The signing authorities'
 // private keys stay here; child processes receive only their public keys.
 func bootstrapDemo(rootDir string) (map[string]processConfig, error) {
+	return bootstrapDemoWithTTL(rootDir, 10*time.Minute)
+}
+
+func bootstrapDemoWithTTL(rootDir string, ttl time.Duration) (map[string]processConfig, error) {
 	managerPublic, managerPrivate, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		return nil, err
@@ -141,7 +145,7 @@ func bootstrapDemo(rootDir string) (map[string]processConfig, error) {
 					"capability_ref": "agtp:peer-action:" + string(action), "ontology_id": "agtp:peer-action:v1",
 					"scopes": []string{"agtp.peer." + string(action)}, "resources": []string{"agtp-node:" + remote.Node.ID},
 				}
-				grant, err := signBootstrapGrant(claims, managerPrivate, now)
+				grant, err := signBootstrapGrant(claims, managerPrivate, now, ttl)
 				if err != nil {
 					return nil, err
 				}
@@ -157,7 +161,7 @@ func bootstrapDemo(rootDir string) (map[string]processConfig, error) {
 				"service": values.Service, "agent": values.Agent, "task_id": values.TaskID,
 				"intent_ref": values.IntentRef, "capability_ref": values.CapabilityRef, "ontology_id": values.OntologyID,
 				"scopes": values.Scopes, "resources": values.Resources,
-			}, managerPrivate, now)
+			}, managerPrivate, now, ttl)
 			if err != nil {
 				return nil, err
 			}
@@ -176,7 +180,7 @@ func bootstrapSerial() (*big.Int, error) {
 	return serial.Add(serial, big.NewInt(1)), nil
 }
 
-func signBootstrapGrant(claims jwt.MapClaims, key ed25519.PrivateKey, now time.Time) (string, error) {
+func signBootstrapGrant(claims jwt.MapClaims, key ed25519.PrivateKey, now time.Time, ttl time.Duration) (string, error) {
 	id := make([]byte, 16)
 	if _, err := rand.Read(id); err != nil {
 		return "", err
@@ -184,7 +188,7 @@ func signBootstrapGrant(claims jwt.MapClaims, key ed25519.PrivateKey, now time.T
 	claims["iss"] = managerIssuer
 	claims["jti"] = hex.EncodeToString(id)
 	claims["iat"] = now.Add(-time.Second).Unix()
-	claims["exp"] = now.Add(10 * time.Minute).Unix()
+	claims["exp"] = now.Add(ttl).Unix()
 	claims["profile_type"] = clients.TokenTypeIdentityGrant
 	claims["profile_version"] = clients.ProfileVersion
 	token := jwt.NewWithClaims(jwt.SigningMethodEdDSA, claims)

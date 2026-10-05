@@ -302,7 +302,9 @@ Implemented:
 - a Redis/Valkey TaskCoord adapter candidate with atomic state/outbox commits,
   bounded interaction history, and leased outbox delivery;
 - a privacy-minimized Agent-to-Human relay profile that consumes one active
-  reachability grant per intent, plus an in-process Mac/CI gateway sink;
+  reachability grant per intent, with a bounded Linux file Store, SQLite
+  reachability authority and read-only provider reconciliation; the included
+  gateway sink is synthetic;
 - separate Action lifecycle and Task–Action binding packages that preserve
   Assignment responsibility while tracking durable execution state;
 - typed dependency groups and conservative deadlock detection; and
@@ -329,8 +331,8 @@ Not implemented or not yet qualified:
 - a network Participant, Agent discovery, or Human matching protocol;
 - an encrypted contact vault, Email/SNS/TEL provider, abuse-monitoring service,
   or live Human delivery implementation;
-- a relay-specific TLS challenge/execute endpoint or restart-durable relay
-  Store;
+- a relay-specific TLS challenge/execute endpoint, service deployment or live
+  provider adapter;
 - a production Action binding store or network Action ingress;
 - Participant status-transition audit (`MemoryStore` registry records are
   immutable);

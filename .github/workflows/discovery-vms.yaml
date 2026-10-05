@@ -1,0 +1,69 @@
+name: ASB Discovery VMs
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/discovery-vms.yaml'
+      - 'scripts/check-asb-discovery-vms.py'
+      - 'scripts/test_check_asb_discovery_vms.py'
+      - 'scripts/fixtures/discovery-vm/**'
+      - 'examples/agtp-agent-interaction/**'
+      - 'pkg/agtp/discovery/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: discovery-vms-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  three-vms:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-go@v5
+        with:
+          go-version: 1.26.6
+          cache: false
+      - name: Install guest tools on disposable runner
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y qemu-system-x86 qemu-utils cloud-image-utils ovmf gnupg
+      - name: Test qualification input and cleanup guards
+        run: python3 -m unittest discover -s scripts -p test_check_asb_discovery_vms.py
+      - name: Build exact Linux lab executable
+        env:
+          GOWORK: 'off'
+          CGO_ENABLED: '0'
+        run: |
+          mkdir -p evidence
+          go build -o "$RUNNER_TEMP/asb-vm-interaction" ./examples/agtp-agent-interaction
+          git rev-parse HEAD > evidence/source-commit.txt
+          go version > evidence/runtime.txt
+          qemu-system-x86_64 --version >> evidence/runtime.txt
+          sha256sum "$RUNNER_TEMP/asb-vm-interaction" > evidence/binary.sha256
+      - name: Test example and VM input guards on Linux
+        env:
+          GOWORK: 'off'
+        run: |
+          set -o pipefail
+          go test -race -count=1 -json ./examples/agtp-agent-interaction | tee evidence/interaction-tests.jsonl
+      - name: Run three full Linux guests and recovery checks
+        run: |
+          sudo timeout --kill-after=60s 21m python3 scripts/check-asb-discovery-vms.py \
+            --execute-disposable-linux-lab --binary "$RUNNER_TEMP/asb-vm-interaction" \
+            --report "$GITHUB_WORKSPACE/evidence/discovery-vms.json"
+      - name: Upload only non-secret evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: asb-discovery-vms-${{ github.run_id }}
+          path: evidence/
+          if-no-files-found: error
+          retention-days: 3
