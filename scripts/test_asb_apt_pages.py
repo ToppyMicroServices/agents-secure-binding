@@ -28,19 +28,19 @@ def fixture():
         files[path] = content
     files.update(apt.metadata(manifest))
     files.update({str(apt.DIST / "InRelease"): b"test signature", str(apt.DIST / "Release.gpg"): b"test signature"})
-    trusted = {"schema": "asb.apt-pages-policy/v1", "base_url": pages.BASE_URL, "signers": ["A" * 40], "keyring_sha256": apt.sha(b"public fixture")}
-    return manifest, files, trusted
+    public_policy = {"schema": "asb.apt-pages-policy/v1", "base_url": pages.BASE_URL, "signers": ["A" * 40], "keyring_sha256": apt.sha(b"public fixture")}
+    return manifest, files, public_policy
 
 
 class AptPagesTest(unittest.TestCase):
     def test_policy_rejects_redirected_destinations_unknown_keys_and_duplicates(self):
         with tempfile.TemporaryDirectory() as temp:
             path = Path(temp) / "policy.json"
-            _, _, trusted = fixture()
-            path.write_bytes(apt.encoded(trusted))
-            self.assertEqual(pages.policy(path), trusted)
-            for changed in (dict(trusted, base_url="https://other.invalid"), dict(trusted, signers=[]),
-                            dict(trusted, signers=["A" * 40, "A" * 40]), dict(trusted, extra=True)):
+            _, _, public_policy = fixture()
+            path.write_bytes(apt.encoded(public_policy))
+            self.assertEqual(pages.policy(path), public_policy)
+            for changed in (dict(public_policy, base_url="https://other.invalid"), dict(public_policy, signers=[]),
+                            dict(public_policy, signers=["A" * 40, "A" * 40]), dict(public_policy, extra=True)):
                 path.write_bytes(apt.encoded(changed))
                 with self.assertRaises(ValueError):
                     pages.policy(path)
@@ -86,20 +86,20 @@ class AptPagesTest(unittest.TestCase):
             self.assertEqual(pages.file_map(root / "right"), files)
 
     def test_keyring_rejects_private_or_additional_keys(self):
-        _, _, trusted = fixture()
+        _, _, public_policy = fixture()
         fingerprint = "fpr:::::::::" + "A" * 40 + ":\n"
         for output in ("sec::::::::::\n" + fingerprint, fingerprint + "fpr:::::::::" + "B" * 40 + ":\n"):
             with patch.object(apt, "execute", return_value=output.encode()), self.assertRaises(ValueError):
-                pages.public_keyring(b"public fixture", trusted)
+                pages.public_keyring(b"public fixture", public_policy)
         with patch.object(apt, "execute", return_value=("pub::::::::::\n" + fingerprint).encode()):
-            pages.public_keyring(b"public fixture", trusted)
+            pages.public_keyring(b"public fixture", public_policy)
         with self.assertRaises(ValueError):
-            pages.public_keyring(b"changed bytes", trusted)
+            pages.public_keyring(b"changed bytes", public_policy)
 
     def test_publication_rejects_extra_file_html_change_and_source_change(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
-            manifest, files, trusted = fixture()
+            manifest, files, public_policy = fixture()
             repo = root / "repo"
             for name, data in files.items():
                 pages.write_new(repo / name, data)
@@ -111,7 +111,7 @@ class AptPagesTest(unittest.TestCase):
                         "signer": "A" * 40, "manifest_sha256": apt.sha(apt.encoded(actual))}
             with patch.object(pages, "public_keyring"), patch.object(apt, "verify", side_effect=verified):
                 site = root / "site"
-                self.assertTrue(pages.stage(repo, key, trusted, manifest["source_commit"], site)["passed"])
+                self.assertTrue(pages.stage(repo, key, public_policy, manifest["source_commit"], site)["passed"])
                 for mode in ("extra", "html", "source"):
                     saved = pages.file_map(site)
                     inventory = apt.strict_json(saved["publication.json"])
@@ -125,7 +125,7 @@ class AptPagesTest(unittest.TestCase):
                         inventory["source_commit"] = "f" * 40
                     (site / "publication.json").write_bytes(apt.encoded(inventory))
                     with self.subTest(mode=mode), self.assertRaises(ValueError):
-                        pages.verify_site(site, trusted, manifest["source_commit"])
+                        pages.verify_site(site, public_policy, manifest["source_commit"])
                     for name in pages.file_map(site):
                         if name not in saved:
                             (site / name).unlink()
@@ -137,8 +137,8 @@ class AptPagesTest(unittest.TestCase):
             site = Path(temp) / "site"
             site.mkdir()
             (site / "index.html").write_bytes(b"approved bytes")
-            _, _, trusted = fixture()
-            def verify(captured, _trusted, _source):
+            _, _, public_policy = fixture()
+            def verify(captured, _policy, _source):
                 self.assertNotEqual(captured, site)
                 self.assertEqual((captured / "index.html").read_bytes(), b"approved bytes")
                 (site / "index.html").write_bytes(b"changed after verification")
@@ -153,7 +153,7 @@ class AptPagesTest(unittest.TestCase):
             opener = Mock()
             opener.open.return_value = response
             with patch.object(pages, "_verify_snapshot", side_effect=verify), patch.object(pages, "build_opener", return_value=opener):
-                self.assertTrue(pages.verify_live(site, trusted, "a" * 40)["published"])
+                self.assertTrue(pages.verify_live(site, public_policy, "a" * 40)["published"])
             response.read.assert_called_once_with(len(b"approved bytes") + 1)
 
     def test_redirects_are_rejected(self):

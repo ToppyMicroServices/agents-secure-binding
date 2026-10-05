@@ -25,6 +25,8 @@ import (
 	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/taskcoord/sqlitestore"
 )
 
+const seedMode = "seed"
+
 type state struct {
 	Schema    int    `json:"schema"`
 	Tasks     string `json:"tasks_sha256"`
@@ -89,7 +91,7 @@ func fixture() (taskcoord.Participant, taskcoord.Transition, error) {
 
 func exercise(ctx context.Context, mode, path string) (map[string]any, error) {
 	var before state
-	if mode == "seed" {
+	if mode == seedMode {
 		if _, err := os.Lstat(path); !errors.Is(err, os.ErrNotExist) {
 			return nil, errors.New("seed requires a new database")
 		}
@@ -105,6 +107,7 @@ func exercise(ctx context.Context, mode, path string) (map[string]any, error) {
 	} else {
 		return nil, errors.New("mode must be seed or verify")
 	}
+	//nolint:contextcheck // Both reviewed Open APIs own a bounded initialization context and accept no caller context.
 	store, err := sqlitestore.Open(path)
 	if err != nil {
 		return nil, err
@@ -114,7 +117,7 @@ func exercise(ctx context.Context, mode, path string) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	if mode == "seed" {
+	if mode == seedMode {
 		if err := store.RegisterParticipant(ctx, participant); err != nil {
 			return nil, err
 		}
@@ -142,7 +145,7 @@ func exercise(ctx context.Context, mode, path string) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	if mode == "seed" && (after.Schema != 1 || after.NewTables != 0) {
+	if mode == seedMode && (after.Schema != 1 || after.NewTables != 0) {
 		return nil, errors.New("initial probe did not create the historical schema")
 	}
 	if mode == "verify" && (after.Schema != 2 || after.NewTables != 2 || before.Tasks != after.Tasks || before.Actions != after.Actions) {
@@ -154,7 +157,7 @@ func exercise(ctx context.Context, mode, path string) (map[string]any, error) {
 	}, nil
 }
 
-func main() {
+func run() int {
 	mode := flag.String("mode", "", "seed or verify")
 	path := flag.String("database", "", "private disposable database path")
 	flag.Parse()
@@ -162,15 +165,20 @@ func main() {
 	defer cancel()
 	if !filepath.IsAbs(*path) {
 		fmt.Fprintln(os.Stderr, "probe requires an absolute database path")
-		os.Exit(2)
+		return 2
 	}
 	result, err := exercise(ctx, *mode, *path)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "TaskCoord upgrade probe failed:", err)
-		os.Exit(1)
+		return 1
 	}
 	if err := json.NewEncoder(os.Stdout).Encode(result); err != nil {
 		fmt.Fprintln(os.Stderr, "probe evidence failed:", err)
-		os.Exit(1)
+		return 1
 	}
+	return 0
+}
+
+func main() {
+	os.Exit(run())
 }

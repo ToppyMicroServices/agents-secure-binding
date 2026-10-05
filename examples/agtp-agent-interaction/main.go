@@ -127,13 +127,19 @@ func parseOptions(args []string) (commandOptions, error) {
 }
 
 func runProcessRole(ctx context.Context, opts commandOptions) (runErr error) {
+	stage := vmStageConfig
+	advance := func(next string) error {
+		stage = next
+		return writeVMStage(opts.controlDir, opts.role, stage)
+	}
 	if opts.controlDir != "" {
 		// Registered before resource defers, so the marker observes both drains.
 		defer func() {
-			runErr = errors.Join(runErr, writeJSONFile(filepath.Join(opts.controlDir, "stopped.json"), map[string]any{
-				"role": opts.role, "pid": os.Getpid(), "passed": runErr == nil,
-			}))
+			runErr = errors.Join(runErr, writeJSONFile(filepath.Join(opts.controlDir, "stopped.json"), vmStopped(opts.role, stage, runErr)))
 		}()
+	}
+	if err := advance(vmStageConfig); err != nil {
+		return err
 	}
 	config, err := readConfig(opts.config)
 	if err != nil {
@@ -149,6 +155,9 @@ func runProcessRole(ctx context.Context, opts commandOptions) (runErr error) {
 	if opts.controlDir != "" {
 		lease = vmLabTTL
 	}
+	if err := advance(vmStageDiscovery); err != nil {
+		return err
+	}
 	node, err := startDiscoveryWithLease(ctx, config, lease)
 	if err != nil {
 		return err
@@ -159,6 +168,9 @@ func runProcessRole(ctx context.Context, opts commandOptions) (runErr error) {
 		runErr = errors.Join(runErr, node.Stop(stopCtx))
 	}()
 	if opts.role == roleAgentB {
+		if err := advance(vmStageTaskServer); err != nil {
+			return err
+		}
 		stop, err := startTaskServer(ctx, config)
 		if err != nil {
 			return err
@@ -169,10 +181,16 @@ func runProcessRole(ctx context.Context, opts commandOptions) (runErr error) {
 			runErr = errors.Join(runErr, stop(stopCtx))
 		}()
 	}
+	if err := advance(vmStageReady); err != nil {
+		return err
+	}
 	if err := writeJSONFile(opts.ready, processReady{Role: opts.role, PID: os.Getpid()}); err != nil {
 		return err
 	}
 	if opts.controlDir != "" {
+		if err := advance(vmStageControl); err != nil {
+			return err
+		}
 		return runVMControl(ctx, node, config, opts.controlDir)
 	}
 	if opts.role != roleAgentA {

@@ -23,6 +23,29 @@ IMAGE_BASE = "https://cloud-images.ubuntu.com/minimal/releases/noble/release-202
 # Ubuntu Security FAQ: https://wiki.ubuntu.com/Security/FAQ
 IMAGE_SIGNER = "D2EB44626FDDC30B513D5BB71A5D6C4C7DB87C81"
 MAX_RUNTIME = 20 * 60
+STAGES = {"config", "discovery", "task-server", "ready", "control"}
+ERROR_CATEGORIES = {"none", "address-not-available", "address-in-use", "permission", "not-found", "deadline",
+                    "cancelled", "missing-trust-source", "trust-source-unavailable", "missing-replay-cache",
+                    "missing-policy", "invalid-authority", "invalid-token-lifetime", "missing-context",
+                    "invalid-current-time", "other"}
+SERVICE_RESULTS = {"success", "resources", "timeout", "exit-code", "signal", "core-dump", "watchdog",
+                   "start-limit-hit", "oom-kill", "exec-condition", "other"}
+EXIT_CODES = {"exited", "killed", "dumped", "unknown"}
+EXIT_SIGNALS = {"HUP", "INT", "QUIT", "ILL", "ABRT", "BUS", "FPE", "KILL", "SEGV", "PIPE", "ALRM", "TERM", "unknown"}
+EXIT_MARKER = """#!/bin/sh
+set -eu
+result=${SERVICE_RESULT:-other}
+case "$result" in success|resources|timeout|exit-code|signal|core-dump|watchdog|start-limit-hit|oom-kill|exec-condition) ;; *) result=other;; esac
+code=${EXIT_CODE:-unknown}
+case "$code" in exited|killed|dumped) ;; *) code=unknown;; esac
+status=${EXIT_STATUS:-unknown}
+case "$status" in ''|*[!0-9]*)
+  case "$status" in HUP|INT|QUIT|ILL|ABRT|BUS|FPE|KILL|SEGV|PIPE|ALRM|TERM) ;; *) status=unknown;; esac;;
+esac
+printf '{"result":"%s","exit_code":"%s","exit_status":"%s"}\\n' "$result" "$code" "$status" > /evidence/.service-exit.tmp
+chmod 0644 /evidence/.service-exit.tmp
+mv /evidence/.service-exit.tmp /evidence/service-exit.json
+"""
 
 
 def digest(path: Path) -> str:
@@ -65,6 +88,37 @@ def read_json(path: Path) -> dict:
     if not isinstance(value, dict):
         raise ValueError("guest evidence must be an object")
     return value
+
+
+def process_markers(share: Path, role: str) -> dict:
+    """Copy only fixed diagnostic fields; never report guest error text."""
+    result = {}
+    for name in ("stage", "stopped", "service-exit"):
+        path = share / (name + ".json")
+        if not path.exists():
+            continue
+        try:
+            value = read_json(path)
+            if name == "service-exit":
+                status = value.get("exit_status")
+                if (set(value) != {"result", "exit_code", "exit_status"}
+                        or value.get("result") not in SERVICE_RESULTS or value.get("exit_code") not in EXIT_CODES
+                        or not isinstance(status, str) or len(status) > 8
+                        or not (status in EXIT_SIGNALS or (status.isascii() and status.isdecimal() and int(status) <= 255))):
+                    raise ValueError("invalid service marker")
+                result[name] = {key: value[key] for key in ("result", "exit_code", "exit_status")}
+                continue
+            expected = {"role", "pid", "stage"} | ({"passed", "category"} if name == "stopped" else set())
+            if (set(value) != expected or value.get("role") != role or type(value.get("pid")) is not int
+                    or not 0 < value["pid"] <= 2 ** 31 - 1 or value.get("stage") not in STAGES):
+                raise ValueError("invalid process marker")
+            if name == "stopped" and (type(value.get("passed")) is not bool or value.get("category") not in ERROR_CATEGORIES
+                                       or value["passed"] != (value["category"] == "none")):
+                raise ValueError("invalid stopped marker")
+            result[name] = {key: value[key] for key in expected}
+        except (OSError, ValueError, TypeError):
+            result[name] = {"invalid": True}
+    return result
 
 
 def signed_image_hash(sums: str) -> str:
@@ -169,12 +223,14 @@ class Lab:
             unit = ("[Unit]\nDescription=ASB disposable qualification node\nRequiresMountsFor=/evidence\nWants=network-online.target\nAfter=network-online.target\n"
                     "[Service]\nUser=asb\nGroup=asb\nWorkingDirectory=/var/lib/asb-vm\nKillSignal=SIGINT\nTimeoutStopSec=10\n"
                     f"ExecStart=/usr/local/bin/asb-interaction --role {role} --config /etc/asb-vm/config.json --ready /evidence/ready.json --control-dir /evidence\n"
+                    "ExecStopPost=/usr/local/bin/asb-vm-exit-marker\n"
                     "Restart=no\n[Install]\nWantedBy=multi-user.target\n")
             cloud = {"users": [{"name": "asb", "system": True, "lock_passwd": True}], "ssh_pwauth": False,
                 "package_update": False, "package_upgrade": False,
                 "mounts": [["asb-input", "/mnt/asb-input", "9p", "trans=virtio,version=9p2000.L,ro", "0", "0"],
                            ["asb-evidence", "/evidence", "9p", "trans=virtio,version=9p2000.L", "0", "0"]],
-                "write_files": [{"path": "/etc/systemd/system/asb-vm.service", "permissions": "0644", "content": unit}],
+                "write_files": [{"path": "/etc/systemd/system/asb-vm.service", "permissions": "0644", "content": unit},
+                                {"path": "/usr/local/bin/asb-vm-exit-marker", "permissions": "0755", "content": EXIT_MARKER}],
                 "runcmd": [["install", "-d", "-m", "0700", "-o", "asb", "-g", "asb", "/var/lib/asb-vm", "/etc/asb-vm"],
                            ["install", "-m", "0600", "-o", "asb", "-g", "asb", "/mnt/asb-input/config.json", "/etc/asb-vm/config.json"],
                            ["install", "-m", "0755", "/mnt/asb-input/asb-interaction", "/usr/local/bin/asb-interaction"],
@@ -185,7 +241,7 @@ class Lab:
     def start(self, role: str) -> None:
         self.stage, self.active_role = "start-guest", role
         guest = self.root / role
-        for name in ("ready.json", "request.json", "response.json", "stopped.json"):
+        for name in ("ready.json", "request.json", "response.json", "stopped.json", "stage.json", "service-exit.json"):
             (guest / "evidence" / name).unlink(missing_ok=True)
         index = ROLES.index(role)
         acceleration = self.guest_acceleration.get(role, self.acceleration)
@@ -217,6 +273,7 @@ class Lab:
                     self.stage = "wait-guest-ready-tcg-fallback"
                     continue
                 raise RuntimeError("QEMU guest exited before readiness")
+            self.reject_stopped(role)
             path = self.root / role / "evidence/ready.json"
             if path.exists():
                 record = read_json(path)
@@ -225,6 +282,16 @@ class Lab:
                 return
             time.sleep(0.2)
         raise TimeoutError("guest readiness exceeded 300 seconds")
+
+    def reject_stopped(self, role: str, allow_success: bool = False) -> None:
+        markers = process_markers(self.root / role / "evidence", role)
+        if any(value.get("invalid") for value in markers.values()):
+            raise ValueError("invalid guest process diagnostic")
+        if "stopped" in markers and not (allow_success and markers["stopped"]["passed"]):
+            stopped = markers["stopped"]
+            raise RuntimeError("guest service stopped at " + stopped["stage"] + " (" + stopped["category"] + ")")
+        if "service-exit" in markers and not (allow_success and markers["service-exit"]["result"] == "success"):
+            raise RuntimeError("guest service exited before completion (" + markers["service-exit"]["result"] + ")")
 
     def command(self, role: str, action: str) -> dict:
         self.stage, self.active_role = "guest-command-" + action, role
@@ -242,6 +309,7 @@ class Lab:
                     return value
             if self.processes[role].poll() is not None:
                 raise RuntimeError("guest exited during command")
+            self.reject_stopped(role, allow_success=action == "stop")
             time.sleep(0.1)
         raise TimeoutError("guest command exceeded 30 seconds")
 
@@ -291,7 +359,8 @@ class Lab:
             guests[role] = {"qemu_exit_status": process.poll(),
                             "acceleration": self.guest_acceleration.get(role),
                             "ready_file_present": (guest / "evidence/ready.json").is_file(),
-                            "serial_categories": {name: any(token in tail for token in tokens) for name, tokens in categories.items()}}
+                            "serial_categories": {name: any(token in tail for token in tokens) for name, tokens in categories.items()},
+                            "process_markers": process_markers(guest / "evidence", role)}
         return {"stage": self.stage, "role": self.active_role,
                 "elapsed_seconds": round(time.monotonic() - self.started, 3), "guests": guests}
 

@@ -66,6 +66,55 @@ class VMHarnessGuards(unittest.TestCase):
             self.assertTrue(result["guests"]["agent-a"]["serial_categories"]["mount_failure"])
             self.assertNotIn("private-placeholder", json.dumps(result))
 
+    def test_service_failure_exits_readiness_without_waiting_for_timeout(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            share = root / "agent-b/evidence"
+            share.mkdir(parents=True)
+            vm.write_json(share / "stopped.json", {"role": "agent-b", "pid": 41, "stage": "task-server",
+                                                  "passed": False, "category": "invalid-authority"})
+            lab = vm.Lab(root, root / "binary")
+            lab.processes = {"agent-b": Mock(poll=Mock(return_value=None))}
+            with patch.object(vm.time, "sleep", side_effect=AssertionError("must not wait after service failure")):
+                with self.assertRaisesRegex(RuntimeError, r"task-server \(invalid-authority\)"):
+                    lab.ready("agent-b")
+            diagnostics = lab.diagnostics()["guests"]["agent-b"]["process_markers"]
+            self.assertEqual(diagnostics["stopped"]["stage"], "task-server")
+
+    def test_systemd_exec_failure_is_reported_without_a_go_marker(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            share = root / "agent-b/evidence"
+            share.mkdir(parents=True)
+            vm.write_json(share / "service-exit.json", {"result": "exit-code", "exit_code": "exited", "exit_status": "203"})
+            lab = vm.Lab(root, root / "binary")
+            with self.assertRaisesRegex(RuntimeError, "exited before completion"):
+                lab.reject_stopped("agent-b")
+            self.assertEqual(vm.process_markers(share, "agent-b")["service-exit"]["exit_status"], "203")
+
+    def test_process_diagnostics_reject_nonallowlisted_guest_content(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            share = Path(temporary)
+            valid = {"role": "agent-b", "pid": 41, "stage": "discovery", "passed": False, "category": "permission"}
+            for changed in (dict(valid, private="unreported-private-token"), dict(valid, stage="unreported-private-token"),
+                            dict(valid, category="unreported-private-token"), dict(valid, pid=True), dict(valid, passed=True)):
+                vm.write_json(share / "stopped.json", changed)
+                result = vm.process_markers(share, "agent-b")
+                self.assertEqual(result, {"stopped": {"invalid": True}})
+                self.assertNotIn("unreported-private-token", json.dumps(result))
+
+    def test_successful_stop_can_wait_for_its_response(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            share = root / "agent-b/evidence"
+            share.mkdir(parents=True)
+            vm.write_json(share / "stopped.json", {"role": "agent-b", "pid": 41, "stage": "control", "passed": True, "category": "none"})
+            vm.write_json(share / "service-exit.json", {"result": "success", "exit_code": "exited", "exit_status": "0"})
+            lab = vm.Lab(root, root / "binary")
+            lab.reject_stopped("agent-b", allow_success=True)
+            with self.assertRaises(RuntimeError):
+                lab.reject_stopped("agent-b")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -26,10 +26,6 @@ type discoveryEvidence struct {
 	Endpoint       string `json:"endpoint"`
 }
 
-func startDiscovery(ctx context.Context, config processConfig) (_ *peer.Node, result error) {
-	return startDiscoveryWithLease(ctx, config, 10*time.Minute)
-}
-
 func startDiscoveryWithLease(ctx context.Context, config processConfig, lease time.Duration) (_ *peer.Node, result error) {
 	if config.StateDir == "" || len(config.SigningKey) != ed25519.PrivateKeySize {
 		return nil, errors.New("missing discovery state or signing key")

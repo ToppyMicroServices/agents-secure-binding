@@ -22,13 +22,18 @@ import (
 	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/agtp/discovery/peer"
 )
 
-const vmLabTTL = 25 * time.Minute
+const (
+	vmLabTTL       = 25 * time.Minute
+	vmOS           = "linux"
+	vmTaskEndpoint = "https://10.203.0.13:9444"
+	vmStopCommand  = "stop"
+)
 
 // This deliberately fixed lab configuration is not a deployment credential
 // importer. Authority private keys remain in this short-lived preparation call;
 // each VM receives only its own role credentials and the peer public identities.
 func prepareVMConfigs(root string) error {
-	if runtime.GOOS != "linux" || !filepath.IsAbs(root) {
+	if runtime.GOOS != vmOS || !filepath.IsAbs(root) {
 		return errors.New("VM preparation requires Linux and a new absolute directory")
 	}
 	if err := os.Mkdir(root, 0o700); err != nil {
@@ -42,7 +47,7 @@ func prepareVMConfigs(root string) error {
 	for role, config := range configs {
 		config.Self.Node.Endpoint = addresses[role] + ":9443"
 		config.AllowedCIDRs = []string{"10.203.0.11/32", "10.203.0.12/32", "10.203.0.13/32"}
-		config.Target.Endpoint = "https://10.203.0.13:9444"
+		config.Target.Endpoint = vmTaskEndpoint
 		config.StateDir = "/var/lib/asb-vm"
 		config.VMQualification = true
 		configs[role] = config
@@ -82,7 +87,7 @@ type vmObservation struct {
 // exposed over a network. Each allowed command is bounded and acknowledgements
 // contain no role configuration, credentials or payload logs.
 func runVMControl(ctx context.Context, node *peer.Node, config processConfig, directory string) error {
-	if runtime.GOOS != "linux" || !filepath.IsAbs(directory) {
+	if runtime.GOOS != vmOS || !filepath.IsAbs(directory) {
 		return errors.New("VM control requires Linux and an absolute private control directory")
 	}
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Minute)
@@ -118,7 +123,7 @@ func runVMControl(ctx context.Context, node *peer.Node, config processConfig, di
 		if operationErr != nil {
 			return errors.New("VM qualification command failed")
 		}
-		if command.Action == "stop" {
+		if command.Action == vmStopCommand {
 			return nil
 		}
 	}
@@ -141,7 +146,7 @@ func readVMCommand(path string) (vmCommand, error) {
 		return command, errors.New("invalid VM command identity")
 	}
 	switch command.Action {
-	case "status", "task", "gossip", "withdraw", "stop":
+	case "status", "task", "gossip", "withdraw", vmStopCommand:
 		return command, nil
 	default:
 		return command, errors.New("unsupported VM command")
@@ -164,7 +169,7 @@ func executeVMCommand(ctx context.Context, node *peer.Node, config processConfig
 			return observation, errors.New("withdraw command requires Agent B")
 		}
 		_, err = node.Deregister(config.Target.Name, 2)
-	case "status", "stop":
+	case "status", vmStopCommand:
 	default:
 		return observation, errors.New("unsupported VM command")
 	}

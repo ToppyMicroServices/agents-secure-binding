@@ -33,7 +33,7 @@ func TestVMCommandRejectsAmbiguousOrUnboundedInput(t *testing.T) {
 			t.Fatalf("accepted invalid command: %.80s", raw)
 		}
 	}
-	for _, action := range []string{"status", "task", "gossip", "withdraw", "stop"} {
+	for _, action := range []string{"status", "task", "gossip", "withdraw", vmStopCommand} {
 		path := filepath.Join(t.TempDir(), "request.json")
 		if err := writeJSONFile(path, vmCommand{ID: 1, Action: action}); err != nil {
 			t.Fatal(err)
@@ -46,7 +46,7 @@ func TestVMCommandRejectsAmbiguousOrUnboundedInput(t *testing.T) {
 }
 
 func TestVMRestartPreservesWithdrawalWithoutNewAnnouncement(t *testing.T) {
-	if runtime.GOOS != "linux" {
+	if runtime.GOOS != vmOS {
 		t.Skip("Linux VM qualification restart")
 	}
 	configs, err := bootstrapDemo(t.TempDir())
@@ -105,7 +105,7 @@ func TestVMRestartPreservesWithdrawalWithoutNewAnnouncement(t *testing.T) {
 }
 
 func TestVMPreparationKeepsExplicitScopeAndRefusesOverwrite(t *testing.T) {
-	if runtime.GOOS != "linux" {
+	if runtime.GOOS != vmOS {
 		t.Skip("Linux VM qualification preparation")
 	}
 	root := filepath.Join(t.TempDir(), "credentials")
