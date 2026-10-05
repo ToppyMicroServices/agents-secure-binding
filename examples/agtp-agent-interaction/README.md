@@ -140,3 +140,54 @@ Unlabelled PRs and normal pushes retain the full platform matrix.
 The `CI` workflow also accepts `linux_only=true` for manual diagnosis. GitHub
 does not count `workflow_dispatch` jobs toward required PR status checks, so
 use the normal pull-request event when preparing a merge.
+
+### Three full Linux guests
+
+The `ASB Discovery VMs` workflow runs three QEMU guests on one disposable Ubuntu
+runner. Each guest has its own kernel, writable virtual disk, machine identity,
+static private IP and dedicated `asb` system user. The lab creates a private
+bridge without a gateway or NAT. It verifies the dated Ubuntu minimal image's
+signed checksum using the pinned Ubuntu Cloud Image signing fingerprint before
+booting it. KVM is used when available; TCG fallback shares the same 20-minute
+lab deadline. Each guest has one vCPU and 768 MiB of memory.
+
+On a **disposable Linux runner only**, after installing `qemu-system-x86`,
+`qemu-utils`, `cloud-image-utils`, `ovmf`, `gnupg` and `iproute2`:
+
+```sh
+CGO_ENABLED=0 GOWORK=off go build -o /tmp/asb-vm-interaction ./examples/agtp-agent-interaction
+sudo timeout --kill-after=60s 21m python3 scripts/check-asb-discovery-vms.py \
+  --execute-disposable-linux-lab --binary /tmp/asb-vm-interaction \
+  --report /tmp/asb-discovery-vms.json
+```
+
+The explicit lab mode generates isolated credentials with fixed 25-minute
+grants and leases; the ordinary example's lifetimes remain unchanged. Each VM
+receives its own private keys and peer public identities. A local shared
+directory carries bounded harness commands. It exposes no remote control API,
+is trusted by the lab, and is cleared before every boot. This control protocol
+is not a production job queue and has no durable exactly-once claim.
+
+The run checks the authenticated DHT/gossip/task interaction, then disconnects
+B's virtual network interface and withdraws B's registration. It forcibly
+terminates and reboots B and A using their existing disks, checks the retained
+withdrawal and stale live snapshot respectively, reconnects B, and requires all
+three nodes to converge to the withdrawal. Finally, each service must drain its
+discovery and task servers within their existing stop deadlines. Numeric PIDs
+are meaningful only within a guest; distinct boot identities establish separate
+guest kernels, and a stable machine identity with a changed boot identity
+identifies each restart.
+
+The JSON report records these observations, the image signer/hash, executable
+hash, acceleration mode and cleanup result. Only non-secret evidence is retained
+by CI. Failure reports retain the stage, role, elapsed time, QEMU exit status
+and fixed error-category flags; raw serial output is never uploaded. Temporary
+disks, credentials and private serial logs are removed after
+owned guest processes and network devices are stopped. Exit zero requires every
+check and cleanup to succeed; a timeout or failure is not qualification.
+
+This qualifies a controlled three-VM topology when a run passes. It uses one
+physical runner and a synthetic sum task. It does not establish independent
+physical-host failure tolerance, physical power-loss durability, an external
+provider integration, cloud firewall/VPN operation or an organization's SLOs.
+The workflow's uploaded source commit identifies the exact tested PR head.

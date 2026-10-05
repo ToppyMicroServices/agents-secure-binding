@@ -69,6 +69,8 @@ type processConfig struct {
 	StateDir   string                            `json:"state_dir"`
 	// Optional exact private host routes for an explicitly prepared Linux lab.
 	AllowedCIDRs []string `json:"allowed_cidrs,omitempty"`
+	// Only the explicit disposable three-VM lab uses its fixed 25-minute grants.
+	VMQualification bool `json:"vm_qualification,omitempty"`
 }
 
 func (c processConfig) identity(role string) (trustedIdentity, error) {
@@ -121,9 +123,13 @@ func profileFor(c processConfig, signer trustedIdentity, audience string, replay
 	if len(c.ManagerKey) != ed25519.PublicKeySize || len(signer.SigningPublicKey) != ed25519.PublicKeySize {
 		return production.SoftwareOnlyProfile{}, errors.New("invalid authority key")
 	}
+	grantLifetime := 15 * time.Minute
+	if c.VMQualification {
+		grantLifetime = vmLabTTL + time.Second
+	}
 	return production.SoftwareOnlyProfile{
 		GrantAuthority: production.AuthorityPolicy{
-			ExpectedIssuer: managerIssuer, ExpectedAudience: audience, ValidMethods: []string{"EdDSA"}, MaxTokenLifetime: 15 * time.Minute,
+			ExpectedIssuer: managerIssuer, ExpectedAudience: audience, ValidMethods: []string{"EdDSA"}, MaxTokenLifetime: grantLifetime,
 			TrustSource: production.StaticTrustSource{Trust: production.TrustSnapshot{Keys: []clients.LocalKey{{KeyID: managerKeyID, Key: ed25519.PublicKey(c.ManagerKey)}}}},
 		},
 		BindingAuthority: production.AuthorityPolicy{

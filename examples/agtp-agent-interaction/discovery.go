@@ -8,6 +8,7 @@ import (
 	"crypto/ed25519"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"time"
 
@@ -26,8 +27,25 @@ type discoveryEvidence struct {
 }
 
 func startDiscovery(ctx context.Context, config processConfig) (_ *peer.Node, result error) {
+	return startDiscoveryWithLease(ctx, config, 10*time.Minute)
+}
+
+func startDiscoveryWithLease(ctx context.Context, config processConfig, lease time.Duration) (_ *peer.Node, result error) {
 	if config.StateDir == "" || len(config.SigningKey) != ed25519.PrivateKeySize {
 		return nil, errors.New("missing discovery state or signing key")
+	}
+	registerTarget := true
+	if config.VMQualification {
+		// Decide before NewNode/AddPeer persist anything. A restored lab disk
+		// must retain its withdrawal instead of making a new announcement.
+		_, err := os.Lstat(discoveryStatePath(config))
+		switch {
+		case err == nil:
+			registerTarget = false
+		case errors.Is(err, os.ErrNotExist):
+		default:
+			return nil, err
+		}
 	}
 	tlsConfig, err := configTLS(config)
 	if err != nil {
@@ -98,10 +116,10 @@ func startDiscovery(ctx context.Context, config processConfig) (_ *peer.Node, re
 			return nil, err
 		}
 	}
-	if config.Self.Role == roleAgentB {
+	if config.Self.Role == roleAgentB && registerTarget {
 		_, err := node.Register(discovery.NameBinding{
 			Name: config.Target.Name, AgentID: config.Target.AgentID, Endpoint: config.Target.Endpoint,
-			Capabilities: []string{config.Target.Capability}, Version: 1, ExpiresAt: time.Now().Add(10 * time.Minute),
+			Capabilities: []string{config.Target.Capability}, Version: 1, ExpiresAt: time.Now().Add(lease),
 			Visibility: discovery.Visibility{Mode: discovery.VisibilityExplicitOnly, AllowedAgents: []string{roleAgentA}},
 		})
 		if err != nil {
