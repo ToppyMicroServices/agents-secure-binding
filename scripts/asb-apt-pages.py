@@ -23,7 +23,8 @@ from urllib.request import HTTPSHandler, HTTPRedirectHandler, Request, build_ope
 spec = importlib.util.spec_from_file_location("asb_apt", Path(__file__).with_name("asb-apt-repository.py"))
 apt = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(apt)
-BASE_URL = "https://toppymicroservices.github.io/agents-secure-binding"
+# Project Pages inherits the organization's configured custom domain.
+BASE_URL = "https://www.toppymicros.com/agents-secure-binding"
 MAX_SITE = 512 * 1024 * 1024
 MAX_FILES = 128
 
