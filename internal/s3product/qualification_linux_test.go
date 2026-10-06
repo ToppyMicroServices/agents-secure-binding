@@ -8,6 +8,7 @@ package s3product
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -15,6 +16,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -245,6 +247,7 @@ func TestOfflineSystemdLifecycle(t *testing.T) {
 	}
 	// Wait for real authenticated readiness, not just Type=simple activation.
 	waitProduct(t, h)
+	assertOfflineServiceExecutable(t, h)
 	capability := h.authorize(t, solution)
 	done := executeAsync(t, h, capability)
 	awaitCLI(t, h)
@@ -318,6 +321,37 @@ func TestOfflineSystemdLifecycle(t *testing.T) {
 		t.Fatal("identity renewal lost uncertain history")
 	}
 	t.Logf("systemd_drain_ms=%d enabled=true authenticated_asb=true emergency_fenced=true private_tmp_cleaned=true projector_renewed=true uncertain_records=3", drain.Milliseconds())
+}
+
+func assertOfflineServiceExecutable(t *testing.T, h *liveProduct) {
+	t.Helper()
+	pid := systemctl(t, "show", "asb-s3.service", "--property=MainPID", "--value")
+	if value, err := strconv.Atoi(pid); err != nil || value <= 0 {
+		t.Fatal("service has no live main process")
+	}
+	assertLiveServiceIdentity(t, pid)
+	identity, err := user.Lookup("asb-s3")
+	if err != nil {
+		t.Fatal("dedicated service UID unavailable")
+	}
+	hashes := make([]string, 0, 2)
+	for _, path := range []string{h.binary, filepath.Join("/proc", pid, "exe")} {
+		file, err := os.Open(path)
+		if err != nil {
+			t.Fatal("service executable unavailable")
+		}
+		hash := sha256.New()
+		_, copyErr := io.Copy(hash, file)
+		closeErr := file.Close()
+		if copyErr != nil || closeErr != nil {
+			t.Fatal("service executable cannot be hashed")
+		}
+		hashes = append(hashes, fmt.Sprintf("%x", hash.Sum(nil)))
+	}
+	if hashes[0] != hashes[1] || systemctl(t, "show", "asb-s3.service", "--property=MainPID", "--value") != pid {
+		t.Fatal("service executable or main process changed")
+	}
+	t.Logf("systemd_runtime_identity main_pid=%s uid=%s no_new_privileges=true effective_capabilities_zero=true executable_sha256=%s", pid, identity.Uid, hashes[0])
 }
 
 func waitProduct(t *testing.T, h *liveProduct) {

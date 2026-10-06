@@ -11,6 +11,12 @@ on:
       - 'scripts/run-s3-operations.cjs'
       - 'scripts/run-s3-systemd-live.cjs'
       - 'scripts/s3-qa-evidence.py'
+      - 'scripts/check-asb-linux-reference.py'
+      - 'scripts/test_check_asb_linux_reference.py'
+      - 'scripts/asb-qualification.py'
+      - 'qualification/profiles/github-linux-reference.json'
+      - 'pkg/humanrelay/**'
+      - 'pkg/taskcoord/sqlitestore/**'
       - 'packaging/s3/**'
       - 'go.mod'
       - 'go.sum'
@@ -23,6 +29,12 @@ on:
       - 'scripts/run-s3-operations.cjs'
       - 'scripts/run-s3-systemd-live.cjs'
       - 'scripts/s3-qa-evidence.py'
+      - 'scripts/check-asb-linux-reference.py'
+      - 'scripts/test_check_asb_linux_reference.py'
+      - 'scripts/asb-qualification.py'
+      - 'qualification/profiles/github-linux-reference.json'
+      - 'pkg/humanrelay/**'
+      - 'pkg/taskcoord/sqlitestore/**'
       - 'packaging/s3/**'
   workflow_dispatch:
     inputs:
@@ -47,7 +59,7 @@ permissions:
 jobs:
   conformance:
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 30
     env:
       GOWORK: 'off'
     steps:
@@ -57,6 +69,8 @@ jobs:
           go-version: 1.26.6
       - name: Verify dependencies
         run: go mod verify
+      - name: Check reference evidence rejection cases
+        run: python3 -B -m unittest discover -s scripts -p test_check_asb_linux_reference.py
       - name: Check least-privilege and AWS components
         run: |
           mkdir -p evidence
@@ -134,6 +148,24 @@ jobs:
         env:
           ASB_QA_PRIOR_STATUS: ${{ job.status }}
         run: python3 scripts/s3-qa-evidence.py evidence
+      - name: Bind the named Linux reference profile
+        env:
+          ASB_REFERENCE_S3_EVIDENCE: ${{ github.workspace }}/evidence
+        run: |
+          source="$RUNNER_TEMP/asb-linux-reference-source"
+          bundle="$RUNNER_TEMP/asb-linux-reference"
+          git -c core.hooksPath=/dev/null worktree add --detach "$source" "$GITHUB_SHA"
+          trap 'git -c core.hooksPath=/dev/null worktree remove --force "$source"' EXIT
+          python3 -B "$source/scripts/asb-qualification.py" run --source-root "$source" --profile "$source/qualification/profiles/github-linux-reference.json" --output "$bundle"
+          python3 -B "$source/scripts/asb-qualification.py" verify --bundle "$bundle"
+      - name: Save the named Linux reference bundle
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: asb-github-linux-reference-${{ github.run_id }}
+          path: ${{ runner.temp }}/asb-linux-reference/
+          if-no-files-found: error
+          retention-days: 7
       - name: Save non-secret conformance evidence
         if: always()
         uses: actions/upload-artifact@v4

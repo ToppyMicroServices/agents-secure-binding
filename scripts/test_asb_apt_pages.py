@@ -39,7 +39,10 @@ class AptPagesTest(unittest.TestCase):
             _, _, public_policy = fixture()
             path.write_bytes(apt.encoded(public_policy))
             self.assertEqual(pages.policy(path), public_policy)
-            for changed in (dict(public_policy, base_url="https://other.invalid"), dict(public_policy, signers=[]),
+            for changed in (dict(public_policy, base_url="https://other.invalid"),
+                            dict(public_policy, base_url="https://toppymicroservices.github.io/agents-secure-binding"),
+                            dict(public_policy, base_url="http://www.toppymicros.com/agents-secure-binding"),
+                            dict(public_policy, signers=[]),
                             dict(public_policy, signers=["A" * 40, "A" * 40]), dict(public_policy, extra=True)):
                 path.write_bytes(apt.encoded(changed))
                 with self.assertRaises(ValueError):

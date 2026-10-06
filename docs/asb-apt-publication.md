@@ -1,10 +1,16 @@
 # ASB apt publication on GitHub Pages
 
-The selected destination is
-`https://toppymicroservices.github.io/agents-secure-binding`.
+The selected GitHub Pages destination is
+`https://www.toppymicros.com/agents-secure-binding`.
+This project [inherits the organization's custom domain](https://docs.github.com/en/pages/configuring-a-custom-domain-for-your-github-pages-site/about-custom-domains-and-github-pages).
+On 2026-10-05 the
+repository Pages API returned that URL with `build_type: workflow` and HTTPS
+enforced. No DNS or organization-site configuration was changed. The verifier
+uses this exact destination and rejects redirects.
+
 The publication workflow is manual and accepts only a reviewed archive from an
-`apt-preview-...` release. This documents a publication path, not a claim that
-the site or a production signing key has already been configured.
+`apt-preview-...` release. Configuring Pages does not establish that signed
+packages have been deployed or that public delivery has passed verification.
 
 ## Trust and key custody
 
@@ -19,7 +25,7 @@ key. It must have exactly these fields:
 | Field | Value |
 | --- | --- |
 | `schema` | `asb.apt-pages-policy/v1` |
-| `base_url` | `https://toppymicroservices.github.io/agents-secure-binding` |
+| `base_url` | `https://www.toppymicros.com/agents-secure-binding` |
 | `signers` | One or two complete uppercase 40-character fingerprints |
 | `keyring_sha256` | SHA-256 of the exact exported public keyring bytes |
 
@@ -32,11 +38,42 @@ to exist merely because key generation succeeded.
 
 ## Prepare and review
 
-Use the final Linux-built packages and their successful lifecycle report with
-`scripts/asb-apt-repository.py prepare`. Review their source commit and hashes,
-then sign that repository offline using the chosen key. See
-[Debian packages](asb-debian-packages.md) for the component scopes and existing
-prepare/sign/verify commands.
+Use the manual **ASB unsigned apt release preparation** workflow on `main` to
+prepare fresh metadata from an existing successful **ASB Debian distribution**
+run. Supply that run's numeric ID and its full source commit:
+
+```sh
+gh workflow run apt-release-prepare.yaml --ref main \
+  -f qualification_run_id="$QUALIFIED_RUN" -f source_commit="$SOURCE_COMMIT"
+```
+
+The source must already be an ancestor of the workflow's `main` commit. The
+preparation job checks the authenticated GitHub API run record, repository,
+workflow path, successful completion and exact source. It selects one unexpired
+artifact named `asb-debian-RUN_ID`, verifies its GitHub SHA-256 and size, and
+reads only the new-source package set and matching Linux lifecycle evidence.
+Missing checks, changed package bytes, unsafe archive members and ambiguous
+artifact identities fail preparation.
+
+Download `asb-apt-unsigned-PREPARATION_RUN_ID` from the successful preparation
+run. It contains `repository/`, the candidate and lifecycle records in
+`evidence/`, `prepare-report.json` and `SHA256SUMS`. Check the source/run IDs,
+package hashes and checksum inventory before signing. The report binds the
+original qualification artifact to the prepared files. This uses GitHub's
+artifact identity and the recorded Linux results; it is not independent proof
+of a reproducible build.
+
+Metadata is created on Linux with seven days of validity. Preparation uses the
+qualified package bytes without rebuilding or installing them and has no
+signing key or publication permission. Existing package and component limits
+continue to apply. An expired CI snapshot cannot be reused as a fresh signed
+repository; prepare a new unsigned snapshot from the qualified payload.
+
+Sign `repository/` offline with the dedicated key, then run the existing
+signature verifier against the independently selected public keyring. See
+[Debian packages](asb-debian-packages.md) for the component scopes and
+prepare/sign/verify commands. The `asb-apt-repository.py prepare` command also
+remains available on Linux for an operator-managed preparation environment.
 
 The following commands use operator-provided paths and identifiers:
 
@@ -58,8 +95,8 @@ snapshots to bind the checked signatures to the actual bytes.
 
 ## Deploy and inspect the public result
 
-Enable GitHub Pages with the Actions source for this repository, and restrict
-the `github-pages` deployment environment to the protected `main` branch.
+Keep GitHub Pages configured with the Actions source, and restrict the
+`github-pages` deployment environment to the protected `main` branch.
 Dispatch `ASB apt Pages publication` on `main` with the release tag, archive
 hash and qualified source commit. The source must be an ancestor of the
 publication workflow's commit.

@@ -1,0 +1,29 @@
+{
+  "profileVersion": 1,
+  "id": "github-linux-reference",
+  "claim": "Offline S3 systemd lifecycle and durable relay library checks on the recorded GitHub-hosted Ubuntu 24.04 reference runner",
+  "targetOs": ["linux"],
+  "checks": [
+    {
+      "id": "named-runner-environment",
+      "required": true,
+      "command": ["python3", "scripts/check-asb-linux-reference.py", "environment"],
+      "timeoutSeconds": 120,
+      "environment": {"PYTHONDONTWRITEBYTECODE": "1"}
+    },
+    {
+      "id": "offline-s3-systemd-evidence",
+      "required": true,
+      "command": ["python3", "scripts/check-asb-linux-reference.py", "offline-s3"],
+      "timeoutSeconds": 120,
+      "environment": {"PYTHONDONTWRITEBYTECODE": "1"}
+    },
+    {
+      "id": "durable-relay-library",
+      "required": true,
+      "command": ["python3", "scripts/check-asb-linux-reference.py", "relay-library"],
+      "timeoutSeconds": 480,
+      "environment": {"GOWORK": "off", "PYTHONDONTWRITEBYTECODE": "1"}
+    }
+  ]
+}
