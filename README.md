@@ -32,6 +32,13 @@ remain responsible for their own approval rules and effects.
 > the runtime that acted and the authority it exercised; model output cannot
 > grant itself permission.
 
+**For Humans:** Start with the [security overview](docs/security-overview.md)
+for the main idea and its limits.
+
+**For AI & Reviewers:** Use the [live red-team report](docs/live-red-team-report.md)
+for test evidence and remaining evaluation, and the [SSOT](docs/SSOT.md) for
+profile requirements.
+
 ## Quick start
 
 Install [Go 1.26.6](https://go.dev/doc/install) and run these commands from this source checkout. The local app

@@ -5,6 +5,8 @@ Copyright (c) 2026 ToppyMicroServices OÜ
 This report is an evidence index, not an independent proof. Its conclusions are
 limited to the checks and commits referenced below.
 
+For a short introduction, see the [security overview](security-overview.md).
+
 This report summarizes the completed live-style red-team work for the
 session-bound agent identity profile. The normative profile source is
 `docs/SSOT.md`.
