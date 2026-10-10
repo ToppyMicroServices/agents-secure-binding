@@ -32,7 +32,7 @@ the bounded Linux/AWS results and original report digests.
 ## Prepare and verify
 
 Maintainers obtain the binary from the recorded GitHub artifact
-`asb-s3-linux-36711947746`. Run from a reviewed checkout with Go 1.26.6:
+`asb-s3-linux-36711947746`. Run from a reviewed checkout with Go 1.26.9:
 
 ```sh
 mkdir -p build/s3-distribution

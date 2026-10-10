@@ -32,7 +32,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-go@v5
         with:
-          go-version: 1.26.6
+          go-version: 1.26.9
           cache: false
       - name: Test archive and signer rejection paths
         run: python3 -m unittest -v scripts/test_package_s3.py

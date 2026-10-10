@@ -95,7 +95,7 @@ class AptUpgradeTest(unittest.TestCase):
     def test_human_package_checks_final_bytes_and_embedded_source(self):
         source, version = "a" * 40, "0.1.0~preview.1-1"
         binary = b"fixture bytes never executed"
-        info = {"go_version": "go1.26.6", "main_path": check.deb.MODULE + "/cmd/asb-human", "settings": {"vcs.revision": source}}
+        info = {"go_version": "go1.26.9", "main_path": check.deb.MODULE + "/cmd/asb-human", "settings": {"vcs.revision": source}}
         inventory = {"schema": "asb.debian-payload/v1", "package": "asb-human", "source_commit": source, "version": version,
                      "files": {"usr/bin/asb-human": check.apt.sha(binary)}, "modules": [],
                      "binaries": {"asb-human": dict(info, sha256=check.apt.sha(binary), bytes=len(binary))}}
