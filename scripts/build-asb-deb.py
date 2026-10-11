@@ -119,9 +119,9 @@ def clean_source(expected: str) -> None:
         raise ValueError("package build requires a clean checkout")
 
 
-def build_info(binary: Path, source: str, env: dict) -> tuple[dict, list]:
+def build_info(binary: Path, source: str, env: dict, toolchain: str = TOOLCHAIN) -> tuple[dict, list]:
     lines = run("go", "version", "-m", str(binary), env=env).decode().splitlines()
-    if not lines or lines[0].rsplit(": ", 1)[-1] != TOOLCHAIN:
+    if not re.fullmatch(r"go[0-9]+\.[0-9]+\.[0-9]+", toolchain) or not lines or lines[0].rsplit(": ", 1)[-1] != toolchain:
         raise ValueError("unexpected Go toolchain")
     settings, dependencies, main_path = {}, [], None
     for line in lines[1:]:
@@ -142,7 +142,7 @@ def build_info(binary: Path, source: str, env: dict) -> tuple[dict, list]:
     required = {"GOOS": "linux", "GOARCH": "amd64", "GOAMD64": "v1", "CGO_ENABLED": "0", "vcs.revision": source, "vcs.modified": "false"}
     if any(settings.get(key) != value for key, value in required.items()):
         raise ValueError("binary build provenance differs from requested clean source")
-    return {"go_version": TOOLCHAIN, "main_path": main_path, "settings": settings}, dependencies
+    return {"go_version": toolchain, "main_path": main_path, "settings": settings}, dependencies
 
 
 def collect_notices(modules: list, env: dict) -> dict[str, bytes]:

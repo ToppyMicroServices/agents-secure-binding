@@ -183,7 +183,16 @@ def validate_sources(args: argparse.Namespace, initial: dict, upgrade: dict) -> 
             "clean_upgrade_checkout": True, "human_entrypoint_sources_changed": bool(human_changes)}
 
 
-def inspect_human_package(directory: Path, expected_source: str) -> dict:
+def source_toolchain(checkout: Path, source: str) -> str:
+    """Read the compiler pin from the reviewed builder at this source commit."""
+    builder = run("git", "-C", str(checkout.resolve()), "show", source + ":scripts/build-asb-deb.py").decode()
+    pins = re.findall(r'^TOOLCHAIN = "(go[0-9]+\.[0-9]+\.[0-9]+)"$', builder, re.MULTILINE)
+    if len(pins) != 1:
+        raise ValueError("reviewed source lacks one Go toolchain pin")
+    return pins[0]
+
+
+def inspect_human_package(directory: Path, expected_source: str, toolchain: str) -> dict:
     """Read final archive/build metadata without executing its Linux program."""
     candidate = apt.strict_json(apt.read(directory / "debian-candidates.json"))
     if candidate.get("source_commit") != expected_source:
@@ -278,7 +287,7 @@ def inspect_human_package(directory: Path, expected_source: str) -> dict:
         path = Path(temporary) / "asb-human"
         path.write_bytes(binary)
         path.chmod(0o600)
-        info, modules = deb.build_info(path, expected_source, dict(os.environ, GOENV="off", GOWORK="off", GOTOOLCHAIN="local"))
+        info, modules = deb.build_info(path, expected_source, dict(os.environ, GOENV="off", GOWORK="off", GOTOOLCHAIN="local"), toolchain)
     if (info.get("main_path") != deb.MODULE + "/cmd/asb-human"
             or any(expected.get(key) != value for key, value in info.items())
             or sorted(modules, key=lambda item: item["path"]) != inventory.get("modules")):
@@ -390,7 +399,11 @@ def check(args: argparse.Namespace) -> dict:
         raise ValueError("refuse to replace existing evidence")
     source_transition = validate_sources(args, apt.strict_json(apt.read(args.initial / "debian-candidates.json")),
                                          apt.strict_json(apt.read(args.upgrade / "debian-candidates.json")))
-    human_packages = {label: inspect_human_package(directory, expected) for label, directory, expected in
+    toolchains = {label: source_toolchain(args.source_checkout, source) for label, source in
+                  (("initial", args.initial_source), ("upgrade", args.upgrade_source))}
+    if toolchains["upgrade"] != deb.TOOLCHAIN:
+        raise ValueError("current builder differs from reviewed source toolchain")
+    human_packages = {label: inspect_human_package(directory, expected, toolchains[label]) for label, directory, expected in
                       (("initial", args.initial, args.initial_source), ("upgrade", args.upgrade, args.upgrade_source))}
     if human_packages["initial"]["binary_sha256"] == human_packages["upgrade"]["binary_sha256"]:
         raise ValueError("cross-source qualification requires distinct Human executable bytes")

@@ -90,6 +90,21 @@ class DebianPackageTest(unittest.TestCase):
                     with self.assertRaisesRegex(ValueError, "provenance"):
                         package.build_info(Path("fixture"), source, {})
 
+    def test_build_info_checks_the_explicit_source_toolchain(self):
+        source = "a" * 40
+        output = ("fixture: go1.26.6\n"
+                  "\tpath\t" + package.MODULE + "/cmd/asb-human\n"
+                  "\tbuild\tGOOS=linux\n\tbuild\tGOARCH=amd64\n"
+                  "\tbuild\tCGO_ENABLED=0\n\tbuild\tvcs.revision=" + source + "\n"
+                  "\tbuild\tvcs.modified=false\n\tbuild\tGOAMD64=v1\n")
+        with patch.object(package, "run", return_value=output.encode()):
+            with self.assertRaisesRegex(ValueError, "Go toolchain"):
+                package.build_info(Path("fixture"), source, {})
+            info, _ = package.build_info(Path("fixture"), source, {}, "go1.26.6")
+            self.assertEqual(info["go_version"], "go1.26.6")
+            with self.assertRaisesRegex(ValueError, "Go toolchain"):
+                package.build_info(Path("fixture"), source, {}, "go1.26.7")
+
     def test_elf_profile_rejects_dynamic_or_wrong_machine(self):
         raw = bytearray(120)
         raw[:6] = b"\x7fELF\x02\x01"

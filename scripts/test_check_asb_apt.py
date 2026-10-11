@@ -92,10 +92,19 @@ class AptUpgradeTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "ambiguous"):
                 check.human_schema_transition(altered)
 
+    def test_compiler_pin_comes_from_reviewed_source(self):
+        builder = b'TOOLCHAIN = "go1.26.6"\n'
+        with patch.object(check, "run", return_value=builder) as git:
+            self.assertEqual(check.source_toolchain(Path("."), "a" * 40), "go1.26.6")
+        self.assertEqual(git.call_args.args[-1], "a" * 40 + ":scripts/build-asb-deb.py")
+        for malformed in (b"", builder + builder, b'TOOLCHAIN = "unversioned"\n'):
+            with patch.object(check, "run", return_value=malformed), self.assertRaisesRegex(ValueError, "toolchain pin"):
+                check.source_toolchain(Path("."), "a" * 40)
+
     def test_human_package_checks_final_bytes_and_embedded_source(self):
         source, version = "a" * 40, "0.1.0~preview.1-1"
         binary = b"fixture bytes never executed"
-        info = {"go_version": "go1.26.9", "main_path": check.deb.MODULE + "/cmd/asb-human", "settings": {"vcs.revision": source}}
+        info = {"go_version": "go1.26.6", "main_path": check.deb.MODULE + "/cmd/asb-human", "settings": {"vcs.revision": source}}
         inventory = {"schema": "asb.debian-payload/v1", "package": "asb-human", "source_commit": source, "version": version,
                      "files": {"usr/bin/asb-human": check.apt.sha(binary)}, "modules": [],
                      "binaries": {"asb-human": dict(info, sha256=check.apt.sha(binary), bytes=len(binary))}}
@@ -122,16 +131,16 @@ class AptUpgradeTest(unittest.TestCase):
             (directory / "debian-candidates.json").write_bytes(check.apt.encoded({"source_commit": source, "version": version,
                 "packages": [{"package": "asb-human", "file": filename, "bytes": len(raw), "sha256": check.apt.sha(raw)}]}))
             with patch.object(check.deb, "validate_static_elf"), patch.object(check.deb, "inspect_deb"), patch.object(check.deb, "build_info", return_value=(info, [])):
-                result = check.inspect_human_package(directory, source)
+                result = check.inspect_human_package(directory, source, "go1.26.6")
                 self.assertEqual(result["binary_sha256"], check.apt.sha(binary))
                 with self.assertRaisesRegex(ValueError, "source mismatch"):
-                    check.inspect_human_package(directory, "b" * 40)
+                    check.inspect_human_package(directory, "b" * 40, "go1.26.6")
                 changed = dict(info, main_path="different/program")
                 with patch.object(check.deb, "build_info", return_value=(changed, [])), self.assertRaisesRegex(ValueError, "embedded build"):
-                    check.inspect_human_package(directory, source)
+                    check.inspect_human_package(directory, source, "go1.26.6")
             (directory / filename).write_bytes(raw + b"changed")
             with self.assertRaisesRegex(ValueError, "bytes differ"):
-                check.inspect_human_package(directory, source)
+                check.inspect_human_package(directory, source, "go1.26.6")
 
 
 if __name__ == "__main__":
