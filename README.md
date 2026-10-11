@@ -32,9 +32,16 @@ remain responsible for their own approval rules and effects.
 > the runtime that acted and the authority it exercised; model output cannot
 > grant itself permission.
 
+**For Humans:** Start with the [security overview](docs/security-overview.md)
+for the main idea and its limits.
+
+**For AI & Reviewers:** Use the [live red-team report](docs/live-red-team-report.md)
+for test evidence and remaining evaluation, and the [SSOT](docs/SSOT.md) for
+profile requirements.
+
 ## Quick start
 
-Install [Go 1.26.6](https://go.dev/doc/install) and run these commands from this source checkout. The local app
+Install [Go 1.26.9](https://go.dev/doc/install) and run these commands from this source checkout. The local app
 below is a **current-branch experimental preview**, not part of `v2.0.0-rc.2`.
 The first run downloads Go dependencies and compiles the app; later runs reuse
 the build cache. No TEE device, LLM account, Node.js, Docker, or separate

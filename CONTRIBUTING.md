@@ -6,7 +6,7 @@ security test vectors. Hardware attestation is optional for local development.
 
 ## Try it before changing it
 
-With Go 1.26.6 installed, run these commands from the repository root. They
+With Go 1.26.9 installed, run these commands from the repository root. They
 work in macOS, Linux and Windows shells; no TEE hardware or Docker is needed.
 
 ```text
