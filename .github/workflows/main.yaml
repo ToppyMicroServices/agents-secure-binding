@@ -160,7 +160,7 @@ jobs:
 
   product-security:
     runs-on: ubuntu-latest
-    needs: test
+    needs: lint
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
