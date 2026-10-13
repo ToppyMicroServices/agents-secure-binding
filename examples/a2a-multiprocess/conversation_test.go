@@ -287,7 +287,7 @@ func TestManagedConversationFailsClosedBeforeInference(t *testing.T) {
 	directory := t.TempDir()
 	fixture := newManagedConversationFixture(t, directory, "agent-a-output", "agent-b-output")
 	promptPath := filepath.Join(directory, "prompt.txt")
-	if err := os.WriteFile(promptPath, []byte("authorized prompt"), 0600); err != nil {
+	if err := os.WriteFile(promptPath, []byte("authorized prompt"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	binary := filepath.Join(directory, "asb-a2a")
@@ -326,13 +326,13 @@ func TestManagedConversationFailsClosedBeforeInference(t *testing.T) {
 					t.Fatal(err)
 				}
 				t.Cleanup(func() {
-					if err := os.WriteFile(test.tamperPath, original, 0600); err != nil {
+					if err := os.WriteFile(test.tamperPath, original, 0o600); err != nil {
 						t.Errorf("restore test model: %v", err)
 					}
 				})
 				modified := append([]byte(nil), original...)
 				modified[len(modified)-1] ^= 1
-				if err := os.WriteFile(test.tamperPath, modified, 0600); err != nil {
+				if err := os.WriteFile(test.tamperPath, modified, 0o600); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -446,7 +446,7 @@ func writeFakeGGUF(t *testing.T, path, tracePath, output string) string {
 		t.Fatal(err)
 	}
 	content = append([]byte("GGUF"), content...)
-	if err := os.WriteFile(path, content, 0600); err != nil {
+	if err := os.WriteFile(path, content, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	return sha256Bytes(content)

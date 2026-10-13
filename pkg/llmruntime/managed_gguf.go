@@ -154,7 +154,7 @@ func copyVerifiedFile(sourcePath, destinationPath, expected string, executable b
 	if err != nil || !before.Mode().IsRegular() {
 		return fmt.Errorf("%w: source must be a regular non-symlink file", ErrInvalidConfig)
 	}
-	if executable && before.Mode().Perm()&0111 == 0 {
+	if executable && before.Mode().Perm()&0o111 == 0 {
 		return fmt.Errorf("%w: server file is not executable", ErrInvalidConfig)
 	}
 	source, err := os.Open(sourcePath)
@@ -166,7 +166,7 @@ func copyVerifiedFile(sourcePath, destinationPath, expected string, executable b
 	if err != nil || !after.Mode().IsRegular() || !os.SameFile(before, after) {
 		return fmt.Errorf("%w: source file changed", ErrInvalidConfig)
 	}
-	destination, err := os.OpenFile(destinationPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	destination, err := os.OpenFile(destinationPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
 		return fmt.Errorf("%w: create private file", ErrInvalidConfig)
 	}
@@ -180,9 +180,9 @@ func copyVerifiedFile(sourcePath, destinationPath, expected string, executable b
 	if actual != expected {
 		return ErrDigestMismatch
 	}
-	mode := os.FileMode(0400)
+	mode := os.FileMode(0o400)
 	if executable {
-		mode = 0500
+		mode = 0o500
 	}
 	if err := os.Chmod(destinationPath, mode); err != nil {
 		return fmt.Errorf("%w: protect private file", ErrInvalidConfig)

@@ -88,7 +88,7 @@ func runOrchestrator(ctx context.Context, opts options, out outputWriter) (runEr
 			return "", err
 		}
 		readinessTimeout := 8 * time.Second
-		if name == "agent-b" && opts.workflow == workflowLLMConversation {
+		if name == demoAudience && opts.workflow == workflowLLMConversation {
 			// Verified model copying and GGUF loading can outlast the normal server startup window.
 			readinessTimeout = 7 * time.Minute
 		}

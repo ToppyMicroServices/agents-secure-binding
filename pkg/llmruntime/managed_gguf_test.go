@@ -49,12 +49,12 @@ func TestManagedGGUFRejectsTamperedBytesBeforeLaunch(t *testing.T) {
 	dir := t.TempDir()
 	modelPath := filepath.Join(dir, "model.gguf")
 	modelContents := []byte("tampered GGUF bytes")
-	if err := os.WriteFile(modelPath, modelContents, 0600); err != nil {
+	if err := os.WriteFile(modelPath, modelContents, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	serverPath := filepath.Join(dir, "llama-server")
 	serverContents := []byte("#!/bin/sh\n: > \"$ASB_TEST_LAUNCH_MARKER\"\nexit 1\n")
-	if err := os.WriteFile(serverPath, serverContents, 0700); err != nil {
+	if err := os.WriteFile(serverPath, serverContents, 0o700); err != nil {
 		t.Fatal(err)
 	}
 	marker := filepath.Join(dir, "launched")
@@ -85,7 +85,7 @@ func TestManagedGGUFRejectsTamperedBytesBeforeLaunch(t *testing.T) {
 func TestManagedGGUFRejectsSymlinkAndNonregularSources(t *testing.T) {
 	dir := t.TempDir()
 	source := filepath.Join(dir, "source.gguf")
-	if err := os.WriteFile(source, []byte("GGUF"), 0600); err != nil {
+	if err := os.WriteFile(source, []byte("GGUF"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	symlink := filepath.Join(dir, "linked.gguf")
