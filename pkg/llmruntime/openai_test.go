@@ -381,6 +381,14 @@ func TestOpenAICompatibleRejectsMalformedResponses(t *testing.T) {
 	}
 }
 
+func TestOpenAICompatibleAcceptsLlamaTimings(t *testing.T) {
+	t.Parallel()
+	response, err := decodeChatCompletion([]byte(`{"choices":[{"index":0,"message":{"content":"Okay"}}],"timings":{"predicted_n":1}}`))
+	if err != nil || response.Choices[0].Message.Content != "Okay" {
+		t.Fatalf("decodeChatCompletion() = %+v, %v; want model text", response, err)
+	}
+}
+
 func TestOpenAICompatibleRejectsOversizedResponse(t *testing.T) {
 	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

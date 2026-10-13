@@ -96,7 +96,7 @@ func main() {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = fmt.Fprintf(w, `{"model":"untrusted-provider-label","choices":[{"index":0,"message":{"role":"assistant","content":%q}}]}`, model.Output)
+		_, _ = fmt.Fprintf(w, `{"model":"untrusted-provider-label","timings":{"predicted_n":1},"choices":[{"index":0,"message":{"role":"assistant","content":%q}}]}`, model.Output)
 	})
 	if err := http.Serve(listener, mux); err != nil {
 		log.Fatal(err)

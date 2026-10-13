@@ -50,14 +50,14 @@ var (
 
 var chatCompletionMemberNames = map[string]struct{}{
 	"id": {}, "object": {}, "created": {}, "model": {}, "choices": {},
-	"usage": {}, "system_fingerprint": {}, "service_tier": {},
+	"usage": {}, "system_fingerprint": {}, "service_tier": {}, "timings": {},
 	"index": {}, "message": {}, "logprobs": {}, "finish_reason": {},
 	"role": {}, "content": {}, "refusal": {}, "annotations": {},
 	"audio": {}, "tool_calls": {}, "function_call": {},
 }
 
 var chatCompletionOpaqueMembers = map[string]struct{}{
-	"usage": {}, "system_fingerprint": {}, "service_tier": {},
+	"usage": {}, "system_fingerprint": {}, "service_tier": {}, "timings": {},
 	"logprobs": {}, "finish_reason": {}, "refusal": {}, "annotations": {},
 	"audio": {}, "tool_calls": {}, "function_call": {},
 }
@@ -100,6 +100,7 @@ type chatCompletionResponse struct {
 	Usage             json.RawMessage `json:"usage,omitempty"`
 	SystemFingerprint json.RawMessage `json:"system_fingerprint,omitempty"`
 	ServiceTier       json.RawMessage `json:"service_tier,omitempty"`
+	Timings           json.RawMessage `json:"timings,omitempty"`
 }
 
 type chatChoice struct {
