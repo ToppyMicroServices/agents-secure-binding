@@ -50,10 +50,11 @@ func runAgentBV2(ctx context.Context, opts options, out outputWriter) error {
 		if err := validateAgentBConversationOptions(opts); err != nil {
 			return err
 		}
-		configuredGenerator, generationErr := newConversationGenerator(opts.agentBLLMURL, opts.agentBLLMModel, opts.agentBAPIKeyEnv, opts.allowInsecureLLMLoopback)
+		configuredGenerator, generationErr := newConversationGenerator(ctx, opts.agentBGGUFPath, opts.agentBGGUFSHA256, opts.llamaServerPath, opts.llamaServerSHA256)
 		if generationErr != nil {
 			return fmt.Errorf("configure Agent B LLM: %w", generationErr)
 		}
+		defer configuredGenerator.Close()
 		generator = configuredGenerator
 	}
 	dir := roleDirectory(opts.stateDir, "agent-b")

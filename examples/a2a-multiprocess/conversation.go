@@ -7,7 +7,6 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -52,10 +51,11 @@ func runAgentAConversation(ctx context.Context, opts options, out outputWriter) 
 	if err != nil {
 		return err
 	}
-	generator, err := newConversationGenerator(opts.agentALLMURL, opts.agentALLMModel, opts.agentAAPIKeyEnv, opts.allowInsecureLLMLoopback)
+	generator, err := newConversationGenerator(ctx, opts.agentAGGUFPath, opts.agentAGGUFSHA256, opts.llamaServerPath, opts.llamaServerSHA256)
 	if err != nil {
 		return fmt.Errorf("configure Agent A LLM: %w", err)
 	}
+	defer generator.Close()
 
 	dir := roleDirectory(opts.stateDir, "agent-a")
 	signingKey, err := loadPrivateKey(filepath.Join(dir, signingKeyFile))
@@ -161,10 +161,11 @@ func runAgentAConversationV2(ctx context.Context, opts options, out outputWriter
 	if err != nil {
 		return err
 	}
-	generator, err := newConversationGenerator(opts.agentALLMURL, opts.agentALLMModel, opts.agentAAPIKeyEnv, opts.allowInsecureLLMLoopback)
+	generator, err := newConversationGenerator(ctx, opts.agentAGGUFPath, opts.agentAGGUFSHA256, opts.llamaServerPath, opts.llamaServerSHA256)
 	if err != nil {
 		return fmt.Errorf("configure Agent A LLM: %w", err)
 	}
+	defer generator.Close()
 
 	dir := roleDirectory(opts.stateDir, "agent-a")
 	signingKey, err := loadPrivateKey(filepath.Join(dir, signingKeyFile))
@@ -248,14 +249,10 @@ func runAgentAConversationV2(ctx context.Context, opts options, out outputWriter
 	return nil
 }
 
-func newConversationGenerator(baseURL, model, apiKeyEnvironment string, allowInsecureLoopback bool) (llmruntime.Generator, error) {
-	apiKey := ""
-	if apiKeyEnvironment != "" {
-		apiKey = os.Getenv(apiKeyEnvironment)
-	}
-	return llmruntime.NewOpenAICompatible(llmruntime.Config{
-		BaseURL: baseURL, Model: model, APIKey: apiKey,
-		AllowInsecureLoopback: allowInsecureLoopback,
+func newConversationGenerator(ctx context.Context, modelPath, modelSHA256, serverPath, serverSHA256 string) (*llmruntime.ManagedGGUF, error) {
+	return llmruntime.NewManagedGGUF(ctx, llmruntime.ManagedGGUFConfig{
+		ModelPath: modelPath, ModelSHA256: modelSHA256,
+		ServerPath: serverPath, ServerSHA256: serverSHA256,
 	})
 }
 

@@ -5,16 +5,15 @@ package main
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -99,7 +98,7 @@ func TestIsolateSecretEnvironmentSeparatesRoleSecrets(t *testing.T) {
 	}
 }
 
-func TestOrchestratorChildEnvironmentConfinesRedisAndLLMSecrets(t *testing.T) {
+func TestOrchestratorChildEnvironmentDoesNotForwardLegacyLLMSecrets(t *testing.T) {
 	const (
 		agentAName = "ASB_TEST_ISOLATION_AGENT_A"
 		agentBName = "ASB_TEST_ISOLATION_AGENT_B"
@@ -112,7 +111,7 @@ func TestOrchestratorChildEnvironmentConfinesRedisAndLLMSecrets(t *testing.T) {
 		workflow: workflowLLMConversation, acceptanceStore: acceptanceStoreRedis,
 		agentAAPIKeyEnv: agentAName, agentBAPIKeyEnv: agentBName, redisPasswordEnv: redisName,
 	}
-	want := map[string]string{"agent-a": agentAName, "agent-b": agentBName, "replay": redisName, "manager": ""}
+	want := map[string]string{"agent-a": "", "agent-b": "", "replay": redisName, "manager": ""}
 	for role, allowed := range want {
 		environment, err := orchestratorChildEnvironment(opts, role)
 		if err != nil {
@@ -129,11 +128,6 @@ func TestOrchestratorChildEnvironmentConfinesRedisAndLLMSecrets(t *testing.T) {
 	arguments := strings.Join(replayProcessArgs(opts), "\x00")
 	if strings.Contains(arguments, "redis-secret-not-for-argv") {
 		t.Fatal("Redis password crossed into child command-line arguments")
-	}
-
-	opts.redisPasswordEnv = agentAName
-	if _, err := orchestratorChildEnvironment(opts, "replay"); err == nil {
-		t.Fatal("Redis and LLM secret environment name collision was accepted")
 	}
 }
 
@@ -217,24 +211,14 @@ func TestConversationWorkflowSelectedLLMsRoundTrip(t *testing.T) {
 		t.Skip("multiprocess loopback test disabled in short mode")
 	}
 	const (
-		agentAModel      = "fixture-agent-a-v1"
-		agentBModel      = "fixture-agent-b-v1"
-		agentAKeyName    = "ASB_TEST_AGENT_A_LLM_API_KEY"
-		agentBKeyName    = "ASB_TEST_AGENT_B_LLM_API_KEY"
-		agentAKey        = "agent-a-private-key-sentinel"
-		agentBKey        = "agent-b-private-key-sentinel"
 		prompt           = "Prepare a request for the authorized document."
 		agentAOutput     = "A-LLM-SENTINEL::bound-message-7f3c"
 		agentBOutput     = "B-LLM-SENTINEL::returned-artifact-91ad"
 		conversationName = "direct-agent-v1+llm-conversation-v1"
 	)
 
-	agentARuntime := newFakeChatRuntime(t, agentAModel, agentAKey, agentAOutput)
-	defer agentARuntime.Close()
-	agentBRuntime := newFakeChatRuntime(t, agentBModel, agentBKey, agentBOutput)
-	defer agentBRuntime.Close()
-
 	temporaryDirectory := t.TempDir()
+	fixture := newManagedConversationFixture(t, temporaryDirectory, agentAOutput, agentBOutput)
 	promptPath := filepath.Join(temporaryDirectory, "prompt.txt")
 	if err := os.WriteFile(promptPath, []byte(prompt), 0o600); err != nil {
 		t.Fatal(err)
@@ -252,16 +236,12 @@ func TestConversationWorkflowSelectedLLMsRoundTrip(t *testing.T) {
 		"--role", "orchestrator",
 		"--workflow", workflowLLMConversation,
 		"--prompt-file", promptPath,
-		"--agent-a-llm-url", agentARuntime.URL,
-		"--agent-a-llm-model", agentAModel,
-		"--agent-a-api-key-env", agentAKeyName,
-		"--agent-b-llm-url", agentBRuntime.URL,
-		"--agent-b-llm-model", agentBModel,
-		"--agent-b-api-key-env", agentBKeyName,
+	)
+	run.Args = append(run.Args, fixture.arguments()...)
+	run.Args = append(run.Args,
 		"--report", reportPath,
 	)
-	baseEnvironment := isolateSecretEnvironment(os.Environ(), "", agentAKeyName, agentBKeyName)
-	run.Env = append(baseEnvironment, agentAKeyName+"="+agentAKey, agentBKeyName+"="+agentBKey)
+	run.Env = append(os.Environ(), "ASB_TEST_ENV_POISON=must-not-reach-llama", "LLAMA_ARG_MODEL=/untrusted/model.gguf")
 	output, err := run.CombinedOutput()
 	if err != nil {
 		t.Fatalf("run A2A LLM conversation: %v\n%s", err, output)
@@ -270,19 +250,13 @@ func TestConversationWorkflowSelectedLLMsRoundTrip(t *testing.T) {
 		t.Fatalf("conversation stdout did not contain Agent B output\n%s", output)
 	}
 
-	agentARequests := agentARuntime.Requests()
-	agentBRequests := agentBRuntime.Requests()
-	if got := agentARuntime.Calls(); got != 1 {
-		t.Fatalf("Agent A LLM calls = %d, want 1", got)
-	}
-	if got := agentBRuntime.Calls(); got != 1 {
-		t.Fatalf("Agent B LLM calls = %d, want 1", got)
-	}
+	agentARequests := readFakeLlamaTrace(t, fixture.agentATracePath)
+	agentBRequests := readFakeLlamaTrace(t, fixture.agentBTracePath)
 	if len(agentARequests) != 1 || len(agentBRequests) != 1 {
 		t.Fatalf("recorded requests = A:%d B:%d, want one each", len(agentARequests), len(agentBRequests))
 	}
-	assertChatRequest(t, agentARequests[0], agentAModel, agentAKey, agentASystemPrompt, prompt)
-	assertChatRequest(t, agentBRequests[0], agentBModel, agentBKey, agentBSystemPrompt, agentAOutput)
+	assertManagedChatRequest(t, agentARequests[0], agentASystemPrompt, prompt)
+	assertManagedChatRequest(t, agentBRequests[0], agentBSystemPrompt, agentAOutput)
 
 	reportBytes, err := os.ReadFile(reportPath)
 	if err != nil {
@@ -298,7 +272,7 @@ func TestConversationWorkflowSelectedLLMsRoundTrip(t *testing.T) {
 		t.Fatalf("conversation scenario = %+v", report.Scenarios[0])
 	}
 	for _, privateValue := range []string{
-		agentAKey, agentBKey, prompt, agentAOutput, agentBOutput, agentARuntime.URL, agentBRuntime.URL,
+		prompt, agentAOutput, agentBOutput, fixture.agentAPath, fixture.agentBPath,
 	} {
 		if bytes.Contains(reportBytes, []byte(privateValue)) {
 			t.Fatalf("conversation report disclosed %q", privateValue)
@@ -306,13 +280,114 @@ func TestConversationWorkflowSelectedLLMsRoundTrip(t *testing.T) {
 	}
 }
 
-type recordedChatRequest struct {
-	Method        string
-	Path          string
-	ContentType   string
-	Authorization string
-	Model         string
-	Messages      []recordedChatMessage
+func TestManagedConversationFailsClosedBeforeInference(t *testing.T) {
+	if testing.Short() {
+		t.Skip("multiprocess loopback test disabled in short mode")
+	}
+	directory := t.TempDir()
+	fixture := newManagedConversationFixture(t, directory, "agent-a-output", "agent-b-output")
+	promptPath := filepath.Join(directory, "prompt.txt")
+	if err := os.WriteFile(promptPath, []byte("authorized prompt"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	binary := filepath.Join(directory, "asb-a2a")
+	build := exec.Command("go", "build", "-o", binary, ".")
+	if output, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build A2A conversation tool: %v\n%s", err, output)
+	}
+	wrongDigest := "sha256:" + strings.Repeat("0", 64)
+	tests := []struct {
+		name       string
+		omit       string
+		change     string
+		value      string
+		extra      []string
+		tamperPath string
+	}{
+		{name: "missing server digest", omit: "--llama-server-sha256"},
+		{name: "missing Agent A digest", omit: "--agent-a-gguf-sha256"},
+		{name: "missing Agent B digest", omit: "--agent-b-gguf-sha256"},
+		{name: "changed server digest", change: "--llama-server-sha256", value: wrongDigest},
+		{name: "changed Agent A digest", change: "--agent-a-gguf-sha256", value: wrongDigest},
+		{name: "changed Agent B digest", change: "--agent-b-gguf-sha256", value: wrongDigest},
+		{name: "tampered Agent A bytes", tamperPath: fixture.agentAPath},
+		{name: "tampered Agent B bytes", tamperPath: fixture.agentBPath},
+		{name: "legacy URL", extra: []string{"--agent-a-llm-url", "http://127.0.0.1:11434"}},
+		{name: "legacy model ID", extra: []string{"--agent-b-llm-model", "unverified-label"}},
+		{name: "legacy loopback opt-in", extra: []string{"--allow-insecure-llm-loopback"}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_ = os.Remove(fixture.agentATracePath)
+			_ = os.Remove(fixture.agentBTracePath)
+			if test.tamperPath != "" {
+				original, err := os.ReadFile(test.tamperPath)
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() {
+					if err := os.WriteFile(test.tamperPath, original, 0600); err != nil {
+						t.Errorf("restore test model: %v", err)
+					}
+				})
+				modified := append([]byte(nil), original...)
+				modified[len(modified)-1] ^= 1
+				if err := os.WriteFile(test.tamperPath, modified, 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			arguments := fixture.arguments()
+			if test.omit != "" {
+				arguments = omitConversationArgument(t, arguments, test.omit)
+			}
+			if test.change != "" {
+				arguments = changeConversationArgument(t, arguments, test.change, test.value)
+			}
+			reportPath := filepath.Join(t.TempDir(), "rejected-report.json")
+			runArgs := []string{"--debug-simple", "--role", "orchestrator", "--workflow", workflowLLMConversation, "--prompt-file", promptPath}
+			runArgs = append(runArgs, arguments...)
+			runArgs = append(runArgs, test.extra...)
+			runArgs = append(runArgs, "--report", reportPath)
+			output, err := exec.Command(binary, runArgs...).CombinedOutput()
+			if err == nil {
+				t.Fatalf("unverified model was accepted:\n%s", output)
+			}
+			if len(readFakeLlamaTrace(t, fixture.agentATracePath)) != 0 || len(readFakeLlamaTrace(t, fixture.agentBTracePath)) != 0 {
+				t.Fatalf("unverified model was used for inference:\n%s", output)
+			}
+			if reportBytes, err := os.ReadFile(reportPath); err == nil {
+				report := decodeA2ATestReport(t, reportBytes)
+				if report.Status == a2asecuritytest.StatusPass || report.Summary.Passed != 0 {
+					t.Fatalf("unverified model produced a successful report: %+v", report)
+				}
+			} else if !os.IsNotExist(err) {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func omitConversationArgument(t *testing.T, arguments []string, flag string) []string {
+	t.Helper()
+	for index := 0; index+1 < len(arguments); index += 2 {
+		if arguments[index] == flag {
+			return append(arguments[:index:index], arguments[index+2:]...)
+		}
+	}
+	t.Fatalf("missing fixture argument %s", flag)
+	return nil
+}
+
+func changeConversationArgument(t *testing.T, arguments []string, flag, value string) []string {
+	t.Helper()
+	for index := 0; index+1 < len(arguments); index += 2 {
+		if arguments[index] == flag {
+			arguments[index+1] = value
+			return arguments
+		}
+	}
+	t.Fatalf("missing fixture argument %s", flag)
+	return nil
 }
 
 type recordedChatMessage struct {
@@ -325,103 +400,123 @@ type fakeChatRequest struct {
 	Messages []recordedChatMessage `json:"messages"`
 }
 
-type fakeChatRuntime struct {
-	URL        string
-	server     *httptest.Server
-	calls      atomic.Int32
-	requestsMu sync.Mutex
-	requests   []recordedChatRequest
+type fakeLlamaTrace struct {
+	Method        string          `json:"method"`
+	Path          string          `json:"path"`
+	ContentType   string          `json:"content_type"`
+	Authorization string          `json:"authorization"`
+	Request       fakeChatRequest `json:"request"`
 }
 
-func newFakeChatRuntime(t *testing.T, model, apiKey, output string) *fakeChatRuntime {
+type managedConversationFixture struct {
+	serverPath      string
+	serverSHA256    string
+	agentAPath      string
+	agentASHA256    string
+	agentATracePath string
+	agentBPath      string
+	agentBSHA256    string
+	agentBTracePath string
+}
+
+func newManagedConversationFixture(t *testing.T, directory, agentAOutput, agentBOutput string) managedConversationFixture {
 	t.Helper()
-	runtime := &fakeChatRuntime{}
-	runtime.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
-		runtime.calls.Add(1)
-		recorded := recordedChatRequest{
-			Method: request.Method, Path: request.URL.Path,
-			ContentType: request.Header.Get("Content-Type"), Authorization: request.Header.Get("Authorization"),
-		}
-		decoder := json.NewDecoder(io.LimitReader(request.Body, 256*1024+1))
-		decoder.DisallowUnknownFields()
-		var body fakeChatRequest
-		if err := decoder.Decode(&body); err != nil {
-			t.Errorf("decode fake LLM request: %v", err)
-			http.Error(w, "invalid request", http.StatusBadRequest)
-			return
-		}
-		var trailing any
-		if err := decoder.Decode(&trailing); err != io.EOF {
-			t.Errorf("fake LLM request has trailing JSON: %v", err)
-			http.Error(w, "invalid request", http.StatusBadRequest)
-			return
-		}
-		recorded.Model = body.Model
-		recorded.Messages = append([]recordedChatMessage(nil), body.Messages...)
-		runtime.requestsMu.Lock()
-		runtime.requests = append(runtime.requests, recorded)
-		runtime.requestsMu.Unlock()
-
-		if request.Method != http.MethodPost || request.URL.Path != "/v1/chat/completions" {
-			t.Errorf("fake LLM request = %s %s, want POST /v1/chat/completions", request.Method, request.URL.Path)
-		}
-		if request.Header.Get("Content-Type") != applicationJSONMediaType {
-			t.Errorf("fake LLM Content-Type = %q, want application/json", request.Header.Get("Content-Type"))
-		}
-		if body.Model != model {
-			t.Errorf("fake LLM model = %q, want %q", body.Model, model)
-		}
-		if request.Header.Get("Authorization") != "Bearer "+apiKey {
-			t.Errorf("fake LLM received the wrong role API key")
-		}
-
-		w.Header().Set("Content-Type", applicationJSONMediaType)
-		response := map[string]any{
-			"id": "chatcmpl-fixture", "object": "chat.completion", "created": int64(1), "model": model,
-			"choices": []map[string]any{{
-				"index": 0, "message": map[string]string{"role": "assistant", "content": output}, "finish_reason": "stop",
-			}},
-		}
-		if err := json.NewEncoder(w).Encode(response); err != nil {
-			t.Errorf("encode fake LLM response: %v", err)
-		}
-	}))
-	runtime.URL = runtime.server.URL
-	return runtime
+	fixture := managedConversationFixture{serverPath: filepath.Join(directory, "fake-llama-server")}
+	build := exec.Command("go", "build", "-o", fixture.serverPath, "./testdata/fake-llama-server")
+	if output, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build test-only llama-server: %v\n%s", err, output)
+	}
+	fixture.serverSHA256 = fileSHA256(t, fixture.serverPath)
+	fixture.agentAPath = filepath.Join(directory, "agent-a.gguf")
+	fixture.agentATracePath = filepath.Join(directory, "agent-a-requests.jsonl")
+	fixture.agentASHA256 = writeFakeGGUF(t, fixture.agentAPath, fixture.agentATracePath, agentAOutput)
+	fixture.agentBPath = filepath.Join(directory, "agent-b.gguf")
+	fixture.agentBTracePath = filepath.Join(directory, "agent-b-requests.jsonl")
+	fixture.agentBSHA256 = writeFakeGGUF(t, fixture.agentBPath, fixture.agentBTracePath, agentBOutput)
+	return fixture
 }
 
-func (r *fakeChatRuntime) Close() {
-	r.server.Close()
-}
-
-func (r *fakeChatRuntime) Calls() int32 {
-	return r.calls.Load()
-}
-
-func (r *fakeChatRuntime) Requests() []recordedChatRequest {
-	r.requestsMu.Lock()
-	defer r.requestsMu.Unlock()
-	return append([]recordedChatRequest(nil), r.requests...)
-}
-
-func assertChatRequest(t *testing.T, request recordedChatRequest, model, apiKey, system, input string) {
+func writeFakeGGUF(t *testing.T, path, tracePath, output string) string {
 	t.Helper()
-	if request.Method != http.MethodPost || request.Path != "/v1/chat/completions" || request.ContentType != applicationJSONMediaType {
-		t.Fatalf("chat request transport = %s %s %q", request.Method, request.Path, request.ContentType)
+	content, err := json.Marshal(struct {
+		Output    string `json:"output"`
+		TracePath string `json:"trace_path"`
+	}{Output: output, TracePath: tracePath})
+	if err != nil {
+		t.Fatal(err)
 	}
-	if request.Authorization != "Bearer "+apiKey {
-		t.Fatal("chat request used the wrong role API key")
+	content = append([]byte("GGUF"), content...)
+	if err := os.WriteFile(path, content, 0600); err != nil {
+		t.Fatal(err)
 	}
-	if request.Model != model {
-		t.Fatalf("chat request model = %q, want %q", request.Model, model)
+	return sha256Bytes(content)
+}
+
+func fileSHA256(t *testing.T, path string) string {
+	t.Helper()
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return sha256Bytes(content)
+}
+
+func sha256Bytes(content []byte) string {
+	sum := sha256.Sum256(content)
+	return "sha256:" + hex.EncodeToString(sum[:])
+}
+
+func (fixture managedConversationFixture) arguments() []string {
+	return []string{
+		"--llama-server-path", fixture.serverPath,
+		"--llama-server-sha256", fixture.serverSHA256,
+		"--agent-a-gguf-path", fixture.agentAPath,
+		"--agent-a-gguf-sha256", fixture.agentASHA256,
+		"--agent-b-gguf-path", fixture.agentBPath,
+		"--agent-b-gguf-sha256", fixture.agentBSHA256,
+	}
+}
+
+func readFakeLlamaTrace(t *testing.T, path string) []fakeLlamaTrace {
+	t.Helper()
+	content, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoder := json.NewDecoder(bytes.NewReader(content))
+	var records []fakeLlamaTrace
+	for {
+		var record fakeLlamaTrace
+		if err := decoder.Decode(&record); err == io.EOF {
+			return records
+		} else if err != nil {
+			t.Fatalf("decode fake llama-server trace: %v", err)
+		}
+		records = append(records, record)
+	}
+}
+
+func assertManagedChatRequest(t *testing.T, trace fakeLlamaTrace, system, input string) {
+	t.Helper()
+	if trace.Method != http.MethodPost || trace.Path != "/v1/chat/completions" || trace.ContentType != applicationJSONMediaType {
+		t.Fatalf("chat request transport = %s %s %q", trace.Method, trace.Path, trace.ContentType)
+	}
+	if trace.Authorization != "" {
+		t.Fatal("managed chat request unexpectedly used an API key")
+	}
+	if trace.Request.Model != "asb-verified-model" {
+		t.Fatalf("chat request model alias = %q", trace.Request.Model)
 	}
 	wantMessages := []recordedChatMessage{{Role: "system", Content: system}, {Role: "user", Content: input}}
-	if len(request.Messages) != len(wantMessages) {
-		t.Fatalf("chat request messages = %+v, want %+v", request.Messages, wantMessages)
+	if len(trace.Request.Messages) != len(wantMessages) {
+		t.Fatalf("chat request messages = %+v, want %+v", trace.Request.Messages, wantMessages)
 	}
 	for index := range wantMessages {
-		if request.Messages[index] != wantMessages[index] {
-			t.Fatalf("chat request message[%d] = %+v, want %+v", index, request.Messages[index], wantMessages[index])
+		if trace.Request.Messages[index] != wantMessages[index] {
+			t.Fatalf("chat request message[%d] = %+v, want %+v", index, trace.Request.Messages[index], wantMessages[index])
 		}
 	}
 }

@@ -41,6 +41,12 @@ type options struct {
 	trustManifest            string
 	deploymentEvidence       string
 	promptFile               string
+	llamaServerPath          string
+	llamaServerSHA256        string
+	agentAGGUFPath           string
+	agentAGGUFSHA256         string
+	agentBGGUFPath           string
+	agentBGGUFSHA256         string
 	agentALLMURL             string
 	agentALLMModel           string
 	agentAAPIKeyEnv          string
@@ -116,13 +122,19 @@ func parseFlags() options {
 	flag.StringVar(&opts.trustManifest, "trust-manifest", "", "multi-host non-secret trust manifest (defaults to <state-dir>/multihost-trust.json)")
 	flag.StringVar(&opts.deploymentEvidence, "deployment-evidence", "", "optional atomic multi-host evidence file written by Agent A")
 	flag.StringVar(&opts.promptFile, "prompt-file", "", "input file for llm-conversation (maximum 64 KiB)")
-	flag.StringVar(&opts.agentALLMURL, "agent-a-llm-url", "", "Agent A OpenAI-compatible API base URL")
-	flag.StringVar(&opts.agentALLMModel, "agent-a-llm-model", "", "Agent A model ID")
-	flag.StringVar(&opts.agentAAPIKeyEnv, "agent-a-api-key-env", "ASB_AGENT_A_LLM_API_KEY", "ASB_-prefixed environment variable containing Agent A's API key")
-	flag.StringVar(&opts.agentBLLMURL, "agent-b-llm-url", "", "Agent B OpenAI-compatible API base URL")
-	flag.StringVar(&opts.agentBLLMModel, "agent-b-llm-model", "", "Agent B model ID")
-	flag.StringVar(&opts.agentBAPIKeyEnv, "agent-b-api-key-env", "ASB_AGENT_B_LLM_API_KEY", "ASB_-prefixed environment variable containing Agent B's API key")
-	flag.BoolVar(&opts.allowInsecureLLMLoopback, "allow-insecure-llm-loopback", false, "allow HTTP only for loopback LLM endpoints")
+	flag.StringVar(&opts.llamaServerPath, "llama-server-path", "", "absolute path to local llama-server executable")
+	flag.StringVar(&opts.llamaServerSHA256, "llama-server-sha256", "", "trusted llama-server digest (sha256:<64 lowercase hex>)")
+	flag.StringVar(&opts.agentAGGUFPath, "agent-a-gguf-path", "", "absolute path to Agent A local GGUF model")
+	flag.StringVar(&opts.agentAGGUFSHA256, "agent-a-gguf-sha256", "", "trusted Agent A GGUF digest (sha256:<64 lowercase hex>)")
+	flag.StringVar(&opts.agentBGGUFPath, "agent-b-gguf-path", "", "absolute path to Agent B local GGUF model")
+	flag.StringVar(&opts.agentBGGUFSHA256, "agent-b-gguf-sha256", "", "trusted Agent B GGUF digest (sha256:<64 lowercase hex>)")
+	flag.StringVar(&opts.agentALLMURL, "agent-a-llm-url", "", "deprecated: unverified OpenAI-compatible endpoints are rejected for llm-conversation")
+	flag.StringVar(&opts.agentALLMModel, "agent-a-llm-model", "", "deprecated: model IDs cannot verify model weights")
+	flag.StringVar(&opts.agentAAPIKeyEnv, "agent-a-api-key-env", "ASB_AGENT_A_LLM_API_KEY", "deprecated: ignored for local llm-conversation")
+	flag.StringVar(&opts.agentBLLMURL, "agent-b-llm-url", "", "deprecated: unverified OpenAI-compatible endpoints are rejected for llm-conversation")
+	flag.StringVar(&opts.agentBLLMModel, "agent-b-llm-model", "", "deprecated: model IDs cannot verify model weights")
+	flag.StringVar(&opts.agentBAPIKeyEnv, "agent-b-api-key-env", "ASB_AGENT_B_LLM_API_KEY", "deprecated: ignored for local llm-conversation")
+	flag.BoolVar(&opts.allowInsecureLLMLoopback, "allow-insecure-llm-loopback", false, "deprecated: unverified LLM endpoints are rejected for llm-conversation")
 	flag.StringVar(&opts.acceptanceStore, "acceptance-store", "file", "v2 acceptance store: file or redis")
 	flag.StringVar(&opts.redisAddress, "redis-address", "", "Redis/Valkey TLS host:port for the redis acceptance store")
 	flag.StringVar(&opts.redisServerName, "redis-server-name", "", "Redis/Valkey TLS server name")

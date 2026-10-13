@@ -18,7 +18,20 @@ import (
 	"time"
 )
 
-func TestNewOpenAICompatibleValidatesEndpoint(t *testing.T) {
+func TestNewOpenAICompatibleRejectsExternalEndpoints(t *testing.T) {
+	t.Parallel()
+	for _, config := range []Config{
+		{BaseURL: "https://models.example/v1", Model: "model-label"},
+		{BaseURL: "http://127.0.0.1:8080/v1", Model: "model-label", AllowInsecureLoopback: true},
+	} {
+		generator, err := NewOpenAICompatible(config)
+		if generator != nil || !errors.Is(err, ErrInvalidConfig) {
+			t.Fatalf("NewOpenAICompatible() = %v, %v; want rejected endpoint", generator, err)
+		}
+	}
+}
+
+func TestInternalOpenAICompatibleValidatesEndpoint(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name     string
@@ -50,7 +63,7 @@ func TestNewOpenAICompatibleValidatesEndpoint(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
-			generator, err := NewOpenAICompatible(Config{
+			generator, err := newOpenAICompatible(Config{
 				BaseURL: test.baseURL, Model: "test-model", AllowInsecureLoopback: test.allow,
 			})
 			if test.wantErr {
@@ -73,7 +86,7 @@ func TestNewOpenAICompatibleValidatesEndpoint(t *testing.T) {
 	}
 }
 
-func TestNewOpenAICompatibleValidatesModelAndKeyWithoutDisclosure(t *testing.T) {
+func TestInternalOpenAICompatibleValidatesModelAndKeyWithoutDisclosure(t *testing.T) {
 	t.Parallel()
 	secret := "secret\nheader"
 	for _, config := range []Config{
@@ -82,7 +95,7 @@ func TestNewOpenAICompatibleValidatesModelAndKeyWithoutDisclosure(t *testing.T) 
 		{BaseURL: "https://models.example", Model: "bad\x00model"},
 		{BaseURL: "https://models.example", Model: "test", APIKey: secret},
 	} {
-		generator, err := NewOpenAICompatible(config)
+		generator, err := newOpenAICompatible(config)
 		if !errors.Is(err, ErrInvalidConfig) || generator != nil {
 			t.Fatalf("NewOpenAICompatible(%+v) = %v, %v", config, generator, err)
 		}
@@ -94,7 +107,7 @@ func TestNewOpenAICompatibleValidatesModelAndKeyWithoutDisclosure(t *testing.T) 
 
 func TestOpenAICompatibleUsesGuardedDirectTransportOnlyForHTTP(t *testing.T) {
 	t.Parallel()
-	httpsGenerator, err := NewOpenAICompatible(Config{BaseURL: "https://models.example/v1", Model: "test"})
+	httpsGenerator, err := newOpenAICompatible(Config{BaseURL: "https://models.example/v1", Model: "test"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,7 +115,7 @@ func TestOpenAICompatibleUsesGuardedDirectTransportOnlyForHTTP(t *testing.T) {
 		t.Fatalf("HTTPS transport = %T, want the standard nil transport", transport)
 	}
 
-	httpGenerator, err := NewOpenAICompatible(Config{
+	httpGenerator, err := newOpenAICompatible(Config{
 		BaseURL: "http://localhost:8080/v1", Model: "test", AllowInsecureLoopback: true,
 	})
 	if err != nil {
@@ -224,7 +237,7 @@ func TestOpenAICompatibleGenerate(t *testing.T) {
 	}))
 	defer server.Close()
 
-	generator, err := NewOpenAICompatible(Config{
+	generator, err := newOpenAICompatible(Config{
 		BaseURL: server.URL + "/gateway/", Model: model, APIKey: apiKey, AllowInsecureLoopback: true,
 	})
 	if err != nil {
@@ -399,7 +412,7 @@ func TestOpenAICompatibleHonorsContextCancellation(t *testing.T) {
 
 func newTestGenerator(t *testing.T, baseURL, apiKey string) Generator {
 	t.Helper()
-	generator, err := NewOpenAICompatible(Config{
+	generator, err := newOpenAICompatible(Config{
 		BaseURL: baseURL, Model: "test-model", APIKey: apiKey, AllowInsecureLoopback: true,
 	})
 	if err != nil {

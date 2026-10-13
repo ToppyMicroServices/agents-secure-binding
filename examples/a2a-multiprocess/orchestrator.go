@@ -87,7 +87,12 @@ func runOrchestrator(ctx context.Context, opts options, out outputWriter) (runEr
 		if err != nil {
 			return "", err
 		}
-		process, rawURL, err := startServerProcess(ctx, executable, stateDir, name, childEnv, extra...)
+		readinessTimeout := 8 * time.Second
+		if name == "agent-b" && opts.workflow == workflowLLMConversation {
+			// Verified model copying and GGUF loading can outlast the normal server startup window.
+			readinessTimeout = 7 * time.Minute
+		}
+		process, rawURL, err := startServerProcess(ctx, executable, stateDir, name, childEnv, readinessTimeout, extra...)
 		if err != nil {
 			return "", err
 		}
@@ -118,13 +123,11 @@ func runOrchestrator(ctx context.Context, opts options, out outputWriter) (runEr
 	if opts.workflow == workflowLLMConversation {
 		agentBArgs = append(agentBArgs,
 			"--workflow", opts.workflow,
-			"--agent-b-llm-url", opts.agentBLLMURL,
-			"--agent-b-llm-model", opts.agentBLLMModel,
-			"--agent-b-api-key-env", opts.agentBAPIKeyEnv,
+			"--llama-server-path", opts.llamaServerPath,
+			"--llama-server-sha256", opts.llamaServerSHA256,
+			"--agent-b-gguf-path", opts.agentBGGUFPath,
+			"--agent-b-gguf-sha256", opts.agentBGGUFSHA256,
 		)
-		if opts.allowInsecureLLMLoopback {
-			agentBArgs = append(agentBArgs, "--allow-insecure-llm-loopback")
-		}
 	}
 	if strings.EqualFold(opts.attestationMode, modeSimulation) {
 		agentBArgs = append(agentBArgs, "--allow-simulation")
@@ -189,13 +192,11 @@ func agentAProcessArgs(opts options, stateDir, managerURL, attesterURL, verifier
 	if opts.workflow == workflowLLMConversation {
 		args = append(args,
 			"--prompt-file", opts.promptFile,
-			"--agent-a-llm-url", opts.agentALLMURL,
-			"--agent-a-llm-model", opts.agentALLMModel,
-			"--agent-a-api-key-env", opts.agentAAPIKeyEnv,
+			"--llama-server-path", opts.llamaServerPath,
+			"--llama-server-sha256", opts.llamaServerSHA256,
+			"--agent-a-gguf-path", opts.agentAGGUFPath,
+			"--agent-a-gguf-sha256", opts.agentAGGUFSHA256,
 		)
-		if opts.allowInsecureLLMLoopback {
-			args = append(args, "--allow-insecure-llm-loopback")
-		}
 	}
 	if opts.reportFile != "" {
 		args = append(args, "--report", opts.reportFile)
@@ -203,7 +204,7 @@ func agentAProcessArgs(opts options, stateDir, managerURL, attesterURL, verifier
 	return args
 }
 
-func startServerProcess(parent context.Context, executable, stateDir, role string, environment []string, extra ...string) (*childProcess, string, error) {
+func startServerProcess(parent context.Context, executable, stateDir, role string, environment []string, readinessTimeout time.Duration, extra ...string) (*childProcess, string, error) {
 	readyFile := filepath.Join(stateDir, ".ready-"+role)
 	_ = os.Remove(readyFile)
 	ctx, cancel := context.WithCancel(parent)
@@ -224,7 +225,7 @@ func startServerProcess(parent context.Context, executable, stateDir, role strin
 		process.done <- process.cmd.Wait()
 	}()
 
-	timer := time.NewTimer(8 * time.Second)
+	timer := time.NewTimer(readinessTimeout)
 	defer timer.Stop()
 	ticker := time.NewTicker(20 * time.Millisecond)
 	defer ticker.Stop()

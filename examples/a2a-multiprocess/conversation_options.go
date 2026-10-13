@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"unicode/utf8"
 )
@@ -20,37 +21,92 @@ func validateConversationOptions(opts options) error {
 	if err := validateAgentBConversationOptions(opts); err != nil {
 		return err
 	}
-	if opts.agentAAPIKeyEnv == opts.agentBAPIKeyEnv {
-		return fmt.Errorf("Agent A and Agent B API keys must use different environment variable names")
-	}
-	redisSecret := effectiveRedisPasswordEnv(opts.redisPasswordEnv)
-	if redisSecret == opts.agentAAPIKeyEnv || redisSecret == opts.agentBAPIKeyEnv {
-		return fmt.Errorf("Redis and LLM credentials must use different environment variable names")
-	}
 	return nil
 }
 
 func validateAgentAConversationOptions(opts options) error {
+	if err := rejectUnverifiedConversationOptions(opts); err != nil {
+		return err
+	}
 	if opts.promptFile == "" {
 		return fmt.Errorf("prompt file is required for llm-conversation")
 	}
-	if opts.agentALLMURL == "" || opts.agentALLMModel == "" {
-		return fmt.Errorf("Agent A LLM URL and model are required for llm-conversation")
+	if err := validateManagedServerOptions(opts); err != nil {
+		return err
 	}
-	if !validEnvironmentName(opts.agentAAPIKeyEnv) {
-		return fmt.Errorf("Agent A API key environment variable name is invalid")
+	if err := validateManagedModelOptions("Agent A", opts.agentAGGUFPath, opts.agentAGGUFSHA256); err != nil {
+		return err
 	}
 	return nil
 }
 
 func validateAgentBConversationOptions(opts options) error {
-	if opts.agentBLLMURL == "" || opts.agentBLLMModel == "" {
-		return fmt.Errorf("Agent B LLM URL and model are required for llm-conversation")
+	if err := rejectUnverifiedConversationOptions(opts); err != nil {
+		return err
 	}
-	if !validEnvironmentName(opts.agentBAPIKeyEnv) {
-		return fmt.Errorf("Agent B API key environment variable name is invalid")
+	if err := validateManagedServerOptions(opts); err != nil {
+		return err
+	}
+	if err := validateManagedModelOptions("Agent B", opts.agentBGGUFPath, opts.agentBGGUFSHA256); err != nil {
+		return err
 	}
 	return nil
+}
+
+func rejectUnverifiedConversationOptions(opts options) error {
+	for _, legacy := range []struct {
+		flag  string
+		value string
+	}{
+		{"--agent-a-llm-url", opts.agentALLMURL},
+		{"--agent-a-llm-model", opts.agentALLMModel},
+		{"--agent-b-llm-url", opts.agentBLLMURL},
+		{"--agent-b-llm-model", opts.agentBLLMModel},
+	} {
+		if legacy.value != "" {
+			return fmt.Errorf("%s cannot be used for llm-conversation: model weights cannot be verified through an external endpoint", legacy.flag)
+		}
+	}
+	if opts.allowInsecureLLMLoopback {
+		return fmt.Errorf("--allow-insecure-llm-loopback cannot be used for llm-conversation")
+	}
+	return nil
+}
+
+func validateManagedServerOptions(opts options) error {
+	if !validManagedFilePath(opts.llamaServerPath) {
+		return fmt.Errorf("--llama-server-path must be an absolute clean path for llm-conversation")
+	}
+	if !validManagedSHA256(opts.llamaServerSHA256) {
+		return fmt.Errorf("--llama-server-sha256 must be sha256: followed by 64 lowercase hex characters")
+	}
+	return nil
+}
+
+func validateManagedModelOptions(name, path, digest string) error {
+	if !validManagedFilePath(path) {
+		return fmt.Errorf("%s GGUF path must be an absolute clean path for llm-conversation", name)
+	}
+	if !validManagedSHA256(digest) {
+		return fmt.Errorf("%s GGUF SHA-256 must be sha256: followed by 64 lowercase hex characters", name)
+	}
+	return nil
+}
+
+func validManagedFilePath(path string) bool {
+	return path != "" && filepath.IsAbs(path) && filepath.Clean(path) == path && !strings.ContainsRune(path, 0)
+}
+
+func validManagedSHA256(value string) bool {
+	if len(value) != len("sha256:")+64 || !strings.HasPrefix(value, "sha256:") {
+		return false
+	}
+	for _, digit := range value[len("sha256:"):] {
+		if (digit < '0' || digit > '9') && (digit < 'a' || digit > 'f') {
+			return false
+		}
+	}
+	return true
 }
 
 func readConversationPrompt(path string) (string, error) {
@@ -84,28 +140,15 @@ func orchestratorChildEnvironment(opts options, role string) ([]string, error) {
 	if !validEnvironmentName(redisSecret) {
 		return nil, fmt.Errorf("Redis password environment variable name is invalid")
 	}
-	secretNames := []string{redisSecret}
+	for _, legacyName := range []string{opts.agentAAPIKeyEnv, opts.agentBAPIKeyEnv} {
+		if legacyName != "" && !validEnvironmentName(legacyName) {
+			return nil, fmt.Errorf("legacy LLM API key environment variable name is invalid")
+		}
+	}
+	secretNames := []string{redisSecret, "ASB_AGENT_A_LLM_API_KEY", "ASB_AGENT_B_LLM_API_KEY", opts.agentAAPIKeyEnv, opts.agentBAPIKeyEnv}
 	allowed := ""
 	if effectiveAcceptanceStore(opts.acceptanceStore) == acceptanceStoreRedis && role == "replay" {
 		allowed = redisSecret
-	}
-	if effectiveWorkflow(opts.workflow) == workflowLLMConversation {
-		if !validEnvironmentName(opts.agentAAPIKeyEnv) || !validEnvironmentName(opts.agentBAPIKeyEnv) {
-			return nil, fmt.Errorf("LLM API key environment variable name is invalid")
-		}
-		if opts.agentAAPIKeyEnv == opts.agentBAPIKeyEnv {
-			return nil, fmt.Errorf("Agent A and Agent B API keys must use different environment variable names")
-		}
-		if redisSecret == opts.agentAAPIKeyEnv || redisSecret == opts.agentBAPIKeyEnv {
-			return nil, fmt.Errorf("Redis and LLM credentials must use different environment variable names")
-		}
-		secretNames = append(secretNames, opts.agentAAPIKeyEnv, opts.agentBAPIKeyEnv)
-		switch role {
-		case demoAgentIssuer:
-			allowed = opts.agentAAPIKeyEnv
-		case demoAudience:
-			allowed = opts.agentBAPIKeyEnv
-		}
 	}
 	return isolateSecretEnvironment(os.Environ(), allowed, secretNames...), nil
 }
