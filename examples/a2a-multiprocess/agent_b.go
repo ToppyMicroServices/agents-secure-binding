@@ -47,7 +47,7 @@ func runAgentB(ctx context.Context, opts options, out outputWriter) error {
 		if err := validateAgentBConversationOptions(opts); err != nil {
 			return err
 		}
-		configuredGenerator, generationErr := newConversationGenerator(ctx, opts.agentBGGUFPath, opts.agentBGGUFSHA256, opts.llamaServerPath, opts.llamaServerSHA256)
+		configuredGenerator, generationErr := newConversationGenerator(ctx, opts.agentBGGUFPath, agentBModelPolicy(opts), opts.kuboAPIURL, opts.llamaServerPath, opts.llamaServerSHA256)
 		if generationErr != nil {
 			return fmt.Errorf("configure Agent B LLM: %w", generationErr)
 		}

@@ -37,8 +37,10 @@ var ErrDigestMismatch = errors.New("llm runtime: digest mismatch")
 // The server executable is copied before launch, so its runtime libraries
 // must remain resolvable from the private copy's location.
 type ManagedGGUFConfig struct {
-	ModelPath    string
-	ModelSHA256  string
+	ModelPath   string
+	ModelSHA256 string
+	// ModelSize, when positive, is the expected byte length of the GGUF.
+	ModelSize    int64
 	ServerPath   string
 	ServerSHA256 string
 }
@@ -68,6 +70,9 @@ func NewManagedGGUF(ctx context.Context, config ManagedGGUFConfig) (*ManagedGGUF
 	if !validSHA256(config.ModelSHA256) || !validSHA256(config.ServerSHA256) {
 		return nil, fmt.Errorf("%w: expected SHA-256", ErrInvalidConfig)
 	}
+	if config.ModelSize < 0 || config.ModelSize == 1<<63-1 {
+		return nil, fmt.Errorf("%w: expected model size", ErrInvalidConfig)
+	}
 	if !validAbsolutePath(config.ModelPath) || !validAbsolutePath(config.ServerPath) {
 		return nil, fmt.Errorf("%w: absolute model and server paths required", ErrInvalidConfig)
 	}
@@ -83,10 +88,10 @@ func NewManagedGGUF(ctx context.Context, config ManagedGGUFConfig) (*ManagedGGUF
 	}()
 	modelPath := filepath.Join(dir, "model.gguf")
 	serverPath := filepath.Join(dir, "llama-server")
-	if err := copyVerifiedFile(config.ModelPath, modelPath, config.ModelSHA256, false); err != nil {
+	if err := copyVerifiedFile(config.ModelPath, modelPath, config.ModelSHA256, config.ModelSize, false); err != nil {
 		return nil, err
 	}
-	if err := copyVerifiedFile(config.ServerPath, serverPath, config.ServerSHA256, true); err != nil {
+	if err := copyVerifiedFile(config.ServerPath, serverPath, config.ServerSHA256, 0, true); err != nil {
 		return nil, err
 	}
 	socketPath := filepath.Join(dir, "llama.sock")
@@ -149,7 +154,7 @@ func validAbsolutePath(path string) bool {
 	return path != "" && filepath.IsAbs(path) && filepath.Clean(path) == path && !strings.ContainsRune(path, 0)
 }
 
-func copyVerifiedFile(sourcePath, destinationPath, expected string, executable bool) error {
+func copyVerifiedFile(sourcePath, destinationPath, expected string, expectedSize int64, executable bool) error {
 	before, err := os.Lstat(sourcePath)
 	if err != nil || !before.Mode().IsRegular() {
 		return fmt.Errorf("%w: source must be a regular non-symlink file", ErrInvalidConfig)
@@ -171,10 +176,17 @@ func copyVerifiedFile(sourcePath, destinationPath, expected string, executable b
 		return fmt.Errorf("%w: create private file", ErrInvalidConfig)
 	}
 	hasher := sha256.New()
-	_, copyErr := io.Copy(io.MultiWriter(destination, hasher), source)
+	var reader io.Reader = source
+	if expectedSize > 0 {
+		reader = io.LimitReader(source, expectedSize+1)
+	}
+	copied, copyErr := io.Copy(io.MultiWriter(destination, hasher), reader)
 	closeErr := destination.Close()
 	if copyErr != nil || closeErr != nil {
 		return fmt.Errorf("%w: copy source file", ErrInvalidConfig)
+	}
+	if expectedSize > 0 && copied != expectedSize {
+		return ErrDigestMismatch
 	}
 	actual := "sha256:" + hex.EncodeToString(hasher.Sum(nil))
 	if actual != expected {

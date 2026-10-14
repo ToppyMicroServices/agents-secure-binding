@@ -126,8 +126,9 @@ func runOrchestrator(ctx context.Context, opts options, out outputWriter) (runEr
 			"--llama-server-path", opts.llamaServerPath,
 			"--llama-server-sha256", opts.llamaServerSHA256,
 			"--agent-b-gguf-path", opts.agentBGGUFPath,
-			"--agent-b-gguf-sha256", opts.agentBGGUFSHA256,
+			"--kubo-api-url", opts.kuboAPIURL,
 		)
+		agentBArgs = append(agentBArgs, modelPolicyArgs("agent-b-gguf", agentBModelPolicy(opts))...)
 	}
 	if strings.EqualFold(opts.attestationMode, modeSimulation) {
 		agentBArgs = append(agentBArgs, "--allow-simulation")
@@ -195,8 +196,9 @@ func agentAProcessArgs(opts options, stateDir, managerURL, attesterURL, verifier
 			"--llama-server-path", opts.llamaServerPath,
 			"--llama-server-sha256", opts.llamaServerSHA256,
 			"--agent-a-gguf-path", opts.agentAGGUFPath,
-			"--agent-a-gguf-sha256", opts.agentAGGUFSHA256,
+			"--kubo-api-url", opts.kuboAPIURL,
 		)
+		args = append(args, modelPolicyArgs("agent-a-gguf", agentAModelPolicy(opts))...)
 	}
 	if opts.reportFile != "" {
 		args = append(args, "--report", opts.reportFile)

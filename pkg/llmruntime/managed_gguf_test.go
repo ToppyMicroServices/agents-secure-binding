@@ -62,14 +62,16 @@ func TestManagedGGUFRejectsTamperedBytesBeforeLaunch(t *testing.T) {
 	for _, test := range []struct {
 		name         string
 		modelDigest  string
+		modelSize    int64
 		serverDigest string
 	}{
 		{name: "model bytes differ despite model label", modelDigest: testSHA256([]byte("expected GGUF bytes")), serverDigest: testSHA256(serverContents)},
 		{name: "server bytes differ", modelDigest: testSHA256(modelContents), serverDigest: testSHA256([]byte("expected server bytes"))},
+		{name: "manifest size differs", modelDigest: testSHA256(modelContents), modelSize: int64(len(modelContents) - 1), serverDigest: testSHA256(serverContents)},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			managed, err := NewManagedGGUF(context.Background(), ManagedGGUFConfig{
-				ModelPath: modelPath, ModelSHA256: test.modelDigest,
+				ModelPath: modelPath, ModelSHA256: test.modelDigest, ModelSize: test.modelSize,
 				ServerPath: serverPath, ServerSHA256: test.serverDigest,
 			})
 			if managed != nil || !errors.Is(err, ErrDigestMismatch) {
@@ -93,7 +95,7 @@ func TestManagedGGUFRejectsSymlinkAndNonregularSources(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, path := range []string{symlink, dir} {
-		if err := copyVerifiedFile(path, filepath.Join(dir, "copy.gguf"), testSHA256([]byte("GGUF")), false); !errors.Is(err, ErrInvalidConfig) {
+		if err := copyVerifiedFile(path, filepath.Join(dir, "copy.gguf"), testSHA256([]byte("GGUF")), 0, false); !errors.Is(err, ErrInvalidConfig) {
 			t.Fatalf("copyVerifiedFile(%q) error = %v; want ErrInvalidConfig", path, err)
 		}
 	}

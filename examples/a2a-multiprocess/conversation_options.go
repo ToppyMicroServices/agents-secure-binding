@@ -34,7 +34,7 @@ func validateAgentAConversationOptions(opts options) error {
 	if err := validateManagedServerOptions(opts); err != nil {
 		return err
 	}
-	if err := validateManagedModelOptions("Agent A", opts.agentAGGUFPath, opts.agentAGGUFSHA256); err != nil {
+	if err := validateManagedModelOptions("Agent A", opts.agentAGGUFPath, agentAModelPolicy(opts)); err != nil {
 		return err
 	}
 	return nil
@@ -47,7 +47,7 @@ func validateAgentBConversationOptions(opts options) error {
 	if err := validateManagedServerOptions(opts); err != nil {
 		return err
 	}
-	if err := validateManagedModelOptions("Agent B", opts.agentBGGUFPath, opts.agentBGGUFSHA256); err != nil {
+	if err := validateManagedModelOptions("Agent B", opts.agentBGGUFPath, agentBModelPolicy(opts)); err != nil {
 		return err
 	}
 	return nil
@@ -83,12 +83,24 @@ func validateManagedServerOptions(opts options) error {
 	return nil
 }
 
-func validateManagedModelOptions(name, path, digest string) error {
+func validateManagedModelOptions(name, path string, policy modelDigestPolicy) error {
 	if !validManagedFilePath(path) {
 		return fmt.Errorf("%s GGUF path must be an absolute clean path for llm-conversation", name)
 	}
-	if !validManagedSHA256(digest) {
-		return fmt.Errorf("%s GGUF SHA-256 must be sha256: followed by 64 lowercase hex characters", name)
+	if policy.ManifestCID == "" {
+		if policy.ManifestSHA256 != "" || policy.Repo != "" || policy.Revision != "" || policy.File != "" {
+			return fmt.Errorf("%s GGUF manifest settings require a CID", name)
+		}
+		if !validManagedSHA256(policy.DirectSHA256) {
+			return fmt.Errorf("%s GGUF SHA-256 must be sha256: followed by 64 lowercase hex characters", name)
+		}
+		return nil
+	}
+	if policy.DirectSHA256 != "" {
+		return fmt.Errorf("%s GGUF direct digest and DHT manifest are mutually exclusive", name)
+	}
+	if !validManagedSHA256(policy.ManifestSHA256) || policy.Repo == "" || policy.Revision == "" || policy.File == "" {
+		return fmt.Errorf("%s GGUF manifest requires a trusted digest and exact Hugging Face source", name)
 	}
 	return nil
 }

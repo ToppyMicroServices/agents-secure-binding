@@ -51,7 +51,7 @@ func runAgentAConversation(ctx context.Context, opts options, out outputWriter) 
 	if err != nil {
 		return err
 	}
-	generator, err := newConversationGenerator(ctx, opts.agentAGGUFPath, opts.agentAGGUFSHA256, opts.llamaServerPath, opts.llamaServerSHA256)
+	generator, err := newConversationGenerator(ctx, opts.agentAGGUFPath, agentAModelPolicy(opts), opts.kuboAPIURL, opts.llamaServerPath, opts.llamaServerSHA256)
 	if err != nil {
 		return fmt.Errorf("configure Agent A LLM: %w", err)
 	}
@@ -161,7 +161,7 @@ func runAgentAConversationV2(ctx context.Context, opts options, out outputWriter
 	if err != nil {
 		return err
 	}
-	generator, err := newConversationGenerator(ctx, opts.agentAGGUFPath, opts.agentAGGUFSHA256, opts.llamaServerPath, opts.llamaServerSHA256)
+	generator, err := newConversationGenerator(ctx, opts.agentAGGUFPath, agentAModelPolicy(opts), opts.kuboAPIURL, opts.llamaServerPath, opts.llamaServerSHA256)
 	if err != nil {
 		return fmt.Errorf("configure Agent A LLM: %w", err)
 	}
@@ -249,9 +249,13 @@ func runAgentAConversationV2(ctx context.Context, opts options, out outputWriter
 	return nil
 }
 
-func newConversationGenerator(ctx context.Context, modelPath, modelSHA256, serverPath, serverSHA256 string) (*llmruntime.ManagedGGUF, error) {
+func newConversationGenerator(ctx context.Context, modelPath string, policy modelDigestPolicy, kuboAPIURL, serverPath, serverSHA256 string) (*llmruntime.ManagedGGUF, error) {
+	modelSHA256, modelSize, err := resolveModelDigest(ctx, policy, kuboAPIURL)
+	if err != nil {
+		return nil, fmt.Errorf("resolve approved model digest: %w", err)
+	}
 	return llmruntime.NewManagedGGUF(ctx, llmruntime.ManagedGGUFConfig{
-		ModelPath: modelPath, ModelSHA256: modelSHA256,
+		ModelPath: modelPath, ModelSHA256: modelSHA256, ModelSize: modelSize,
 		ServerPath: serverPath, ServerSHA256: serverSHA256,
 	})
 }

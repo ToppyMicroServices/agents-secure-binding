@@ -166,6 +166,13 @@ hexadecimal characters each. Then run:
   --agent-b-gguf-sha256 "sha256:${AGENT_B_GGUF_SHA256}"
 ```
 
+Alternatively, each Agent can resolve its expected GGUF digest from a
+[locally approved IPFS manifest](../../docs/llm-gguf-ipfs-manifest.md). The
+manifest is fetched through local Kubo, checked against a verifier-pinned
+digest and exact Hugging Face repository commit and file path, then passed to
+the same pre-launch byte check. This is an optional way to distribute approved
+hashes; the verifier must still establish trust in the manifest independently.
+
 The prompt goes to Agent A's model. Its output becomes an ASB-bound A2A
 request. Agent B completes the normal transport, grant, session-binding,
 attestation, authorization, and replay checks before calling its model. The

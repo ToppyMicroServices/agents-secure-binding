@@ -45,8 +45,19 @@ type options struct {
 	llamaServerSHA256        string
 	agentAGGUFPath           string
 	agentAGGUFSHA256         string
+	agentAGGUFManifestCID    string
+	agentAGGUFManifestSHA256 string
+	agentAGGUFRepo           string
+	agentAGGUFRevision       string
+	agentAGGUFFile           string
 	agentBGGUFPath           string
 	agentBGGUFSHA256         string
+	agentBGGUFManifestCID    string
+	agentBGGUFManifestSHA256 string
+	agentBGGUFRepo           string
+	agentBGGUFRevision       string
+	agentBGGUFFile           string
+	kuboAPIURL               string
 	agentALLMURL             string
 	agentALLMModel           string
 	agentAAPIKeyEnv          string
@@ -126,8 +137,19 @@ func parseFlags() options {
 	flag.StringVar(&opts.llamaServerSHA256, "llama-server-sha256", "", "trusted llama-server digest (sha256:<64 lowercase hex>)")
 	flag.StringVar(&opts.agentAGGUFPath, "agent-a-gguf-path", "", "absolute path to Agent A local GGUF model")
 	flag.StringVar(&opts.agentAGGUFSHA256, "agent-a-gguf-sha256", "", "trusted Agent A GGUF digest (sha256:<64 lowercase hex>)")
+	flag.StringVar(&opts.agentAGGUFManifestCID, "agent-a-gguf-manifest-cid", "", "IPFS CID of Agent A's approved GGUF manifest")
+	flag.StringVar(&opts.agentAGGUFManifestSHA256, "agent-a-gguf-manifest-sha256", "", "trusted SHA-256 of Agent A's manifest bytes")
+	flag.StringVar(&opts.agentAGGUFRepo, "agent-a-gguf-repo", "", "expected Hugging Face repository for Agent A")
+	flag.StringVar(&opts.agentAGGUFRevision, "agent-a-gguf-revision", "", "expected full Hugging Face commit for Agent A")
+	flag.StringVar(&opts.agentAGGUFFile, "agent-a-gguf-file", "", "expected GGUF file path in Agent A's Hugging Face repository")
 	flag.StringVar(&opts.agentBGGUFPath, "agent-b-gguf-path", "", "absolute path to Agent B local GGUF model")
 	flag.StringVar(&opts.agentBGGUFSHA256, "agent-b-gguf-sha256", "", "trusted Agent B GGUF digest (sha256:<64 lowercase hex>)")
+	flag.StringVar(&opts.agentBGGUFManifestCID, "agent-b-gguf-manifest-cid", "", "IPFS CID of Agent B's approved GGUF manifest")
+	flag.StringVar(&opts.agentBGGUFManifestSHA256, "agent-b-gguf-manifest-sha256", "", "trusted SHA-256 of Agent B's manifest bytes")
+	flag.StringVar(&opts.agentBGGUFRepo, "agent-b-gguf-repo", "", "expected Hugging Face repository for Agent B")
+	flag.StringVar(&opts.agentBGGUFRevision, "agent-b-gguf-revision", "", "expected full Hugging Face commit for Agent B")
+	flag.StringVar(&opts.agentBGGUFFile, "agent-b-gguf-file", "", "expected GGUF file path in Agent B's Hugging Face repository")
+	flag.StringVar(&opts.kuboAPIURL, "kubo-api-url", "http://127.0.0.1:5001", "loopback Kubo RPC URL for approved GGUF manifests")
 	flag.StringVar(&opts.agentALLMURL, "agent-a-llm-url", "", "deprecated: unverified OpenAI-compatible endpoints are rejected for llm-conversation")
 	flag.StringVar(&opts.agentALLMModel, "agent-a-llm-model", "", "deprecated: model IDs cannot verify model weights")
 	flag.StringVar(&opts.agentAAPIKeyEnv, "agent-a-api-key-env", "ASB_AGENT_A_LLM_API_KEY", "deprecated: ignored for local llm-conversation")
