@@ -109,7 +109,7 @@ func NewManagedGGUF(ctx context.Context, config ManagedGGUFConfig) (*ManagedGGUF
 		Transport:     transport,
 		CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return errRedirect },
 	}
-	endpoint := &url.URL{Scheme: "http", Host: "asb-managed.invalid", Path: "/v1/chat/completions"}
+	endpoint := &url.URL{Scheme: httpScheme, Host: "asb-managed.invalid", Path: "/v1/chat/completions"}
 	generator := &openAICompatible{endpoint: endpoint, model: managedModelAlias, client: client}
 	command := exec.CommandContext(ctx, serverPath,
 		"--model", modelPath,

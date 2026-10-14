@@ -21,6 +21,7 @@ import (
 )
 
 const (
+	httpScheme       = "http"
 	maxHTTPBodyBytes = 256 * 1024
 	maxModelBytes    = 512
 	maxSystemBytes   = 64 * 1024
@@ -147,7 +148,7 @@ func newOpenAICompatible(config Config) (Generator, error) {
 			return errRedirect
 		},
 	}
-	if endpoint.Scheme == "http" {
+	if endpoint.Scheme == httpScheme {
 		transport := http.DefaultTransport.(*http.Transport).Clone()
 		transport.Proxy = nil
 		transport.DialContext = loopbackDialContext(net.DefaultResolver.LookupIPAddr, (&net.Dialer{
@@ -172,7 +173,7 @@ func completionEndpoint(raw string, allowInsecureLoopback bool) (*url.URL, error
 	}
 	switch strings.ToLower(parsed.Scheme) {
 	case "https":
-	case "http":
+	case httpScheme:
 		if !allowInsecureLoopback || !isLoopbackHost(parsed.Hostname()) {
 			return nil, fmt.Errorf("%w: cleartext HTTP requires explicit loopback permission", ErrInvalidConfig)
 		}

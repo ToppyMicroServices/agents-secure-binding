@@ -146,7 +146,7 @@ func rawSHA256CID(value string) ([sha256.Size]byte, error) {
 
 func localKuboAddress(raw string) (string, error) {
 	parsed, err := url.Parse(raw)
-	if err != nil || parsed.Scheme != "http" || parsed.Host == "" || parsed.User != nil ||
+	if err != nil || parsed.Scheme != httpScheme || parsed.Host == "" || parsed.User != nil ||
 		parsed.Path != "" || parsed.RawPath != "" || parsed.RawQuery != "" || parsed.ForceQuery ||
 		parsed.Fragment != "" || strings.Contains(raw, "#") || parsed.Opaque != "" {
 		return "", fmt.Errorf("%w: Kubo RPC must be a loopback HTTP origin", ErrInvalidConfig)
