@@ -40,12 +40,20 @@ This follows the Task identifier rules in the
 
 ## Selected LLM conversation
 
-The optional `llm-conversation` workflow connects one configured model to each
-Agent runtime. Agent A generates the request text before ASB binds the complete
-A2A request. Agent B calls its model only after the normal verification and
-replay checks succeed. This is one round trip and does not add model provenance
-or a reverse-direction ASB signature. It supports Direct-Agent v1 and the
-experimental repository-local `draft06-v2` profile.
+The optional `llm-conversation` workflow uses one locally managed, single-file
+GGUF model for each Agent. Before either server starts, ASB compares the file's
+SHA-256 digest and the `llama-server` executable's digest with operator-supplied
+expected values. These values should come from an independently reviewed
+record. Missing or mismatched values stop the run. Agent A generates the
+request text before ASB binds the complete A2A request. Agent B calls its model
+only after the normal verification and replay checks succeed. This is one round
+trip and supports Direct-Agent v1 and the experimental repository-local
+`draft06-v2` profile.
+
+The digest check is local to each Agent and assumes a trusted host OS and
+model-server runtime. The A2A message and report do not carry model measurement
+evidence, and the reply has no reverse-direction ASB signature. A successful
+run therefore does not prove model provenance to the remote Agent.
 
 ## Result contract
 

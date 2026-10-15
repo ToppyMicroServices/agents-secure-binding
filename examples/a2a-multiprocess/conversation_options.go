@@ -7,11 +7,28 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
+	"time"
 	"unicode/utf8"
 )
 
-const maxConversationPromptBytes = 64 * 1024
+const (
+	maxConversationPromptBytes        = 64 * 1024
+	defaultConversationRequestTimeout = 20 * time.Second
+	maxConversationRequestTimeout     = 10 * time.Minute
+)
+
+func conversationRequestTimeout(opts options) time.Duration {
+	if opts.llmRequestTimeout == 0 {
+		return defaultConversationRequestTimeout
+	}
+	return opts.llmRequestTimeout
+}
+
+func conversationA2ATimeout(opts options) time.Duration {
+	return conversationRequestTimeout(opts) + 15*time.Second
+}
 
 func validateConversationOptions(opts options) error {
 	if err := validateAgentAConversationOptions(opts); err != nil {
@@ -20,37 +37,143 @@ func validateConversationOptions(opts options) error {
 	if err := validateAgentBConversationOptions(opts); err != nil {
 		return err
 	}
-	if opts.agentAAPIKeyEnv == opts.agentBAPIKeyEnv {
-		return fmt.Errorf("Agent A and Agent B API keys must use different environment variable names")
-	}
-	redisSecret := effectiveRedisPasswordEnv(opts.redisPasswordEnv)
-	if redisSecret == opts.agentAAPIKeyEnv || redisSecret == opts.agentBAPIKeyEnv {
-		return fmt.Errorf("Redis and LLM credentials must use different environment variable names")
-	}
 	return nil
 }
 
 func validateAgentAConversationOptions(opts options) error {
+	if err := rejectUnverifiedConversationOptions(opts); err != nil {
+		return err
+	}
 	if opts.promptFile == "" {
 		return fmt.Errorf("prompt file is required for llm-conversation")
 	}
-	if opts.agentALLMURL == "" || opts.agentALLMModel == "" {
-		return fmt.Errorf("Agent A LLM URL and model are required for llm-conversation")
+	return validateConversationModelOptions(opts, "Agent A", agentAModelConfig(opts))
+}
+
+func validateAgentBConversationOptions(opts options) error {
+	if err := rejectUnverifiedConversationOptions(opts); err != nil {
+		return err
 	}
-	if !validEnvironmentName(opts.agentAAPIKeyEnv) {
-		return fmt.Errorf("Agent A API key environment variable name is invalid")
+	return validateConversationModelOptions(opts, "Agent B", agentBModelConfig(opts))
+}
+
+func rejectUnverifiedConversationOptions(opts options) error {
+	for _, legacy := range []struct {
+		flag  string
+		value string
+	}{
+		{"--agent-a-llm-url", opts.agentALLMURL},
+		{"--agent-a-llm-model", opts.agentALLMModel},
+		{"--agent-b-llm-url", opts.agentBLLMURL},
+		{"--agent-b-llm-model", opts.agentBLLMModel},
+	} {
+		if legacy.value != "" {
+			return fmt.Errorf("%s cannot be used for llm-conversation: model weights cannot be verified through an external endpoint", legacy.flag)
+		}
+	}
+	if opts.allowInsecureLLMLoopback {
+		return fmt.Errorf("--allow-insecure-llm-loopback cannot be used for llm-conversation")
 	}
 	return nil
 }
 
-func validateAgentBConversationOptions(opts options) error {
-	if opts.agentBLLMURL == "" || opts.agentBLLMModel == "" {
-		return fmt.Errorf("Agent B LLM URL and model are required for llm-conversation")
+func validateManagedServerOptions(opts options) error {
+	if !validManagedFilePath(opts.llamaServerPath) {
+		return fmt.Errorf("--llama-server-path must be an absolute clean path for llm-conversation")
 	}
-	if !validEnvironmentName(opts.agentBAPIKeyEnv) {
-		return fmt.Errorf("Agent B API key environment variable name is invalid")
+	if !validManagedSHA256(opts.llamaServerSHA256) {
+		return fmt.Errorf("--llama-server-sha256 must be sha256: followed by 64 lowercase hex characters")
 	}
 	return nil
+}
+
+func validateConversationModelOptions(opts options, name string, config conversationModelConfig) error {
+	if opts.llmRequestTimeout <= 0 || opts.llmRequestTimeout > maxConversationRequestTimeout {
+		return fmt.Errorf("--llm-request-timeout must be positive and at most 10m")
+	}
+	if err := validatePythonOptions(opts); err != nil {
+		return err
+	}
+	if !config.usesBundle() {
+		if err := validateManagedServerOptions(opts); err != nil {
+			return err
+		}
+		return validateManagedModelOptions(name, config.GGUFPath, config.GGUFPolicy)
+	}
+	if config.GGUFPath != "" || config.GGUFPolicy != (modelDigestPolicy{}) {
+		return fmt.Errorf("%s model bundle and legacy GGUF settings are mutually exclusive", name)
+	}
+	if opts.llamaServerPath != "" || opts.llamaServerSHA256 != "" {
+		if err := validateManagedServerOptions(opts); err != nil {
+			return err
+		}
+	}
+	if !validManagedFilePath(config.Bundle.RootPath) {
+		return fmt.Errorf("%s model directory must be an absolute clean path", name)
+	}
+	if (config.Bundle.ManifestPath == "") == (config.Bundle.ManifestCID == "") {
+		return fmt.Errorf("%s model bundle requires exactly one local manifest or manifest CID", name)
+	}
+	if config.Bundle.ManifestPath != "" && !validManagedFilePath(config.Bundle.ManifestPath) {
+		return fmt.Errorf("%s model manifest must be an absolute clean path", name)
+	}
+	if !validManagedSHA256(config.Bundle.ManifestSHA256) {
+		return fmt.Errorf("%s model manifest requires a trusted SHA-256 digest", name)
+	}
+	return nil
+}
+
+func validatePythonOptions(opts options) error {
+	if opts.pythonPath != "" || opts.pythonSHA256 != "" || opts.pythonSitePackages != "" {
+		if !validManagedFilePath(opts.pythonPath) || !validManagedSHA256(opts.pythonSHA256) ||
+			!validManagedFilePath(opts.pythonSitePackages) {
+			return fmt.Errorf("Python runtime requires absolute clean --python-path and --python-site-packages paths and a trusted --python-sha256 digest")
+		}
+	}
+	switch opts.transformersDevice {
+	case "", "cpu", "cuda", "mps":
+		return nil
+	default:
+		return fmt.Errorf("--transformers-device must be cpu, cuda, or mps")
+	}
+}
+
+func validateManagedModelOptions(name, path string, policy modelDigestPolicy) error {
+	if !validManagedFilePath(path) {
+		return fmt.Errorf("%s GGUF path must be an absolute clean path for llm-conversation", name)
+	}
+	if policy.ManifestCID == "" {
+		if policy.ManifestSHA256 != "" || policy.Repo != "" || policy.Revision != "" || policy.File != "" {
+			return fmt.Errorf("%s GGUF manifest settings require a CID", name)
+		}
+		if !validManagedSHA256(policy.DirectSHA256) {
+			return fmt.Errorf("%s GGUF SHA-256 must be sha256: followed by 64 lowercase hex characters", name)
+		}
+		return nil
+	}
+	if policy.DirectSHA256 != "" {
+		return fmt.Errorf("%s GGUF direct digest and DHT manifest are mutually exclusive", name)
+	}
+	if !validManagedSHA256(policy.ManifestSHA256) || policy.Repo == "" || policy.Revision == "" || policy.File == "" {
+		return fmt.Errorf("%s GGUF manifest requires a trusted digest and exact Hugging Face source", name)
+	}
+	return nil
+}
+
+func validManagedFilePath(path string) bool {
+	return path != "" && filepath.IsAbs(path) && filepath.Clean(path) == path && !strings.ContainsRune(path, 0)
+}
+
+func validManagedSHA256(value string) bool {
+	if len(value) != len("sha256:")+64 || !strings.HasPrefix(value, "sha256:") {
+		return false
+	}
+	for _, digit := range value[len("sha256:"):] {
+		if (digit < '0' || digit > '9') && (digit < 'a' || digit > 'f') {
+			return false
+		}
+	}
+	return true
 }
 
 func readConversationPrompt(path string) (string, error) {
@@ -84,28 +207,15 @@ func orchestratorChildEnvironment(opts options, role string) ([]string, error) {
 	if !validEnvironmentName(redisSecret) {
 		return nil, fmt.Errorf("Redis password environment variable name is invalid")
 	}
-	secretNames := []string{redisSecret}
+	for _, legacyName := range []string{opts.agentAAPIKeyEnv, opts.agentBAPIKeyEnv} {
+		if legacyName != "" && !validEnvironmentName(legacyName) {
+			return nil, fmt.Errorf("legacy LLM API key environment variable name is invalid")
+		}
+	}
+	secretNames := []string{redisSecret, "ASB_AGENT_A_LLM_API_KEY", "ASB_AGENT_B_LLM_API_KEY", opts.agentAAPIKeyEnv, opts.agentBAPIKeyEnv}
 	allowed := ""
 	if effectiveAcceptanceStore(opts.acceptanceStore) == acceptanceStoreRedis && role == "replay" {
 		allowed = redisSecret
-	}
-	if effectiveWorkflow(opts.workflow) == workflowLLMConversation {
-		if !validEnvironmentName(opts.agentAAPIKeyEnv) || !validEnvironmentName(opts.agentBAPIKeyEnv) {
-			return nil, fmt.Errorf("LLM API key environment variable name is invalid")
-		}
-		if opts.agentAAPIKeyEnv == opts.agentBAPIKeyEnv {
-			return nil, fmt.Errorf("Agent A and Agent B API keys must use different environment variable names")
-		}
-		if redisSecret == opts.agentAAPIKeyEnv || redisSecret == opts.agentBAPIKeyEnv {
-			return nil, fmt.Errorf("Redis and LLM credentials must use different environment variable names")
-		}
-		secretNames = append(secretNames, opts.agentAAPIKeyEnv, opts.agentBAPIKeyEnv)
-		switch role {
-		case demoAgentIssuer:
-			allowed = opts.agentAAPIKeyEnv
-		case demoAudience:
-			allowed = opts.agentBAPIKeyEnv
-		}
 	}
 	return isolateSecretEnvironment(os.Environ(), allowed, secretNames...), nil
 }

@@ -121,6 +121,10 @@ jobs:
       - name: Create coverage directory
         run: mkdir -p coverage
 
+      - name: Test managed Transformers request and loading policy
+        if: matrix.module == 'pkg'
+        run: python3 -B -m unittest discover -s pkg/llmruntime -p 'transformers_server_test.py'
+
       - name: Run tests for ${{ matrix.module }}
         run: |
           if [[ "${{ matrix.module }}" == "manager" ]]; then

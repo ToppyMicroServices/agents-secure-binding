@@ -130,23 +130,13 @@ func TestConversationWorkflowSelectedLLMsRoundTripV2(t *testing.T) {
 		t.Skip("multiprocess loopback test disabled in short mode")
 	}
 	const (
-		agentAModel   = "fixture-agent-a-v2"
-		agentBModel   = "fixture-agent-b-v2"
-		agentAKeyName = "ASB_TEST_V2_AGENT_A_LLM_API_KEY"
-		agentBKeyName = "ASB_TEST_V2_AGENT_B_LLM_API_KEY"
-		agentAKey     = "agent-a-v2-private-key-sentinel"
-		agentBKey     = "agent-b-v2-private-key-sentinel"
-		prompt        = "Prepare a draft-06 request for the authorized document."
-		agentAOutput  = "A-V2-LLM-SENTINEL::bound-message"
-		agentBOutput  = "B-V2-LLM-SENTINEL::returned-artifact"
+		prompt       = "Prepare a draft-06 request for the authorized document."
+		agentAOutput = "A-V2-LLM-SENTINEL::bound-message"
+		agentBOutput = "B-V2-LLM-SENTINEL::returned-artifact"
 	)
 
-	agentARuntime := newFakeChatRuntime(t, agentAModel, agentAKey, agentAOutput)
-	defer agentARuntime.Close()
-	agentBRuntime := newFakeChatRuntime(t, agentBModel, agentBKey, agentBOutput)
-	defer agentBRuntime.Close()
-
 	temporaryDirectory := t.TempDir()
+	fixture := newManagedConversationFixture(t, temporaryDirectory, agentAOutput, agentBOutput)
 	promptPath := filepath.Join(temporaryDirectory, "prompt.txt")
 	if err := os.WriteFile(promptPath, []byte(prompt), 0o600); err != nil {
 		t.Fatal(err)
@@ -164,17 +154,11 @@ func TestConversationWorkflowSelectedLLMsRoundTripV2(t *testing.T) {
 		"--workflow", workflowLLMConversation,
 		"--binding-profile", bindingProfileDraft06V2,
 		"--prompt-file", promptPath,
-		"--agent-a-llm-url", agentARuntime.URL,
-		"--agent-a-llm-model", agentAModel,
-		"--agent-a-api-key-env", agentAKeyName,
-		"--agent-b-llm-url", agentBRuntime.URL,
-		"--agent-b-llm-model", agentBModel,
-		"--agent-b-api-key-env", agentBKeyName,
-		"--allow-insecure-llm-loopback",
+	)
+	run.Args = append(run.Args, fixture.arguments()...)
+	run.Args = append(run.Args,
 		"--report", reportPath,
 	)
-	baseEnvironment := isolateSecretEnvironment(os.Environ(), "", agentAKeyName, agentBKeyName)
-	run.Env = append(baseEnvironment, agentAKeyName+"="+agentAKey, agentBKeyName+"="+agentBKey)
 	output, err := run.CombinedOutput()
 	if err != nil {
 		t.Fatalf("run draft-06 A2A LLM conversation: %v\n%s", err, output)
@@ -183,19 +167,13 @@ func TestConversationWorkflowSelectedLLMsRoundTripV2(t *testing.T) {
 		t.Fatalf("conversation stdout did not contain Agent B output\n%s", output)
 	}
 
-	if got := agentARuntime.Calls(); got != 1 {
-		t.Fatalf("Agent A LLM calls = %d, want 1", got)
-	}
-	if got := agentBRuntime.Calls(); got != 1 {
-		t.Fatalf("Agent B LLM calls = %d, want 1", got)
-	}
-	agentARequests := agentARuntime.Requests()
-	agentBRequests := agentBRuntime.Requests()
+	agentARequests := readFakeLlamaTrace(t, fixture.agentATracePath)
+	agentBRequests := readFakeLlamaTrace(t, fixture.agentBTracePath)
 	if len(agentARequests) != 1 || len(agentBRequests) != 1 {
 		t.Fatalf("recorded requests = A:%d B:%d, want one each", len(agentARequests), len(agentBRequests))
 	}
-	assertChatRequest(t, agentARequests[0], agentAModel, agentAKey, agentASystemPrompt, prompt)
-	assertChatRequest(t, agentBRequests[0], agentBModel, agentBKey, agentBSystemPrompt, agentAOutput)
+	assertManagedChatRequest(t, agentARequests[0], agentASystemPrompt, prompt)
+	assertManagedChatRequest(t, agentBRequests[0], agentBSystemPrompt, agentAOutput)
 
 	reportBytes, err := os.ReadFile(reportPath)
 	if err != nil {
@@ -208,7 +186,7 @@ func TestConversationWorkflowSelectedLLMsRoundTripV2(t *testing.T) {
 			report.Profile, report.Status, report.Summary, len(report.Scenarios))
 	}
 	for _, privateValue := range []string{
-		agentAKey, agentBKey, prompt, agentAOutput, agentBOutput, agentARuntime.URL, agentBRuntime.URL,
+		prompt, agentAOutput, agentBOutput, fixture.agentAPath, fixture.agentBPath,
 	} {
 		if bytes.Contains(reportBytes, []byte(privateValue)) {
 			t.Fatalf("conversation report disclosed %q", privateValue)

@@ -87,7 +87,12 @@ func runOrchestrator(ctx context.Context, opts options, out outputWriter) (runEr
 		if err != nil {
 			return "", err
 		}
-		process, rawURL, err := startServerProcess(ctx, executable, stateDir, name, childEnv, extra...)
+		readinessTimeout := 8 * time.Second
+		if name == demoAudience && opts.workflow == workflowLLMConversation {
+			// Verified model copying and loading can outlast the normal server startup window.
+			readinessTimeout = 7 * time.Minute
+		}
+		process, rawURL, err := startServerProcess(ctx, executable, stateDir, name, childEnv, readinessTimeout, extra...)
 		if err != nil {
 			return "", err
 		}
@@ -116,15 +121,8 @@ func runOrchestrator(ctx context.Context, opts options, out outputWriter) (runEr
 	}
 	agentBArgs := []string{"--replay-url", replayURL, "--expected-measurement-hex", opts.expectedMeasurementHex, "--binding-profile", opts.bindingProfile}
 	if opts.workflow == workflowLLMConversation {
-		agentBArgs = append(agentBArgs,
-			"--workflow", opts.workflow,
-			"--agent-b-llm-url", opts.agentBLLMURL,
-			"--agent-b-llm-model", opts.agentBLLMModel,
-			"--agent-b-api-key-env", opts.agentBAPIKeyEnv,
-		)
-		if opts.allowInsecureLLMLoopback {
-			agentBArgs = append(agentBArgs, "--allow-insecure-llm-loopback")
-		}
+		agentBArgs = append(agentBArgs, "--workflow", opts.workflow)
+		agentBArgs = append(agentBArgs, conversationModelArgs(opts, "agent-b", agentBModelConfig(opts))...)
 	}
 	if strings.EqualFold(opts.attestationMode, modeSimulation) {
 		agentBArgs = append(agentBArgs, "--allow-simulation")
@@ -187,15 +185,8 @@ func agentAProcessArgs(opts options, stateDir, managerURL, attesterURL, verifier
 		"--format", opts.reportFormat,
 	}
 	if opts.workflow == workflowLLMConversation {
-		args = append(args,
-			"--prompt-file", opts.promptFile,
-			"--agent-a-llm-url", opts.agentALLMURL,
-			"--agent-a-llm-model", opts.agentALLMModel,
-			"--agent-a-api-key-env", opts.agentAAPIKeyEnv,
-		)
-		if opts.allowInsecureLLMLoopback {
-			args = append(args, "--allow-insecure-llm-loopback")
-		}
+		args = append(args, "--prompt-file", opts.promptFile)
+		args = append(args, conversationModelArgs(opts, "agent-a", agentAModelConfig(opts))...)
 	}
 	if opts.reportFile != "" {
 		args = append(args, "--report", opts.reportFile)
@@ -203,7 +194,7 @@ func agentAProcessArgs(opts options, stateDir, managerURL, attesterURL, verifier
 	return args
 }
 
-func startServerProcess(parent context.Context, executable, stateDir, role string, environment []string, extra ...string) (*childProcess, string, error) {
+func startServerProcess(parent context.Context, executable, stateDir, role string, environment []string, readinessTimeout time.Duration, extra ...string) (*childProcess, string, error) {
 	readyFile := filepath.Join(stateDir, ".ready-"+role)
 	_ = os.Remove(readyFile)
 	ctx, cancel := context.WithCancel(parent)
@@ -224,7 +215,7 @@ func startServerProcess(parent context.Context, executable, stateDir, role strin
 		process.done <- process.cmd.Wait()
 	}()
 
-	timer := time.NewTimer(8 * time.Second)
+	timer := time.NewTimer(readinessTimeout)
 	defer timer.Stop()
 	ticker := time.NewTicker(20 * time.Millisecond)
 	defer ticker.Stop()

@@ -176,21 +176,33 @@ endpoints. It retains mTLS, exact session/request binding, signed
 attestation-result verification, and replay handling, but the evidence is
 explicitly labeled `SIMULATED`.
 
-To connect two local OpenAI-compatible model endpoints:
+To run the optional conversation with two locally pinned GGUF models, set
+`AGENT_A_GGUF_SHA256`, `AGENT_B_GGUF_SHA256`, and `LLAMA_SERVER_SHA256` to
+64-character lowercase SHA-256 hex values from an independently reviewed source:
 
 ```sh
 make a2a-test
 ./build/asb-a2a-test --debug-simple \
   --workflow llm-conversation \
   --prompt-file ./prompt.txt \
-  --agent-a-llm-url http://127.0.0.1:11434 \
-  --agent-a-llm-model model-a \
-  --agent-b-llm-url http://127.0.0.1:11434 \
-  --agent-b-llm-model model-b
+  --llama-server-path /path/to/llama-server \
+  --llama-server-sha256 "sha256:${LLAMA_SERVER_SHA256}" \
+  --agent-a-gguf-path /path/to/model-a.gguf \
+  --agent-a-gguf-sha256 "sha256:${AGENT_A_GGUF_SHA256}" \
+  --agent-b-gguf-path /path/to/model-b.gguf \
+  --agent-b-gguf-sha256 "sha256:${AGENT_B_GGUF_SHA256}"
 ```
 
-Both endpoints must use a loopback hostname. Proxy use and addresses resolving
-outside loopback are rejected. Do not use production credentials or data.
+ASB checks the model and server bytes before starting each local model server,
+then connects through a private Unix socket. A digest obtained from the same
+file at run time is not an independent expected value. The paths must be
+absolute, clean paths to regular, non-symlink files, and `llama-server` must be
+executable. Do not use production credentials or data in the debug lab.
+
+For Safetensors checkpoints, sharded weights, or an approved LoRA adapter,
+use an [approved model bundle](docs/llm-model-bundles.md). The manifest pins
+the complete base model and adapter combination, including its tokenizer and
+configuration files. The existing single-GGUF options above remain supported.
 
 The debug lab collects no SNP, TDX, TPM, or vTPM evidence. It is useful for
 protocol debugging on a MacBook; it is not hardware qualification. See the

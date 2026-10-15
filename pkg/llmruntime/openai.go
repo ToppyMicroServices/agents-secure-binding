@@ -21,6 +21,7 @@ import (
 )
 
 const (
+	httpScheme       = "http"
 	maxHTTPBodyBytes = 256 * 1024
 	maxModelBytes    = 512
 	maxSystemBytes   = 64 * 1024
@@ -50,21 +51,20 @@ var (
 
 var chatCompletionMemberNames = map[string]struct{}{
 	"id": {}, "object": {}, "created": {}, "model": {}, "choices": {},
-	"usage": {}, "system_fingerprint": {}, "service_tier": {},
+	"usage": {}, "system_fingerprint": {}, "service_tier": {}, "timings": {},
 	"index": {}, "message": {}, "logprobs": {}, "finish_reason": {},
 	"role": {}, "content": {}, "refusal": {}, "annotations": {},
 	"audio": {}, "tool_calls": {}, "function_call": {},
 }
 
 var chatCompletionOpaqueMembers = map[string]struct{}{
-	"usage": {}, "system_fingerprint": {}, "service_tier": {},
+	"usage": {}, "system_fingerprint": {}, "service_tier": {}, "timings": {},
 	"logprobs": {}, "finish_reason": {}, "refusal": {}, "annotations": {},
 	"audio": {}, "tool_calls": {}, "function_call": {},
 }
 
-// Config selects an OpenAI-compatible model endpoint. APIKey may be empty for
-// a local runtime. Cleartext HTTP is accepted only for an explicitly enabled
-// loopback endpoint.
+// Config describes an OpenAI-compatible model endpoint. External endpoints
+// cannot currently provide model-weight evidence accepted by ASB.
 type Config struct {
 	BaseURL               string
 	Model                 string
@@ -101,6 +101,7 @@ type chatCompletionResponse struct {
 	Usage             json.RawMessage `json:"usage,omitempty"`
 	SystemFingerprint json.RawMessage `json:"system_fingerprint,omitempty"`
 	ServiceTier       json.RawMessage `json:"service_tier,omitempty"`
+	Timings           json.RawMessage `json:"timings,omitempty"`
 }
 
 type chatChoice struct {
@@ -120,9 +121,15 @@ type chatResponseMessage struct {
 	FunctionCall json.RawMessage `json:"function_call,omitempty"`
 }
 
-// NewOpenAICompatible creates a provider-neutral Generator backed by the
-// OpenAI chat-completions wire format. It never follows redirects.
-func NewOpenAICompatible(config Config) (Generator, error) {
+// NewOpenAICompatible rejects external endpoints until ASB has a verifiable
+// provider evidence contract for the loaded model weights.
+func NewOpenAICompatible(_ Config) (Generator, error) {
+	return nil, fmt.Errorf("%w: OpenAI-compatible endpoints do not prove model weights", ErrInvalidConfig)
+}
+
+// newOpenAICompatible handles the wire format for the private, verified
+// ManagedGGUF server. It is not a public external-model entry point.
+func newOpenAICompatible(config Config) (Generator, error) {
 	endpoint, err := completionEndpoint(config.BaseURL, config.AllowInsecureLoopback)
 	if err != nil {
 		return nil, err
@@ -141,7 +148,7 @@ func NewOpenAICompatible(config Config) (Generator, error) {
 			return errRedirect
 		},
 	}
-	if endpoint.Scheme == "http" {
+	if endpoint.Scheme == httpScheme {
 		transport := http.DefaultTransport.(*http.Transport).Clone()
 		transport.Proxy = nil
 		transport.DialContext = loopbackDialContext(net.DefaultResolver.LookupIPAddr, (&net.Dialer{
@@ -166,7 +173,7 @@ func completionEndpoint(raw string, allowInsecureLoopback bool) (*url.URL, error
 	}
 	switch strings.ToLower(parsed.Scheme) {
 	case "https":
-	case "http":
+	case httpScheme:
 		if !allowInsecureLoopback || !isLoopbackHost(parsed.Hostname()) {
 			return nil, fmt.Errorf("%w: cleartext HTTP requires explicit loopback permission", ErrInvalidConfig)
 		}

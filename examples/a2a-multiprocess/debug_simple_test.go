@@ -8,13 +8,13 @@ import (
 	"testing"
 )
 
-func TestPrepareDebugSimpleEnablesOnlyLocalSimulationOptIns(t *testing.T) {
+func TestPrepareDebugSimpleEnablesOnlySimulation(t *testing.T) {
 	opts, err := prepareDebugSimple(debugSimpleTestOptions())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !opts.allowSimulation || !opts.allowInsecureLLMLoopback {
-		t.Fatalf("debug opt-ins = simulation:%v insecure-loopback:%v, want both true", opts.allowSimulation, opts.allowInsecureLLMLoopback)
+	if !opts.allowSimulation || opts.allowInsecureLLMLoopback {
+		t.Fatalf("debug opt-ins = simulation:%v insecure-loopback:%v, want only simulation", opts.allowSimulation, opts.allowInsecureLLMLoopback)
 	}
 }
 
@@ -49,40 +49,15 @@ func TestPrepareDebugSimpleRejectsNonlocalOrProductionOptions(t *testing.T) {
 	}
 }
 
-func TestPrepareDebugSimpleRequiresLoopbackConversationLLMs(t *testing.T) {
-	base := debugSimpleTestOptions()
-	base.workflow = workflowLLMConversation
-	base.agentALLMURL = "http://localhost:11434/v1"
-	base.agentBLLMURL = "http://[::1]:11435/v1"
-	if _, err := prepareDebugSimple(base); err != nil {
-		t.Fatalf("loopback LLM URLs rejected: %v", err)
+func TestPrepareDebugSimpleDoesNotEnableLegacyLLMTransport(t *testing.T) {
+	opts := debugSimpleTestOptions()
+	opts.workflow = workflowLLMConversation
+	prepared, err := prepareDebugSimple(opts)
+	if err != nil {
+		t.Fatal(err)
 	}
-
-	tests := []struct {
-		name      string
-		configure func(*options)
-		want      string
-	}{
-		{name: "Agent A remote", want: "Agent A LLM URL", configure: func(opts *options) { opts.agentALLMURL = "http://llm-a.example" }},
-		{name: "Agent B remote", want: "Agent B LLM URL", configure: func(opts *options) { opts.agentBLLMURL = "http://llm-b.example" }},
-		{name: "Agent A missing", want: "Agent A LLM URL", configure: func(opts *options) { opts.agentALLMURL = "" }},
-		{name: "Agent B missing", want: "Agent B LLM URL", configure: func(opts *options) { opts.agentBLLMURL = "" }},
-		{name: "HTTPS", want: "use HTTP", configure: func(opts *options) { opts.agentALLMURL = "https://localhost:11434" }},
-		{name: "non HTTP scheme", want: "use HTTP", configure: func(opts *options) { opts.agentALLMURL = "file://localhost/tmp/model" }},
-		{name: "malformed URL", want: "absolute HTTP URL", configure: func(opts *options) { opts.agentALLMURL = "http://[::1" }},
-		{name: "relative URL", want: "absolute HTTP URL", configure: func(opts *options) { opts.agentALLMURL = "//localhost:11434" }},
-		{name: "user information", want: "user information", configure: func(opts *options) { opts.agentALLMURL = "http://user@localhost:11434" }},
-		{name: "query", want: "a query", configure: func(opts *options) { opts.agentALLMURL = "http://localhost:11434?debug=1" }},
-		{name: "fragment", want: "a fragment", configure: func(opts *options) { opts.agentALLMURL = "http://localhost:11434#debug" }},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			opts := base
-			test.configure(&opts)
-			if _, err := prepareDebugSimple(opts); err == nil || !strings.Contains(err.Error(), test.want) {
-				t.Fatalf("prepareDebugSimple() error = %v, want error containing %q", err, test.want)
-			}
-		})
+	if prepared.allowInsecureLLMLoopback {
+		t.Fatal("debug-simple enabled the legacy HTTP LLM transport")
 	}
 }
 

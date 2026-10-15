@@ -116,25 +116,28 @@ labeled `SIMULATED`. That signature detects tampering within the demo trust
 setup; it is not an SNP, TDX, TPM, or vTPM quote and is not evidence of
 confidential execution.
 
-To use two OpenAI-compatible model servers on loopback, create `prompt.txt` and
-run, for example:
+To use two local single-file GGUF models, create `prompt.txt`, pin the reviewed
+SHA-256 digests of both model files and the `llama-server` executable, then run:
 
 ```sh
 ./build/asb-a2a-test --debug-simple \
   --workflow llm-conversation \
   --prompt-file ./prompt.txt \
-  --agent-a-llm-url http://127.0.0.1:11434 \
-  --agent-a-llm-model model-a \
-  --agent-b-llm-url http://127.0.0.1:11434 \
-  --agent-b-llm-model model-b
+  --llama-server-path /path/to/llama-server \
+  --llama-server-sha256 "sha256:${LLAMA_SERVER_SHA256}" \
+  --agent-a-gguf-path /path/to/model-a.gguf \
+  --agent-a-gguf-sha256 "sha256:${AGENT_A_GGUF_SHA256}" \
+  --agent-b-gguf-path /path/to/model-b.gguf \
+  --agent-b-gguf-sha256 "sha256:${AGENT_B_GGUF_SHA256}"
 ```
 
-Replace the model labels and ports as needed. In `--debug-simple` mode, both
-model URLs must use cleartext HTTP and a loopback hostname. The runtime disables
-proxy use and rejects any resolved address outside loopback. This workflow
-makes one ASB-bound request from Agent A to Agent B. The reply is authenticated
-by its TLS connection but is not a separately ASB-bound reverse-direction
-request.
+Set the three digest variables from a trusted, reviewed source before running;
+hashing the files under test and using those values as the expected policy in
+the same run would not check them against independent expectations. ASB checks
+the file bytes, starts one model server for each Agent, and connects through
+private Unix sockets. This workflow makes one ASB-bound request from Agent A
+to Agent B. The reply is authenticated by its TLS connection but is not a
+separately ASB-bound reverse-direction request.
 
 By default, the demo PKI, role keys, and file-backed state are placed in a
 temporary directory and removed after the run. If `--state-dir` is supplied,
@@ -146,52 +149,76 @@ establish hardware qualification or production readiness.
 
 ## Run two selected LLMs
 
-The `llm-conversation` workflow uses two OpenAI-compatible
-[Chat Completions](https://developers.openai.com/api/reference/cli/resources/chat/subresources/completions/methods/create)
-endpoints. When a provider requires authentication, set its API key in
-`ASB_AGENT_A_LLM_API_KEY` or `ASB_AGENT_B_LLM_API_KEY` with your shell or
-secret manager. A keyless local runtime may leave its variable unset. Then run:
+The `llm-conversation` workflow accepts local single-file GGUF models or
+[approved model bundles](../../docs/llm-model-bundles.md) containing Safetensors,
+sharded weights, and an optional LoRA adapter. For the single-GGUF path, supply
+two models and a pinned `llama-server` executable. Set the three digest
+variables from a trusted policy or reviewed release record. They must contain 64 lowercase
+hexadecimal characters each. Then run:
 
 ```sh
 ./build/asb-a2a-test \
   --workflow llm-conversation \
   --prompt-file ./prompt.txt \
-  --agent-a-llm-url https://provider-a.example \
-  --agent-a-llm-model model-a \
-  --agent-b-llm-url https://provider-b.example \
-  --agent-b-llm-model model-b
+  --llama-server-path /path/to/llama-server \
+  --llama-server-sha256 "sha256:${LLAMA_SERVER_SHA256}" \
+  --agent-a-gguf-path /path/to/model-a.gguf \
+  --agent-a-gguf-sha256 "sha256:${AGENT_A_GGUF_SHA256}" \
+  --agent-b-gguf-path /path/to/model-b.gguf \
+  --agent-b-gguf-sha256 "sha256:${AGENT_B_GGUF_SHA256}"
 ```
+
+Alternatively, each Agent can resolve its expected GGUF digest from a
+[locally approved IPFS manifest](../../docs/llm-gguf-ipfs-manifest.md). The
+manifest is fetched through local Kubo, checked against a verifier-pinned
+digest and exact Hugging Face repository commit and file path, then passed to
+the same pre-launch byte check. This is an optional way to distribute approved
+hashes; the verifier must still establish trust in the manifest independently.
 
 The prompt goes to Agent A's model. Its output becomes an ASB-bound A2A
 request. Agent B completes the normal transport, grant, session-binding,
 attestation, authorization, and replay checks before calling its model. The
 reply returns as a TLS-authenticated A2A text artifact.
 
-HTTPS is required. HTTP is accepted only for a local loopback endpoint when
-`--allow-insecure-llm-loopback` is set. The API key environment variable names
-can be changed with `--agent-a-api-key-env` and `--agent-b-api-key-env`; they
-must start with `ASB_` and remain different. The orchestrator passes each key
-only to its matching Agent child. Key values are not put in CLI arguments,
-reports, or logs.
+Before inference, ASB hashes the exact GGUF bytes while copying each model
+into a private directory and checks the pinned server executable. It launches
+the server with a fixed single-model command and talks to it through a private
+Unix socket. Missing or mismatched digests stop the run before any model call.
+The old external URL and model-ID flags are rejected for this workflow because
+an OpenAI-compatible response cannot prove the provider's model weights.
+The model and server paths must be absolute, clean paths to regular,
+non-symlink files; the server file must be executable. Resolve symlinked
+installation paths before use. The copies need temporary disk space roughly
+equal to both models plus two copies of the server binary. Use a self-contained
+`llama-server` build, or one whose shared libraries still resolve from the
+copied executable; shared libraries are not covered by the executable digest.
 
 With the default text format, stdout shows the Agent A request and Agent B
-reply. JSON reports contain only the workflow decision. This workflow supports
-both Direct-Agent v1 and the experimental `draft06-v2` profile, makes one round
-trip, and does not retry model calls. Select v2 with:
+reply. JSON reports contain run metadata and decisions, but no prompt, reply,
+or model digest. This workflow supports both Direct-Agent v1 and the
+experimental `draft06-v2` profile, makes one round trip, and does not retry
+model calls. Select v2 with:
 
 ```sh
 ./build/asb-a2a-test \
   --binding-profile draft06-v2 \
   --workflow llm-conversation \
   --prompt-file ./prompt.txt \
-  --agent-a-llm-url https://provider-a.example \
-  --agent-a-llm-model model-a \
-  --agent-b-llm-url https://provider-b.example \
-  --agent-b-llm-model model-b
+  --llama-server-path /path/to/llama-server \
+  --llama-server-sha256 "sha256:${LLAMA_SERVER_SHA256}" \
+  --agent-a-gguf-path /path/to/model-a.gguf \
+  --agent-a-gguf-sha256 "sha256:${AGENT_A_GGUF_SHA256}" \
+  --agent-b-gguf-path /path/to/model-b.gguf \
+  --agent-b-gguf-sha256 "sha256:${AGENT_B_GGUF_SHA256}"
 ```
 
-Model IDs are configured labels, not proof of model-weight provenance. Agent
-B's artifact is authenticated by the return TLS connection; it is not a
+For the single-GGUF path shown above, the checked digest covers that GGUF file,
+including its metadata. The bundle path also checks the declared configuration,
+tokenizer, shards, and optional adapter as one approved combination. These
+checks rely on the host OS and runtime dependencies; they do not attest a
+compromised host or an external provider. The digest is a local check, not
+proof sent to the other Agent.
+Agent B's artifact is authenticated by the return TLS connection; it is not a
 separately ASB-signed reverse-direction message. ASB does not establish the
 truth or safety of model-generated text.
 
