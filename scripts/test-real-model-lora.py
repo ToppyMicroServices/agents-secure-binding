@@ -196,9 +196,15 @@ def main():
     approval = json.loads(approval_path.read_text(encoding="utf-8"))
     if set(approval["approved_manifest_sha256"]) != {config[kind + "_manifest_sha256"] for kind in ("base", "lora")}:
         raise ValueError("test approval does not match the configured manifest pins")
-    runtime_diff = command_text(["git", "diff", "HEAD", "--", "pkg", "examples/a2a-multiprocess", "go.mod", "go.sum"], repo)
-    if runtime_diff:
-        raise ValueError("runtime tracked files differ from the recorded source commit")
+    # Include untracked inputs: git diff alone cannot detect extra source files
+    # that go build would compile into a binary attributed to this commit.
+    runtime_status = command_text([
+        "git", "status", "--porcelain=v1", "--untracked-files=all", "--",
+        "pkg", "internal", "schemas", "examples/a2a-multiprocess",
+        ":(top,glob)*.go", "attestation.bin", "go.mod", "go.sum", "go.work", "go.work.sum",
+    ], repo)
+    if runtime_status:
+        raise ValueError("runtime checkout has tracked or untracked changes: " + runtime_status)
     binary = output / "a2a-multiprocess"
     build_command = ["go", "build", "-o", str(binary), "./examples/a2a-multiprocess"]
     with (output / "build.log").open("wb") as log:
