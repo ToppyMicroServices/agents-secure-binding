@@ -65,13 +65,31 @@ func ResolvePinnedGGUFManifest(ctx context.Context, config PinnedGGUFManifestCon
 		!validHFRevision(config.ExpectedRevision) || !validGGUFPath(config.ExpectedPath) {
 		return GGUFManifest{}, fmt.Errorf("%w: pinned manifest policy", ErrInvalidConfig)
 	}
-	cidDigest, err := rawSHA256CID(config.CID)
-	if err != nil || "sha256:"+hex.EncodeToString(cidDigest[:]) != config.ManifestSHA256 {
-		return GGUFManifest{}, fmt.Errorf("%w: manifest CID and digest", ErrInvalidConfig)
-	}
-	address, err := localKuboAddress(config.KuboAPIURL)
+	block, err := fetchPinnedManifest(ctx, config.CID, config.ManifestSHA256, config.KuboAPIURL)
 	if err != nil {
 		return GGUFManifest{}, err
+	}
+	manifest, err := parseGGUFManifest(block)
+	if err != nil {
+		return GGUFManifest{}, err
+	}
+	if manifest.Repo != config.ExpectedRepo || manifest.Revision != config.ExpectedRevision || manifest.Path != config.ExpectedPath {
+		return GGUFManifest{}, fmt.Errorf("%w: source identity differs from policy", ErrInvalidManifest)
+	}
+	return manifest, nil
+}
+
+func fetchPinnedManifest(ctx context.Context, cid, expectedSHA256, kuboAPIURL string) ([]byte, error) {
+	if ctx == nil || ctx.Err() != nil || !validSHA256(expectedSHA256) {
+		return nil, fmt.Errorf("%w: pinned manifest policy", ErrInvalidConfig)
+	}
+	cidDigest, err := rawSHA256CID(cid)
+	if err != nil || "sha256:"+hex.EncodeToString(cidDigest[:]) != expectedSHA256 {
+		return nil, fmt.Errorf("%w: manifest CID and digest", ErrInvalidConfig)
+	}
+	address, err := localKuboAddress(kuboAPIURL)
+	if err != nil {
+		return nil, err
 	}
 	fetchCtx, cancel := context.WithTimeout(ctx, manifestFetchTimeout)
 	defer cancel()
@@ -90,35 +108,28 @@ func ResolvePinnedGGUFManifest(ctx context.Context, config PinnedGGUFManifestCon
 			return errRedirect
 		},
 	}
-	endpoint := "http://" + address + "/api/v0/block/get?arg=" + url.QueryEscape(config.CID)
+	endpoint := "http://" + address + "/api/v0/block/get?arg=" + url.QueryEscape(cid)
 	request, err := http.NewRequestWithContext(fetchCtx, http.MethodPost, endpoint, nil)
 	if err != nil {
-		return GGUFManifest{}, fmt.Errorf("%w: Kubo request", ErrInvalidConfig)
+		return nil, fmt.Errorf("%w: Kubo request", ErrInvalidConfig)
 	}
 	response, err := client.Do(request)
 	if err != nil {
-		return GGUFManifest{}, fmt.Errorf("%w: Kubo block fetch", ErrProvider)
+		return nil, fmt.Errorf("%w: Kubo block fetch", ErrProvider)
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
-		return GGUFManifest{}, fmt.Errorf("%w: Kubo block status %d", ErrProvider, response.StatusCode)
+		return nil, fmt.Errorf("%w: Kubo block status %d", ErrProvider, response.StatusCode)
 	}
 	block, err := io.ReadAll(io.LimitReader(response.Body, maxGGUFManifestBytes+1))
 	if err != nil || len(block) == 0 || len(block) > maxGGUFManifestBytes {
-		return GGUFManifest{}, fmt.Errorf("%w: Kubo block exceeds bounds", ErrInvalidManifest)
+		return nil, fmt.Errorf("%w: Kubo block exceeds bounds", ErrInvalidManifest)
 	}
 	digest := sha256.Sum256(block)
-	if "sha256:"+hex.EncodeToString(digest[:]) != config.ManifestSHA256 {
-		return GGUFManifest{}, ErrDigestMismatch
+	if "sha256:"+hex.EncodeToString(digest[:]) != expectedSHA256 {
+		return nil, ErrDigestMismatch
 	}
-	manifest, err := parseGGUFManifest(block)
-	if err != nil {
-		return GGUFManifest{}, err
-	}
-	if manifest.Repo != config.ExpectedRepo || manifest.Revision != config.ExpectedRevision || manifest.Path != config.ExpectedPath {
-		return GGUFManifest{}, fmt.Errorf("%w: source identity differs from policy", ErrInvalidManifest)
-	}
-	return manifest, nil
+	return block, nil
 }
 
 func rawSHA256CID(value string) ([sha256.Size]byte, error) {

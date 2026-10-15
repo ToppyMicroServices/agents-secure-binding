@@ -26,11 +26,23 @@ func TestConversationServerWriteTimeoutCoversModelCall(t *testing.T) {
 	if got := serverWriteTimeout(options{workflow: workflowLLMConversation}, "agent-b"); got != 30*time.Second {
 		t.Fatalf("conversation Agent B write timeout = %s, want 30s", got)
 	}
-	if conversationA2ATimeout != 35*time.Second {
-		t.Fatalf("conversation A2A timeout = %s, want 35s", conversationA2ATimeout)
+	if got := conversationA2ATimeout(options{}); got != 35*time.Second {
+		t.Fatalf("conversation A2A timeout = %s, want 35s", got)
 	}
 	if got := serverWriteTimeout(options{workflow: workflowSecurityTest}, "agent-b"); got != 10*time.Second {
 		t.Fatalf("security-test Agent B write timeout = %s, want 10s", got)
+	}
+	for _, timeout := range []time.Duration{time.Nanosecond, 2 * time.Minute, maxConversationRequestTimeout} {
+		opts := options{workflow: workflowLLMConversation, llmRequestTimeout: timeout}
+		if got := serverWriteTimeout(opts, "agent-b"); got != timeout+10*time.Second {
+			t.Errorf("Agent B write timeout = %s, want model timeout %s plus 10s", got, timeout)
+		}
+		if got := conversationA2ATimeout(opts); got != timeout+15*time.Second {
+			t.Errorf("A2A deadline = %s, want model timeout %s plus 15s", got, timeout)
+		}
+		if got := serverWriteTimeout(opts, "manager"); got != 10*time.Second {
+			t.Errorf("non-model service write timeout changed to %s", got)
+		}
 	}
 }
 
@@ -406,6 +418,7 @@ type fakeLlamaTrace struct {
 	ContentType   string          `json:"content_type"`
 	Authorization string          `json:"authorization"`
 	Request       fakeChatRequest `json:"request"`
+	AdapterSHA256 string          `json:"adapter_sha256,omitempty"`
 }
 
 type managedConversationFixture struct {

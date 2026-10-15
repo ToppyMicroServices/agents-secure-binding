@@ -149,9 +149,11 @@ establish hardware qualification or production readiness.
 
 ## Run two selected LLMs
 
-The `llm-conversation` workflow requires two local single-file GGUF models and
-a pinned `llama-server` executable. Set the three digest variables from a
-trusted policy or reviewed release record. They must contain 64 lowercase
+The `llm-conversation` workflow accepts local single-file GGUF models or
+[approved model bundles](../../docs/llm-model-bundles.md) containing Safetensors,
+sharded weights, and an optional LoRA adapter. For the single-GGUF path, supply
+two models and a pinned `llama-server` executable. Set the three digest
+variables from a trusted policy or reviewed release record. They must contain 64 lowercase
 hexadecimal characters each. Then run:
 
 ```sh
@@ -210,10 +212,12 @@ model calls. Select v2 with:
   --agent-b-gguf-sha256 "sha256:${AGENT_B_GGUF_SHA256}"
 ```
 
-The checked digest covers the single GGUF file, including metadata stored in
-that file. This check relies on the host OS and the pinned model-server runtime;
-it does not attest a compromised host, an external provider, or additional
-adapter files. The digest is a local check, not proof sent to the other Agent.
+For the single-GGUF path shown above, the checked digest covers that GGUF file,
+including its metadata. The bundle path also checks the declared configuration,
+tokenizer, shards, and optional adapter as one approved combination. These
+checks rely on the host OS and runtime dependencies; they do not attest a
+compromised host or an external provider. The digest is a local check, not
+proof sent to the other Agent.
 Agent B's artifact is authenticated by the return TLS connection; it is not a
 separately ASB-signed reverse-direction message. ASB does not establish the
 truth or safety of model-generated text.

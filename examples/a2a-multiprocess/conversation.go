@@ -20,7 +20,6 @@ const (
 	agentASystemPrompt       = "You are Agent A. Turn the user's goal into one concise plain-text request for Agent B. Return only the request."
 	agentBSystemPrompt       = "You are Agent B. Answer the verified request from Agent A in plain text. Do not claim access to data or tools you do not have."
 	maxConversationTextBytes = 128 * 1024
-	conversationA2ATimeout   = 35 * time.Second
 )
 
 func runAgentAConversation(ctx context.Context, opts options, out outputWriter) (runErr error) {
@@ -51,7 +50,7 @@ func runAgentAConversation(ctx context.Context, opts options, out outputWriter) 
 	if err != nil {
 		return err
 	}
-	generator, err := newConversationGenerator(ctx, opts.agentAGGUFPath, agentAModelPolicy(opts), opts.kuboAPIURL, opts.llamaServerPath, opts.llamaServerSHA256)
+	generator, err := newConversationGenerator(ctx, opts, agentAModelConfig(opts))
 	if err != nil {
 		return fmt.Errorf("configure Agent A LLM: %w", err)
 	}
@@ -115,7 +114,7 @@ func runAgentAConversation(ctx context.Context, opts options, out outputWriter) 
 		connection.close()
 		return err
 	}
-	result, err := connection.sendWithTimeout(request, a2aVersion, conversationA2ATimeout)
+	result, err := connection.sendWithTimeout(request, a2aVersion, conversationA2ATimeout(opts))
 	connection.close()
 	if err != nil {
 		return err
@@ -161,7 +160,7 @@ func runAgentAConversationV2(ctx context.Context, opts options, out outputWriter
 	if err != nil {
 		return err
 	}
-	generator, err := newConversationGenerator(ctx, opts.agentAGGUFPath, agentAModelPolicy(opts), opts.kuboAPIURL, opts.llamaServerPath, opts.llamaServerSHA256)
+	generator, err := newConversationGenerator(ctx, opts, agentAModelConfig(opts))
 	if err != nil {
 		return fmt.Errorf("configure Agent A LLM: %w", err)
 	}
@@ -231,7 +230,7 @@ func runAgentAConversationV2(ctx context.Context, opts options, out outputWriter
 		connection.close()
 		return err
 	}
-	result, err := connection.sendV2WithTimeout(request, conversationA2ATimeout)
+	result, err := connection.sendV2WithTimeout(request, conversationA2ATimeout(opts))
 	connection.close()
 	if err != nil {
 		return err
@@ -249,14 +248,24 @@ func runAgentAConversationV2(ctx context.Context, opts options, out outputWriter
 	return nil
 }
 
-func newConversationGenerator(ctx context.Context, modelPath string, policy modelDigestPolicy, kuboAPIURL, serverPath, serverSHA256 string) (*llmruntime.ManagedGGUF, error) {
-	modelSHA256, modelSize, err := resolveModelDigest(ctx, policy, kuboAPIURL)
+func newConversationGenerator(ctx context.Context, opts options, config conversationModelConfig) (*llmruntime.ManagedGGUF, error) {
+	if config.usesBundle() {
+		return llmruntime.NewManagedModel(ctx, llmruntime.ManagedModelConfig{
+			Bundle:     config.Bundle,
+			ServerPath: opts.llamaServerPath, ServerSHA256: opts.llamaServerSHA256,
+			PythonPath: opts.pythonPath, PythonSHA256: opts.pythonSHA256,
+			PythonSitePackages: opts.pythonSitePackages, Device: opts.transformersDevice,
+			RequestTimeout: conversationRequestTimeout(opts),
+		})
+	}
+	modelSHA256, modelSize, err := resolveModelDigest(ctx, config.GGUFPolicy, opts.kuboAPIURL)
 	if err != nil {
 		return nil, fmt.Errorf("resolve approved model digest: %w", err)
 	}
 	return llmruntime.NewManagedGGUF(ctx, llmruntime.ManagedGGUFConfig{
-		ModelPath: modelPath, ModelSHA256: modelSHA256, ModelSize: modelSize,
-		ServerPath: serverPath, ServerSHA256: serverSHA256,
+		ModelPath: config.GGUFPath, ModelSHA256: modelSHA256, ModelSize: modelSize,
+		ServerPath: opts.llamaServerPath, ServerSHA256: opts.llamaServerSHA256,
+		RequestTimeout: conversationRequestTimeout(opts),
 	})
 }
 

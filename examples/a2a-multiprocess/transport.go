@@ -89,9 +89,8 @@ func newHTTPClient(tlsConfig *tls.Config) *http.Client {
 
 func serverWriteTimeout(opts options, role string) time.Duration {
 	if role == "agent-b" && effectiveWorkflow(opts.workflow) == workflowLLMConversation {
-		// The selected Agent B runtime has a 20-second request limit. Keep the
-		// authenticated A2A response open long enough for that bounded call.
-		return 30 * time.Second
+		// Keep the authenticated response open for the bounded model call.
+		return conversationRequestTimeout(opts) + 10*time.Second
 	}
 	return 10 * time.Second
 }

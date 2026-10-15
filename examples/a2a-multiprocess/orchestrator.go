@@ -89,7 +89,7 @@ func runOrchestrator(ctx context.Context, opts options, out outputWriter) (runEr
 		}
 		readinessTimeout := 8 * time.Second
 		if name == demoAudience && opts.workflow == workflowLLMConversation {
-			// Verified model copying and GGUF loading can outlast the normal server startup window.
+			// Verified model copying and loading can outlast the normal server startup window.
 			readinessTimeout = 7 * time.Minute
 		}
 		process, rawURL, err := startServerProcess(ctx, executable, stateDir, name, childEnv, readinessTimeout, extra...)
@@ -121,14 +121,8 @@ func runOrchestrator(ctx context.Context, opts options, out outputWriter) (runEr
 	}
 	agentBArgs := []string{"--replay-url", replayURL, "--expected-measurement-hex", opts.expectedMeasurementHex, "--binding-profile", opts.bindingProfile}
 	if opts.workflow == workflowLLMConversation {
-		agentBArgs = append(agentBArgs,
-			"--workflow", opts.workflow,
-			"--llama-server-path", opts.llamaServerPath,
-			"--llama-server-sha256", opts.llamaServerSHA256,
-			"--agent-b-gguf-path", opts.agentBGGUFPath,
-			"--kubo-api-url", opts.kuboAPIURL,
-		)
-		agentBArgs = append(agentBArgs, modelPolicyArgs("agent-b-gguf", agentBModelPolicy(opts))...)
+		agentBArgs = append(agentBArgs, "--workflow", opts.workflow)
+		agentBArgs = append(agentBArgs, conversationModelArgs(opts, "agent-b", agentBModelConfig(opts))...)
 	}
 	if strings.EqualFold(opts.attestationMode, modeSimulation) {
 		agentBArgs = append(agentBArgs, "--allow-simulation")
@@ -191,14 +185,8 @@ func agentAProcessArgs(opts options, stateDir, managerURL, attesterURL, verifier
 		"--format", opts.reportFormat,
 	}
 	if opts.workflow == workflowLLMConversation {
-		args = append(args,
-			"--prompt-file", opts.promptFile,
-			"--llama-server-path", opts.llamaServerPath,
-			"--llama-server-sha256", opts.llamaServerSHA256,
-			"--agent-a-gguf-path", opts.agentAGGUFPath,
-			"--kubo-api-url", opts.kuboAPIURL,
-		)
-		args = append(args, modelPolicyArgs("agent-a-gguf", agentAModelPolicy(opts))...)
+		args = append(args, "--prompt-file", opts.promptFile)
+		args = append(args, conversationModelArgs(opts, "agent-a", agentAModelConfig(opts))...)
 	}
 	if opts.reportFile != "" {
 		args = append(args, "--report", opts.reportFile)

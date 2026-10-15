@@ -23,8 +23,9 @@ import (
 )
 
 const (
-	managedModelAlias     = "asb-verified-model"
-	managedStartupTimeout = 5 * time.Minute
+	managedModelAlias        = "asb-verified-model"
+	managedStartupTimeout    = 5 * time.Minute
+	maxManagedRequestTimeout = 10 * time.Minute
 )
 
 // ErrDigestMismatch means the bytes copied for a model or server executable
@@ -43,6 +44,9 @@ type ManagedGGUFConfig struct {
 	ModelSize    int64
 	ServerPath   string
 	ServerSHA256 string
+	// RequestTimeout bounds one generation. Zero uses 20 seconds; values above
+	// ten minutes or below zero are rejected.
+	RequestTimeout time.Duration
 }
 
 // ManagedGGUF owns a verified copy of the model and server executable, and
@@ -66,6 +70,9 @@ var _ Generator = (*ManagedGGUF)(nil)
 func NewManagedGGUF(ctx context.Context, config ManagedGGUFConfig) (*ManagedGGUF, error) {
 	if ctx == nil || ctx.Err() != nil {
 		return nil, fmt.Errorf("%w: context", ErrInvalidConfig)
+	}
+	if _, err := resolveManagedRequestTimeout(config.RequestTimeout); err != nil {
+		return nil, err
 	}
 	if !validSHA256(config.ModelSHA256) || !validSHA256(config.ServerSHA256) {
 		return nil, fmt.Errorf("%w: expected SHA-256", ErrInvalidConfig)
@@ -94,6 +101,37 @@ func NewManagedGGUF(ctx context.Context, config ManagedGGUFConfig) (*ManagedGGUF
 	if err := copyVerifiedFile(config.ServerPath, serverPath, config.ServerSHA256, 0, true); err != nil {
 		return nil, err
 	}
+	command := exec.CommandContext(ctx, serverPath,
+		"--model", modelPath,
+		"--alias", managedModelAlias,
+		"--host", filepath.Join(dir, "llama.sock"),
+		"--no-webui")
+	command.Dir = dir
+	// Do not inherit loader or llama.cpp variables that can change loaded bytes.
+	command.Env = []string{}
+	managed, err := startManagedServer(ctx, dir, command, config.RequestTimeout)
+	if err != nil {
+		return nil, err
+	}
+	keepDir = true
+	return managed, nil
+}
+
+func resolveManagedRequestTimeout(timeout time.Duration) (time.Duration, error) {
+	if timeout < 0 || timeout > maxManagedRequestTimeout {
+		return 0, fmt.Errorf("%w: request timeout must be positive and at most ten minutes", ErrInvalidConfig)
+	}
+	if timeout == 0 {
+		return requestTimeout, nil
+	}
+	return timeout, nil
+}
+
+func startManagedServer(ctx context.Context, dir string, command *exec.Cmd, timeout time.Duration) (*ManagedGGUF, error) {
+	timeout, err := resolveManagedRequestTimeout(timeout)
+	if err != nil {
+		return nil, err
+	}
 	socketPath := filepath.Join(dir, "llama.sock")
 	if len(socketPath) > 100 {
 		return nil, fmt.Errorf("%w: Unix socket path too long", ErrInvalidConfig)
@@ -105,21 +143,12 @@ func NewManagedGGUF(ctx context.Context, config ManagedGGUFConfig) (*ManagedGGUF
 		},
 	}
 	client := &http.Client{
-		Timeout:       requestTimeout,
+		Timeout:       timeout,
 		Transport:     transport,
 		CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return errRedirect },
 	}
 	endpoint := &url.URL{Scheme: httpScheme, Host: "asb-managed.invalid", Path: "/v1/chat/completions"}
 	generator := &openAICompatible{endpoint: endpoint, model: managedModelAlias, client: client}
-	command := exec.CommandContext(ctx, serverPath,
-		"--model", modelPath,
-		"--alias", managedModelAlias,
-		"--host", socketPath,
-		"--no-webui")
-	command.Dir = dir
-	// The server needs no inherited environment. In particular, dynamic-loader
-	// and llama.cpp variables must not change the code or model it loads.
-	command.Env = []string{}
 	if err := command.Start(); err != nil {
 		transport.CloseIdleConnections()
 		return nil, fmt.Errorf("%w: start verified server", ErrProvider)
@@ -134,7 +163,6 @@ func NewManagedGGUF(ctx context.Context, config ManagedGGUFConfig) (*ManagedGGUF
 		_ = managed.Close()
 		return nil, err
 	}
-	keepDir = true
 	return managed, nil
 }
 

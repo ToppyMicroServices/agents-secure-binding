@@ -12,7 +12,45 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
+
+func TestManagedRequestTimeoutBounds(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		name    string
+		value   time.Duration
+		want    time.Duration
+		wantErr bool
+	}{
+		{name: "default", want: 20 * time.Second},
+		{name: "positive", value: time.Nanosecond, want: time.Nanosecond},
+		{name: "CPU duration", value: 2 * time.Minute, want: 2 * time.Minute},
+		{name: "maximum", value: 10 * time.Minute, want: 10 * time.Minute},
+		{name: "negative", value: -time.Nanosecond, wantErr: true},
+		{name: "excessive", value: 10*time.Minute + time.Nanosecond, wantErr: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := resolveManagedRequestTimeout(test.value)
+			if got != test.want || (err != nil) != test.wantErr {
+				t.Fatalf("timeout = %s, %v; want %s, error %v", got, err, test.want, test.wantErr)
+			}
+			if !test.wantErr {
+				return
+			}
+			if _, err := NewManagedGGUF(context.Background(), ManagedGGUFConfig{RequestTimeout: test.value}); !errors.Is(err, ErrInvalidConfig) || !strings.Contains(err.Error(), "request timeout") {
+				t.Errorf("GGUF did not reject invalid timeout before copying model files: %v", err)
+			}
+			if _, err := NewManagedModel(context.Background(), ManagedModelConfig{RequestTimeout: test.value}); !errors.Is(err, ErrInvalidConfig) || !strings.Contains(err.Error(), "request timeout") {
+				t.Errorf("bundle did not reject invalid timeout before copying model files: %v", err)
+			}
+			if _, err := startManagedServer(context.Background(), "", nil, test.value); !errors.Is(err, ErrInvalidConfig) {
+				t.Errorf("server did not reject invalid timeout before starting command: %v", err)
+			}
+		})
+	}
+}
 
 func testSHA256(contents []byte) string {
 	digest := sha256.Sum256(contents)

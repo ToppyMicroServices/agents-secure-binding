@@ -9,10 +9,26 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 	"unicode/utf8"
 )
 
-const maxConversationPromptBytes = 64 * 1024
+const (
+	maxConversationPromptBytes        = 64 * 1024
+	defaultConversationRequestTimeout = 20 * time.Second
+	maxConversationRequestTimeout     = 10 * time.Minute
+)
+
+func conversationRequestTimeout(opts options) time.Duration {
+	if opts.llmRequestTimeout == 0 {
+		return defaultConversationRequestTimeout
+	}
+	return opts.llmRequestTimeout
+}
+
+func conversationA2ATimeout(opts options) time.Duration {
+	return conversationRequestTimeout(opts) + 15*time.Second
+}
 
 func validateConversationOptions(opts options) error {
 	if err := validateAgentAConversationOptions(opts); err != nil {
@@ -31,26 +47,14 @@ func validateAgentAConversationOptions(opts options) error {
 	if opts.promptFile == "" {
 		return fmt.Errorf("prompt file is required for llm-conversation")
 	}
-	if err := validateManagedServerOptions(opts); err != nil {
-		return err
-	}
-	if err := validateManagedModelOptions("Agent A", opts.agentAGGUFPath, agentAModelPolicy(opts)); err != nil {
-		return err
-	}
-	return nil
+	return validateConversationModelOptions(opts, "Agent A", agentAModelConfig(opts))
 }
 
 func validateAgentBConversationOptions(opts options) error {
 	if err := rejectUnverifiedConversationOptions(opts); err != nil {
 		return err
 	}
-	if err := validateManagedServerOptions(opts); err != nil {
-		return err
-	}
-	if err := validateManagedModelOptions("Agent B", opts.agentBGGUFPath, agentBModelPolicy(opts)); err != nil {
-		return err
-	}
-	return nil
+	return validateConversationModelOptions(opts, "Agent B", agentBModelConfig(opts))
 }
 
 func rejectUnverifiedConversationOptions(opts options) error {
@@ -81,6 +85,57 @@ func validateManagedServerOptions(opts options) error {
 		return fmt.Errorf("--llama-server-sha256 must be sha256: followed by 64 lowercase hex characters")
 	}
 	return nil
+}
+
+func validateConversationModelOptions(opts options, name string, config conversationModelConfig) error {
+	if opts.llmRequestTimeout <= 0 || opts.llmRequestTimeout > maxConversationRequestTimeout {
+		return fmt.Errorf("--llm-request-timeout must be positive and at most 10m")
+	}
+	if err := validatePythonOptions(opts); err != nil {
+		return err
+	}
+	if !config.usesBundle() {
+		if err := validateManagedServerOptions(opts); err != nil {
+			return err
+		}
+		return validateManagedModelOptions(name, config.GGUFPath, config.GGUFPolicy)
+	}
+	if config.GGUFPath != "" || config.GGUFPolicy != (modelDigestPolicy{}) {
+		return fmt.Errorf("%s model bundle and legacy GGUF settings are mutually exclusive", name)
+	}
+	if opts.llamaServerPath != "" || opts.llamaServerSHA256 != "" {
+		if err := validateManagedServerOptions(opts); err != nil {
+			return err
+		}
+	}
+	if !validManagedFilePath(config.Bundle.RootPath) {
+		return fmt.Errorf("%s model directory must be an absolute clean path", name)
+	}
+	if (config.Bundle.ManifestPath == "") == (config.Bundle.ManifestCID == "") {
+		return fmt.Errorf("%s model bundle requires exactly one local manifest or manifest CID", name)
+	}
+	if config.Bundle.ManifestPath != "" && !validManagedFilePath(config.Bundle.ManifestPath) {
+		return fmt.Errorf("%s model manifest must be an absolute clean path", name)
+	}
+	if !validManagedSHA256(config.Bundle.ManifestSHA256) {
+		return fmt.Errorf("%s model manifest requires a trusted SHA-256 digest", name)
+	}
+	return nil
+}
+
+func validatePythonOptions(opts options) error {
+	if opts.pythonPath != "" || opts.pythonSHA256 != "" || opts.pythonSitePackages != "" {
+		if !validManagedFilePath(opts.pythonPath) || !validManagedSHA256(opts.pythonSHA256) ||
+			!validManagedFilePath(opts.pythonSitePackages) {
+			return fmt.Errorf("Python runtime requires absolute clean --python-path and --python-site-packages paths and a trusted --python-sha256 digest")
+		}
+	}
+	switch opts.transformersDevice {
+	case "", "cpu", "cuda", "mps":
+		return nil
+	default:
+		return fmt.Errorf("--transformers-device must be cpu, cuda, or mps")
+	}
 }
 
 func validateManagedModelOptions(name, path string, policy modelDigestPolicy) error {

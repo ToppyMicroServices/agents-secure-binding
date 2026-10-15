@@ -7,6 +7,7 @@ package main
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -36,6 +37,7 @@ type traceRecord struct {
 	ContentType   string      `json:"content_type"`
 	Authorization string      `json:"authorization"`
 	Request       chatRequest `json:"request"`
+	AdapterSHA256 string      `json:"adapter_sha256,omitempty"`
 }
 
 func main() {
@@ -43,6 +45,7 @@ func main() {
 		log.Fatal("inherited parent environment")
 	}
 	modelPath := flag.String("model", "", "test fixture model path")
+	adapterPath := flag.String("lora", "", "test fixture adapter path")
 	alias := flag.String("alias", "", "model alias")
 	socketPath := flag.String("host", "", "private Unix socket path")
 	noWebUI := flag.Bool("no-webui", false, "disable web UI")
@@ -58,6 +61,17 @@ func main() {
 	var model fixtureModel
 	if err := json.Unmarshal(raw[4:], &model); err != nil || model.Output == "" || model.TracePath == "" {
 		log.Fatal("invalid test fixture model data")
+	}
+	adapterDigest := ""
+	if *adapterPath != "" {
+		if !filepath.IsAbs(*adapterPath) {
+			log.Fatal("invalid adapter path")
+		}
+		adapter, err := os.ReadFile(*adapterPath)
+		if err != nil || !bytes.HasPrefix(adapter, []byte("GGUF")) {
+			log.Fatal("invalid test fixture adapter")
+		}
+		adapterDigest = fmt.Sprintf("sha256:%x", sha256.Sum256(adapter))
 	}
 	listener, err := net.Listen("unix", *socketPath)
 	if err != nil {
@@ -79,7 +93,8 @@ func main() {
 		trace := traceRecord{
 			Method: r.Method, Path: r.URL.Path,
 			ContentType: r.Header.Get("Content-Type"), Authorization: r.Header.Get("Authorization"),
-			Request: request,
+			Request:       request,
+			AdapterSHA256: adapterDigest,
 		}
 		file, err := os.OpenFile(model.TracePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
 		if err != nil {

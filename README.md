@@ -199,6 +199,11 @@ file at run time is not an independent expected value. The paths must be
 absolute, clean paths to regular, non-symlink files, and `llama-server` must be
 executable. Do not use production credentials or data in the debug lab.
 
+For Safetensors checkpoints, sharded weights, or an approved LoRA adapter,
+use an [approved model bundle](docs/llm-model-bundles.md). The manifest pins
+the complete base model and adapter combination, including its tokenizer and
+configuration files. The existing single-GGUF options above remain supported.
+
 The debug lab collects no SNP, TDX, TPM, or vTPM evidence. It is useful for
 protocol debugging on a MacBook; it is not hardware qualification. See the
 [multiprocess guide](examples/a2a-multiprocess/README.md) for reports, Docker,

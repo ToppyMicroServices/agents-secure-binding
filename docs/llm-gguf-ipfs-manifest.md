@@ -1,5 +1,9 @@
 # Pinned GGUF manifests over IPFS
 
+For Safetensors, sharded weights, or LoRA adapters, use
+[approved model bundles](llm-model-bundles.md). That format supports both local
+and IPFS manifests. This page describes the existing single-GGUF schema.
+
 The `llm-conversation` example can obtain an expected GGUF digest from a small
 IPFS manifest. The verifier first approves the manifest's exact SHA-256, CID,
 Hugging Face repository, commit, and file path in local policy. ASB fetches the
