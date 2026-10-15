@@ -1,0 +1,836 @@
+{
+  "adapter_files": [
+    {
+      "path": "adapter_config.json",
+      "sha256": "sha256:d2297cabfe3cc323881ea76fe6fab146af959b4de22c249a642ef3c6362f1cde",
+      "size": 1165
+    },
+    {
+      "path": "adapter_model.safetensors",
+      "sha256": "sha256:24a307e69e36d7c28aa7706e9850e77267321542193001d0b35229801043a8c0",
+      "size": 31776
+    }
+  ],
+  "approval_scope": "test-only fixture identity approval; not model safety certification",
+  "approval_sha256": "sha256:8febf3a7716023755ca0b988349c84ce503a1d3733ed50086d66c3bf5c1688c5",
+  "approved_fixture_restored": true,
+  "approved_manifest_sha256": [
+    "sha256:105205faa4787f5acbe7a18f6b4ee5e94c4036990c138470692abe815fc67483",
+    "sha256:e40275b80ce9d1892e255ac65823b417d2ef169b384f41a792fe5da6cc70187e"
+  ],
+  "binary_sha256": "sha256:e467c8cf9e636d1ab5c69c5cae63f6651d38823858ef7ee235ea91781d04980c",
+  "cases": [
+    {
+      "agent_a_text": "Agent B: \"Yes, I have received the package. It's from the local library. I hope you're having a great day.\"",
+      "agent_b_ready": true,
+      "agent_b_text": "\"Thank you for the update. I'm glad to hear that you're enjoying your day. I'll be in touch soon with any updates or recommendations. I'll keep you updated on the library's progress.\"",
+      "attestation": {
+        "mode": "simulation",
+        "platform": "SIMULATED"
+      },
+      "cli_report_status": "PASS",
+      "duration_seconds": 17.89,
+      "exit_code": 0,
+      "expected": "accept",
+      "log_sha256": "sha256:f4fde5721a25c7a92ca951a3bb87186c0b3cd3a7853ccc845fc1e2130951872c",
+      "mutation": null,
+      "name": "approved_v1",
+      "observed_profile": "direct-agent-v1+llm-conversation-v1",
+      "profile": "v1",
+      "report_sha256": "sha256:32d5693507db92e5a6bf8131df49c9d6562bbb1e86ac469718f5af62fa5e4338",
+      "status": "PASS",
+      "timed_out": false
+    },
+    {
+      "agent_a_text": "Agent B: \"Yes, I have received the package. It's from the local library. I hope you're having a great day.\"",
+      "agent_b_ready": true,
+      "agent_b_text": "\"Thank you for the update. I'm glad to hear that you're enjoying your day. I'll be in touch soon with any updates or recommendations. I'll keep you updated on the library's progress.\"",
+      "attestation": {
+        "mode": "simulation",
+        "platform": "SIMULATED"
+      },
+      "cli_report_status": "PASS",
+      "duration_seconds": 23.932,
+      "exit_code": 0,
+      "expected": "accept",
+      "log_sha256": "sha256:a898a9c7d900d92c8b23ac4aec36f12ab7b71e80a694deea7d5581441ba8d940",
+      "mutation": null,
+      "name": "approved_v2",
+      "observed_profile": "draft06-v2+llm-conversation-v1",
+      "profile": "draft06-v2",
+      "report_sha256": "sha256:0c16ddae4b8d466912fc417cbb084769859b6a7c10045413d603b07a13d7753a",
+      "status": "PASS",
+      "timed_out": false
+    },
+    {
+      "agent_b_ready": false,
+      "attestation": {
+        "mode": "simulation",
+        "platform": "SIMULATED"
+      },
+      "cli_report_status": "ERROR",
+      "duration_seconds": 0.667,
+      "exit_code": 1,
+      "expected": "reject",
+      "expected_error": "configure Agent B LLM: llm runtime: digest mismatch",
+      "log_sha256": "sha256:7f2cec84a47cd79625ba5a00ae1093830a4150c8ddb4c0419307938d683e9cc4",
+      "mutation": {
+        "changed_sha256": "sha256:4923905a6becf95c535aa099092d8a16f3fede69b4f170a5045260b26ec2a69a",
+        "file": "model/model.safetensors",
+        "offset": 269060551,
+        "operation": "xor final byte with 1"
+      },
+      "name": "changed_base",
+      "observed_profile": "direct-agent-v1+llm-conversation-v1",
+      "phase": "pre-runtime artifact validation",
+      "phase_evidence": "exact configuration error plus NewManagedModel call ordering; no inference counter is instrumented",
+      "profile": "v1",
+      "report_sha256": "sha256:7c9b18c260e06b44ba49681483aa4ad991dcd2b1b8b0e8002db95669c8b44bf2",
+      "status": "PASS",
+      "timed_out": false
+    },
+    {
+      "agent_b_ready": false,
+      "attestation": {
+        "mode": "simulation",
+        "platform": "SIMULATED"
+      },
+      "cli_report_status": "ERROR",
+      "duration_seconds": 0.982,
+      "exit_code": 1,
+      "expected": "reject",
+      "expected_error": "configure Agent B LLM: llm runtime: digest mismatch",
+      "log_sha256": "sha256:dfeae7c051971ffb3e37e86cf15e2690e603a9f075893d8fa88499e750294224",
+      "mutation": {
+        "changed_sha256": "sha256:8faff8f150ee025e8db8bb838a9a5e221b7d8b4613c2855a4b1effac6f5ba6ff",
+        "file": "adapter/adapter_model.safetensors",
+        "offset": 31775,
+        "operation": "xor final byte with 1"
+      },
+      "name": "changed_lora",
+      "observed_profile": "direct-agent-v1+llm-conversation-v1",
+      "phase": "pre-runtime artifact validation",
+      "phase_evidence": "exact configuration error plus NewManagedModel call ordering; no inference counter is instrumented",
+      "profile": "v1",
+      "report_sha256": "sha256:a5d55feb244725a3d73108b01f2c0f7cd033f38cee5da646a0e14c20e7c519a0",
+      "status": "PASS",
+      "timed_out": false
+    },
+    {
+      "agent_b_ready": false,
+      "attestation": {
+        "mode": "simulation",
+        "platform": "SIMULATED"
+      },
+      "cli_report_status": "ERROR",
+      "duration_seconds": 1.029,
+      "exit_code": 1,
+      "expected": "reject",
+      "expected_error": "configure Agent B LLM: llm runtime: digest mismatch",
+      "log_sha256": "sha256:b1daee876ddf3121dd53e7e2341712ce57531082345b90a0bdb28b865cb39d30",
+      "mutation": {
+        "changed_sha256": "sha256:43b773edc50519e63b5dd2761bf3dea6a87fc295c39b2cd2630e6cdc75b91375",
+        "file": "model/tokenizer.json",
+        "offset": 2104555,
+        "operation": "xor final byte with 1"
+      },
+      "name": "changed_tokenizer",
+      "observed_profile": "direct-agent-v1+llm-conversation-v1",
+      "phase": "pre-runtime artifact validation",
+      "phase_evidence": "exact configuration error plus NewManagedModel call ordering; no inference counter is instrumented",
+      "profile": "v1",
+      "report_sha256": "sha256:4c5e12e7be693c4b1b5732035b9ab46eec548dc1d6de20bb1c08f1be81ad2863",
+      "status": "PASS",
+      "timed_out": false
+    },
+    {
+      "agent_b_ready": false,
+      "attestation": {
+        "mode": "simulation",
+        "platform": "SIMULATED"
+      },
+      "cli_report_status": "ERROR",
+      "duration_seconds": 0.236,
+      "exit_code": 1,
+      "expected": "reject",
+      "expected_error": "configure Agent B LLM: llm runtime: digest mismatch",
+      "log_sha256": "sha256:041756d05450717a30d13923ececc6642d86d67576af057ce4da08aa667a90e4",
+      "mutation": {
+        "changed_sha256": "sha256:3645bda13bd24b1525f27746a2a2eb10888f42806b2a7668a8144dedcf3343d5",
+        "file": "model/config.json",
+        "offset": 860,
+        "operation": "xor final byte with 1"
+      },
+      "name": "changed_model_config",
+      "observed_profile": "direct-agent-v1+llm-conversation-v1",
+      "phase": "pre-runtime artifact validation",
+      "phase_evidence": "exact configuration error plus NewManagedModel call ordering; no inference counter is instrumented",
+      "profile": "v1",
+      "report_sha256": "sha256:458d67f2ee5765de850cd56471253ba0ea79575342c980277ea1fd42b8fdf9ba",
+      "status": "PASS",
+      "timed_out": false
+    },
+    {
+      "agent_b_ready": false,
+      "attestation": {
+        "mode": "simulation",
+        "platform": "SIMULATED"
+      },
+      "cli_report_status": "ERROR",
+      "duration_seconds": 1.142,
+      "exit_code": 1,
+      "expected": "reject",
+      "expected_error": "configure Agent B LLM: llm runtime: digest mismatch",
+      "log_sha256": "sha256:3ebc7b401a7179f7a02807eec10a25f28238bae17d3ae2dca3ce992f84172482",
+      "mutation": {
+        "changed_sha256": "sha256:21a582613b850880132c26e7b8010d4a3695eea5497a31896a8487006cc64e16",
+        "file": "adapter/adapter_config.json",
+        "offset": 1164,
+        "operation": "xor final byte with 1"
+      },
+      "name": "changed_adapter_config",
+      "observed_profile": "direct-agent-v1+llm-conversation-v1",
+      "phase": "pre-runtime artifact validation",
+      "phase_evidence": "exact configuration error plus NewManagedModel call ordering; no inference counter is instrumented",
+      "profile": "v1",
+      "report_sha256": "sha256:82b5dc771b19a1405c8e97960ca1fe1d93b93aaa7916670bc3f959fb558f00bd",
+      "status": "PASS",
+      "timed_out": false
+    },
+    {
+      "agent_b_ready": false,
+      "attestation": {
+        "mode": "simulation",
+        "platform": "SIMULATED"
+      },
+      "cli_report_status": "ERROR",
+      "duration_seconds": 0.973,
+      "exit_code": 1,
+      "expected": "reject",
+      "expected_error": "configure Agent B LLM: llm runtime: digest mismatch",
+      "log_sha256": "sha256:736f6c486277bec8933077109885a80f3f469fdd28c9eae23129cfc5c0329765",
+      "mutation": {
+        "changed_sha256": "sha256:489a9e9cc74415cb15fc616568cd9a4974a1e0652530f912577ccd98fc01692b",
+        "changed_value": {
+          "add_prefix_space": false,
+          "added_tokens_decoder": {
+            "0": {
+              "content": "<|endoftext|>",
+              "lstrip": false,
+              "normalized": false,
+              "rstrip": false,
+              "single_word": false,
+              "special": true
+            },
+            "1": {
+              "content": "<|im_start|>",
+              "lstrip": false,
+              "normalized": false,
+              "rstrip": false,
+              "single_word": false,
+              "special": true
+            },
+            "10": {
+              "content": "<issue_closed>",
+              "lstrip": false,
+              "normalized": false,
+              "rstrip": false,
+              "single_word": false,
+              "special": true
+            },
+            "11": {
+              "content": "<jupyter_start>",
+              "lstrip": false,
+              "normalized": false,
+              "rstrip": false,
+              "single_word": false,
+              "special": true
+            },
+            "12": {
+              "content": "<jupyter_text>",
+              "lstrip": false,
+              "normalized": false,
+              "rstrip": false,
+              "single_word": false,
+              "special": true
+            },
+            "13": {
+              "content": "<jupyter_code>",
+              "lstrip": false,
+              "normalized": false,
+              "rstrip": false,
+              "single_word": false,
+              "special": true
+            },
+            "14": {
+              "content": "<jupyter_output>",
+              "lstrip": false,
+              "normalized": false,
+              "rstrip": false,
+              "single_word": false,
+              "special": true
+            },
+            "15": {
+              "content": "<jupyter_script>",
+              "lstrip": false,
+              "normalized": false,
+              "rstrip": false,
+              "single_word": false,
+              "special": true
+            },
+            "16": {
+              "content": "<empty_output>",
+              "lstrip": false,
+              "normalized": false,
+              "rstrip": false,
+              "single_word": false,
+              "special": true
+            },
+            "2": {
+              "content": "<|im_end|>",
+              "lstrip": false,
+              "normalized": false,
+              "rstrip": false,
+              "single_word": false,
+              "special": true
+            },
+            "3": {
+              "content": "<repo_name>",
+              "lstrip": false,
+              "normalized": false,
+              "rstrip": false,
+              "single_word": false,
+              "special": true
+            },
+            "4": {
+              "content": "<reponame>",
+              "lstrip": false,
+              "normalized": false,
+              "rstrip": false,
+              "single_word": false,
+              "special": true
+            },
+            "5": {
+              "content": "<file_sep>",
+              "lstrip": false,
+              "normalized": false,
+              "rstrip": false,
+              "single_word": false,
+              "special": true
+            },
+            "6": {
+              "content": "<filename>",
+              "lstrip": false,
+              "normalized": false,
+              "rstrip": false,
+              "single_word": false,
+              "special": true
+            },
+            "7": {
+              "content": "<gh_stars>",
+              "lstrip": false,
+              "normalized": false,
+              "rstrip": false,
+              "single_word": false,
+              "special": true
+            },
+            "8": {
+              "content": "<issue_start>",
+              "lstrip": false,
+              "normalized": false,
+              "rstrip": false,
+              "single_word": false,
+              "special": true
+            },
+            "9": {
+              "content": "<issue_comment>",
+              "lstrip": false,
+              "normalized": false,
+              "rstrip": false,
+              "single_word": false,
+              "special": true
+            }
+          },
+          "additional_special_tokens": [
+            "<|im_start|>",
+            "<|im_end|>"
+          ],
+          "bos_token": "<|im_start|>",
+          "chat_template": "unapproved {% for message in messages %}{% if loop.first and messages[0]['role'] != 'system' %}{{ '<|im_start|>system\nYou are a helpful AI assistant named SmolLM, trained by Hugging Face<|im_end|>\n' }}{% endif %}{{'<|im_start|>' + message['role'] + '\n' + message['content'] + '<|im_end|>' + '\n'}}{% endfor %}{% if add_generation_prompt %}{{ '<|im_start|>assistant\n' }}{% endif %}",
+          "clean_up_tokenization_spaces": false,
+          "eos_token": "<|im_end|>",
+          "model_max_length": 8192,
+          "pad_token": "<|im_end|>",
+          "tokenizer_class": "GPT2Tokenizer",
+          "unk_token": "<|endoftext|>",
+          "vocab_size": 49152
+        },
+        "operation": "change JSON"
+      },
+      "name": "changed_chat_template",
+      "observed_profile": "direct-agent-v1+llm-conversation-v1",
+      "phase": "pre-runtime artifact validation",
+      "phase_evidence": "exact configuration error plus NewManagedModel call ordering; no inference counter is instrumented",
+      "profile": "v1",
+      "report_sha256": "sha256:874a0885e9a842834ae5812207912a2bfd14fe7acb34629095d3580cfb3221f7",
+      "status": "PASS",
+      "timed_out": false
+    },
+    {
+      "agent_b_ready": false,
+      "attestation": {
+        "mode": "simulation",
+        "platform": "SIMULATED"
+      },
+      "cli_report_status": "ERROR",
+      "duration_seconds": 0.987,
+      "exit_code": 1,
+      "expected": "reject",
+      "expected_error": "configure Agent B LLM: llm runtime: invalid configuration: bundle file must be regular and not a symlink",
+      "log_sha256": "sha256:f6abb61542815bd54990d8d9b12d83be016d62d45eaee51725f98959e06cbc27",
+      "mutation": {
+        "operation": "remove declared file"
+      },
+      "name": "missing_lora",
+      "observed_profile": "direct-agent-v1+llm-conversation-v1",
+      "phase": "pre-runtime artifact validation",
+      "phase_evidence": "exact configuration error plus NewManagedModel call ordering; no inference counter is instrumented",
+      "profile": "v1",
+      "report_sha256": "sha256:8804729c3b3dfba6faadf2bc1e630ea45d496ac6a0c943233a38021e9b304f32",
+      "status": "PASS",
+      "timed_out": false
+    },
+    {
+      "agent_b_ready": false,
+      "attestation": {
+        "mode": "simulation",
+        "platform": "SIMULATED"
+      },
+      "cli_report_status": "ERROR",
+      "duration_seconds": 0.182,
+      "exit_code": 1,
+      "expected": "reject",
+      "expected_error": "configure Agent B LLM: llm runtime: digest mismatch",
+      "log_sha256": "sha256:367dab1ebe4f56caa1c7812934336101aa3dee25f401434307e6b1007aaa236f",
+      "mutation": {
+        "changed_sha256": "sha256:105205faa4787f5acbe7a18f6b4ee5e94c4036990c138470692abe815fc67483",
+        "changed_value": {
+          "format": "safetensors",
+          "model": {
+            "files": [
+              {
+                "path": "config.json",
+                "sha256": "sha256:8eb740e8bbe4cff95ea7b4588d17a2432deb16e8075bc5828ff7ba9be94d982a",
+                "size": 861
+              },
+              {
+                "path": "generation_config.json",
+                "sha256": "sha256:87b916edaaab66b3899b9d0dd0752727dff6666686da0504d89ae0a6e055a013",
+                "size": 132
+              },
+              {
+                "path": "model.safetensors",
+                "sha256": "sha256:5af571cbf074e6d21a03528d2330792e532ca608f24ac70a143f6b369968ab8c",
+                "size": 269060552
+              },
+              {
+                "path": "special_tokens_map.json",
+                "sha256": "sha256:2b7379f3ae813529281a5c602bc5a11c1d4e0a99107aaa597fe936c1e813ca52",
+                "size": 655
+              },
+              {
+                "path": "tokenizer.json",
+                "sha256": "sha256:9ca9acddb6525a194ec8ac7a87f24fbba7232a9a15ffa1af0c1224fcd888e47c",
+                "size": 2104556
+              },
+              {
+                "path": "tokenizer_config.json",
+                "sha256": "sha256:4ec77d44f62efeb38d7e044a1db318f6a939438425312dfa333b8382dbad98df",
+                "size": 3764
+              }
+            ]
+          },
+          "schema": "asb.model-bundle/v1"
+        },
+        "operation": "change JSON"
+      },
+      "name": "removed_adapter_from_manifest",
+      "observed_profile": "direct-agent-v1+llm-conversation-v1",
+      "phase": "pre-runtime artifact validation",
+      "phase_evidence": "exact configuration error plus NewManagedModel call ordering; no inference counter is instrumented",
+      "profile": "v1",
+      "report_sha256": "sha256:e113e9b30d0875fe5629ac75284ee8d480689d86c2ed277955dde7e894e0e3be",
+      "status": "PASS",
+      "timed_out": false
+    },
+    {
+      "agent_b_ready": false,
+      "attestation": {
+        "mode": "simulation",
+        "platform": "SIMULATED"
+      },
+      "cli_report_status": "ERROR",
+      "duration_seconds": 0.183,
+      "exit_code": 1,
+      "expected": "reject",
+      "expected_error": "configure Agent B LLM: llm runtime: digest mismatch",
+      "log_sha256": "sha256:30f661699a86658ba9b08a81b34558ca3c0ed2923b9fa1b8e4c76b875a1c6e3b",
+      "mutation": {
+        "changed_sha256": "sha256:e40275b80ce9d1892e255ac65823b417d2ef169b384f41a792fe5da6cc70187e"
+      },
+      "name": "added_adapter_to_manifest",
+      "observed_profile": "direct-agent-v1+llm-conversation-v1",
+      "phase": "pre-runtime artifact validation",
+      "phase_evidence": "exact configuration error plus NewManagedModel call ordering; no inference counter is instrumented",
+      "profile": "v1",
+      "report_sha256": "sha256:2226d72b08235d6632c17169ae11b5e94a88b00633a6b11f06ded9dc54d48f51",
+      "status": "PASS",
+      "timed_out": false
+    },
+    {
+      "agent_b_ready": false,
+      "attestation": {
+        "mode": "simulation",
+        "platform": "SIMULATED"
+      },
+      "cli_report_status": "ERROR",
+      "duration_seconds": 0.225,
+      "exit_code": 1,
+      "expected": "reject",
+      "expected_error": "configure Agent B LLM: llm runtime: digest mismatch",
+      "log_sha256": "sha256:ebd2756d36c3da474dba1d915a27335848cc1a7bc4232c490563b59eb6814f08",
+      "mutation": {
+        "manifest": {
+          "changed_sha256": "sha256:9164b21a27d88db3bc914065be15155991fb22b3c2bd53a1511d83482c2d25fb",
+          "changed_value": {
+            "adapter": {
+              "files": [
+                {
+                  "path": "adapter_config.json",
+                  "sha256": "sha256:d2297cabfe3cc323881ea76fe6fab146af959b4de22c249a642ef3c6362f1cde",
+                  "size": 1165
+                },
+                {
+                  "path": "adapter_model.safetensors",
+                  "sha256": "sha256:8faff8f150ee025e8db8bb838a9a5e221b7d8b4613c2855a4b1effac6f5ba6ff",
+                  "size": 31776
+                }
+              ],
+              "format": "peft-lora"
+            },
+            "format": "safetensors",
+            "model": {
+              "files": [
+                {
+                  "path": "config.json",
+                  "sha256": "sha256:8eb740e8bbe4cff95ea7b4588d17a2432deb16e8075bc5828ff7ba9be94d982a",
+                  "size": 861
+                },
+                {
+                  "path": "generation_config.json",
+                  "sha256": "sha256:87b916edaaab66b3899b9d0dd0752727dff6666686da0504d89ae0a6e055a013",
+                  "size": 132
+                },
+                {
+                  "path": "model.safetensors",
+                  "sha256": "sha256:5af571cbf074e6d21a03528d2330792e532ca608f24ac70a143f6b369968ab8c",
+                  "size": 269060552
+                },
+                {
+                  "path": "special_tokens_map.json",
+                  "sha256": "sha256:2b7379f3ae813529281a5c602bc5a11c1d4e0a99107aaa597fe936c1e813ca52",
+                  "size": 655
+                },
+                {
+                  "path": "tokenizer.json",
+                  "sha256": "sha256:9ca9acddb6525a194ec8ac7a87f24fbba7232a9a15ffa1af0c1224fcd888e47c",
+                  "size": 2104556
+                },
+                {
+                  "path": "tokenizer_config.json",
+                  "sha256": "sha256:4ec77d44f62efeb38d7e044a1db318f6a939438425312dfa333b8382dbad98df",
+                  "size": 3764
+                }
+              ]
+            },
+            "schema": "asb.model-bundle/v1"
+          },
+          "operation": "change JSON"
+        },
+        "tensor": {
+          "changed_sha256": "sha256:8faff8f150ee025e8db8bb838a9a5e221b7d8b4613c2855a4b1effac6f5ba6ff",
+          "offset": 31775,
+          "operation": "xor final byte with 1"
+        }
+      },
+      "name": "attacker_rehashed_manifest",
+      "observed_profile": "direct-agent-v1+llm-conversation-v1",
+      "phase": "pre-runtime artifact validation",
+      "phase_evidence": "exact configuration error plus NewManagedModel call ordering; no inference counter is instrumented",
+      "profile": "v1",
+      "report_sha256": "sha256:fa887b31c23e6ec7a0a925e28b5eecf96b572f858f69a630ac93f1c8fb9f55e1",
+      "status": "PASS",
+      "timed_out": false
+    },
+    {
+      "agent_b_ready": true,
+      "attestation": {
+        "mode": "simulation",
+        "platform": "SIMULATED"
+      },
+      "cli_report_status": "ERROR",
+      "duration_seconds": 6.933,
+      "exit_code": 1,
+      "expected": "reject",
+      "expected_error": "configure Agent A LLM: llm runtime: digest mismatch",
+      "log_sha256": "sha256:87b00eee1abdf017342fe90f0048583bd1fbe1d9f1003b2af4030111668d0fc4",
+      "mutation": {
+        "changed_sha256": "sha256:e40275b80ce9d1892e255ac65823b417d2ef169b384f41a792fe5da6cc70187e",
+        "changed_value": {
+          "adapter": {
+            "files": [
+              {
+                "path": "adapter_config.json",
+                "sha256": "sha256:d2297cabfe3cc323881ea76fe6fab146af959b4de22c249a642ef3c6362f1cde",
+                "size": 1165
+              },
+              {
+                "path": "adapter_model.safetensors",
+                "sha256": "sha256:24a307e69e36d7c28aa7706e9850e77267321542193001d0b35229801043a8c0",
+                "size": 31776
+              }
+            ],
+            "format": "peft-lora"
+          },
+          "format": "safetensors",
+          "model": {
+            "files": [
+              {
+                "path": "config.json",
+                "sha256": "sha256:8eb740e8bbe4cff95ea7b4588d17a2432deb16e8075bc5828ff7ba9be94d982a",
+                "size": 861
+              },
+              {
+                "path": "generation_config.json",
+                "sha256": "sha256:87b916edaaab66b3899b9d0dd0752727dff6666686da0504d89ae0a6e055a013",
+                "size": 132
+              },
+              {
+                "path": "model.safetensors",
+                "sha256": "sha256:5af571cbf074e6d21a03528d2330792e532ca608f24ac70a143f6b369968ab8c",
+                "size": 269060552
+              },
+              {
+                "path": "special_tokens_map.json",
+                "sha256": "sha256:2b7379f3ae813529281a5c602bc5a11c1d4e0a99107aaa597fe936c1e813ca52",
+                "size": 655
+              },
+              {
+                "path": "tokenizer.json",
+                "sha256": "sha256:9ca9acddb6525a194ec8ac7a87f24fbba7232a9a15ffa1af0c1224fcd888e47c",
+                "size": 2104556
+              },
+              {
+                "path": "tokenizer_config.json",
+                "sha256": "sha256:4ec77d44f62efeb38d7e044a1db318f6a939438425312dfa333b8382dbad98df",
+                "size": 3764
+              }
+            ]
+          },
+          "schema": "asb.model-bundle/v1"
+        },
+        "operation": "change JSON"
+      },
+      "name": "agent_a_policy_changed",
+      "observed_profile": "direct-agent-v1+llm-conversation-v1",
+      "phase": "pre-runtime artifact validation",
+      "phase_evidence": "exact configuration error plus NewManagedModel call ordering; no inference counter is instrumented",
+      "profile": "v1",
+      "report_sha256": "sha256:c86e70e04f61da9a2d24926252f267869c97286109fc6c8b10845dfc9236bd3e",
+      "status": "PASS",
+      "timed_out": false
+    }
+  ],
+  "date_jst": "2026-10-16",
+  "device": "cpu",
+  "evidence_archive": {
+    "checksummed_files": 89,
+    "excludes": [
+      "downloadable base model files",
+      "built executable",
+      "temporary private A2A state"
+    ],
+    "name": "real-model-lora-cpu-evidence.zip",
+    "sha256": "sha256:25a5a5afd8819a11c922b98312257d2daca30c23b9d20d9f4a306389c9980ccd",
+    "size_bytes": 164726,
+    "verification": "ZIP integrity and every archived file SHA-256 passed"
+  },
+  "evidence_sha256": "sha256:777e9e81abc69c2bc94e2d9e3d87efbcd6b76f945f25d245bbdd9062fea6d0ed",
+  "finished_at_utc": "2026-10-15T15:25:30.320014+00:00",
+  "go_version": "go version go1.26.9 darwin/arm64",
+  "limits": [
+    "test-only artifact approval; no model-wide safety claim",
+    "CPU on one Mac; MPS/CUDA not tested",
+    "simulated attestation; not peer-verifiable loaded-weight evidence",
+    "no live IPFS retrieval",
+    "Linux/Windows and other pretrained checkpoints not tested",
+    "Positive transcripts invent details; instruction following and behavioral safety were not scored"
+  ],
+  "local_evidence_directory": "build/model-validation/2026-10-16",
+  "machine": "arm64",
+  "platform": "macOS-26.7.1-arm64-arm-64bit-Mach-O",
+  "preparation_attempts": {
+    "completed": "BF16 adapter training and exact reload passed",
+    "first": "FP32 adapter reload equality failed; retained under attempts/float32-adapter-reload"
+  },
+  "preparation_evidence_sha256": "sha256:9cc56cff4174da7b2b6cc83664fb80f4d44d034a2be8bd608344a2a60513e2db",
+  "preparation_script_sha256": "sha256:218975241d58ca91374899d15c743496b68b63e55cb25c5983b49c94be08fdf7",
+  "preparation_versions": {
+    "huggingface-hub": "2.2.0",
+    "peft": "0.21.2",
+    "safetensors": "0.8.0",
+    "tokenizers": "0.23.3",
+    "torch": "2.14.1",
+    "transformers": "5.19.0"
+  },
+  "python": "3.14.6 (main, Jun 10 2026, 10:03:53) [Clang 21.0.0 (clang-2100.0.123.102)]",
+  "runner_sha256": "sha256:356ff5967810d10873339d29e9dd4527665cff298b10f556ee3dd98a49278725",
+  "runtime_script_sha256": "sha256:f70e926556ee7d0c9fe9d3d995dbf89d505f75266bf4f6df24a12654b4f6deca",
+  "schema": "asb.real-model-validation-record/v1",
+  "source_commit": "2f547ae147b130ff26fea63c478124c0b3894f10",
+  "source_files": [
+    {
+      "path": "config.json",
+      "sha256": "sha256:8eb740e8bbe4cff95ea7b4588d17a2432deb16e8075bc5828ff7ba9be94d982a",
+      "size": 861
+    },
+    {
+      "path": "generation_config.json",
+      "sha256": "sha256:87b916edaaab66b3899b9d0dd0752727dff6666686da0504d89ae0a6e055a013",
+      "size": 132
+    },
+    {
+      "path": "model.safetensors",
+      "sha256": "sha256:5af571cbf074e6d21a03528d2330792e532ca608f24ac70a143f6b369968ab8c",
+      "size": 269060552
+    },
+    {
+      "path": "special_tokens_map.json",
+      "sha256": "sha256:2b7379f3ae813529281a5c602bc5a11c1d4e0a99107aaa597fe936c1e813ca52",
+      "size": 655
+    },
+    {
+      "path": "tokenizer.json",
+      "sha256": "sha256:9ca9acddb6525a194ec8ac7a87f24fbba7232a9a15ffa1af0c1224fcd888e47c",
+      "size": 2104556
+    },
+    {
+      "path": "tokenizer_config.json",
+      "sha256": "sha256:4ec77d44f62efeb38d7e044a1db318f6a939438425312dfa333b8382dbad98df",
+      "size": 3764
+    }
+  ],
+  "source_repository": "HuggingFaceTB/SmolLM2-135M-Instruct",
+  "source_revision": "12fd25f77366fa6b3b4b768ec3050bf629380bac",
+  "started_at_utc": "2026-10-15T15:24:34.222861+00:00",
+  "status": "PASS",
+  "training": {
+    "active_adapters": [
+      "default"
+    ],
+    "adapter_dtype": "torch.bfloat16",
+    "autocast_adapter_dtype": false,
+    "base_dtype": "torch.bfloat16",
+    "batch_size": 1,
+    "bias": "none",
+    "deterministic_algorithms": true,
+    "device": "cpu",
+    "dropout": 0.0,
+    "frozen_base_sha256_after": "sha256:9079b1cb03e0371b0e603f58e0d5b9f705d4c1f04360ebecc46746ae0c2b7bda",
+    "frozen_base_sha256_before": "sha256:9079b1cb03e0371b0e603f58e0d5b9f705d4c1f04360ebecc46746ae0c2b7bda",
+    "interop_threads": 1,
+    "layers_to_transform": [
+      28,
+      29
+    ],
+    "learning_rate": 0.002,
+    "lora_alpha": 8,
+    "loss_scope": "assistant response tokens only",
+    "losses": [
+      {
+        "example_index": 0,
+        "loss": 1.1339731216430664,
+        "step": 1,
+        "tokens": 44
+      },
+      {
+        "example_index": 1,
+        "loss": 2.70095157623291,
+        "step": 2,
+        "tokens": 41
+      },
+      {
+        "example_index": 2,
+        "loss": 0.16822119057178497,
+        "step": 3,
+        "tokens": 46
+      },
+      {
+        "example_index": 3,
+        "loss": 0.7506746649742126,
+        "step": 4,
+        "tokens": 48
+      },
+      {
+        "example_index": 0,
+        "loss": 1.1284387111663818,
+        "step": 5,
+        "tokens": 44
+      },
+      {
+        "example_index": 1,
+        "loss": 2.62953782081604,
+        "step": 6,
+        "tokens": 41
+      }
+    ],
+    "max_grad_norm": 1.0,
+    "max_tokens": 64,
+    "model_engine_reload": "passed",
+    "optimizer": "AdamW",
+    "rank": 4,
+    "reload_max_abs_logit_error": 0.0,
+    "reloaded_max_abs_logit_difference": 0.3125,
+    "saved_adapter_dtype_verification": "passed",
+    "saved_adapter_tensor_verification": "passed",
+    "saved_nonzero_lora_b_elements": 6144,
+    "seed": 20261016,
+    "steps": 6,
+    "target_modules": [
+      "q_proj",
+      "v_proj"
+    ],
+    "threads": 4,
+    "trainable_parameter_names": [
+      "base_model.model.model.layers.28.self_attn.q_proj.lora_A.default.weight",
+      "base_model.model.model.layers.28.self_attn.q_proj.lora_B.default.weight",
+      "base_model.model.model.layers.28.self_attn.v_proj.lora_A.default.weight",
+      "base_model.model.model.layers.28.self_attn.v_proj.lora_B.default.weight",
+      "base_model.model.model.layers.29.self_attn.q_proj.lora_A.default.weight",
+      "base_model.model.model.layers.29.self_attn.q_proj.lora_B.default.weight",
+      "base_model.model.model.layers.29.self_attn.v_proj.lora_A.default.weight",
+      "base_model.model.model.layers.29.self_attn.v_proj.lora_B.default.weight"
+    ],
+    "trainable_parameters": 15360,
+    "trained_max_abs_logit_difference": 0.3125,
+    "weight_decay": 0.0
+  },
+  "training_dataset_sha256": "sha256:129d855c834928746b38499a11ff786a120aeb1222c36d2285d4838145d03111",
+  "versions": {
+    "peft": "0.21.2",
+    "safetensors": "0.8.0",
+    "tokenizers": "0.23.3",
+    "torch": "2.14.1",
+    "transformers": "5.19.0"
+  }
+}
