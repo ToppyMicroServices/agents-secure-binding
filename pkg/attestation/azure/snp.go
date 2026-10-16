@@ -88,6 +88,9 @@ func (a provider) AzureAttestationToken(tokenNonce []byte) ([]byte, error) {
 	if err != nil {
 		return nil, errors.Wrap(ErrFetchAzureToken, err)
 	}
+	if token == "" {
+		return nil, fmt.Errorf("%w: empty token", ErrFetchAzureToken)
+	}
 
 	return []byte(token), nil
 }
@@ -163,6 +166,9 @@ func FetchAzureAttestationToken(tokenNonce []byte, maaURL string) ([]byte, error
 	token, err := DefaultMaaClient.Attest(context.Background(), tokenNonce, maaURL, http.DefaultClient)
 	if err != nil {
 		return nil, fmt.Errorf("error fetching azure token: %w", err)
+	}
+	if token == "" {
+		return nil, errors.New("error fetching azure token: empty token")
 	}
 	return []byte(token), nil
 }

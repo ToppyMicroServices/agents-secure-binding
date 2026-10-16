@@ -11,149 +11,82 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestEmptyProvider_Attestation(t *testing.T) {
-	tests := []struct {
-		name      string
-		teeNonce  []byte
-		vTpmNonce []byte
-		wantErr   bool
+func TestEmptyProviderRejectsUnsupportedEvidenceCollection(t *testing.T) {
+	p := &EmptyProvider{}
+	methods := []struct {
+		name    string
+		collect func([]byte) ([]byte, error)
 	}{
 		{
-			name:      "should return error for empty nonces",
-			teeNonce:  []byte{},
-			vTpmNonce: []byte{},
-			wantErr:   true,
+			name: "Attestation",
+			collect: func(nonce []byte) ([]byte, error) {
+				return p.Attestation(nonce, nonce)
+			},
 		},
-		{
-			name:      "should return error for valid nonces",
-			teeNonce:  make([]byte, 64),
-			vTpmNonce: make([]byte, 32),
-			wantErr:   true,
-		},
-		{
-			name:      "should return error for nil nonces",
-			teeNonce:  nil,
-			vTpmNonce: nil,
-			wantErr:   true,
-		},
+		{name: "TeeAttestation", collect: p.TeeAttestation},
+		{name: "AzureAttestationToken", collect: p.AzureAttestationToken},
 	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			p := &EmptyProvider{}
-			got, err := p.Attestation(tt.teeNonce, tt.vTpmNonce)
-
-			if tt.wantErr {
-				assert.Error(t, err)
-				assert.Nil(t, got)
-				assert.Contains(t, err.Error(), "EmptyProvider should not be used")
-			} else {
-				assert.NoError(t, err)
-				assert.NotNil(t, got)
+	nonces := []struct {
+		name  string
+		value []byte
+	}{
+		{name: "nil", value: nil},
+		{name: "empty", value: []byte{}},
+		{name: "nonempty", value: []byte("nonce")},
+	}
+	for _, method := range methods {
+		t.Run(method.name, func(t *testing.T) {
+			for _, nonce := range nonces {
+				t.Run(nonce.name, func(t *testing.T) {
+					evidence, err := method.collect(nonce.value)
+					require.Error(t, err)
+					assert.Contains(t, err.Error(), "EmptyProvider should not be used")
+					assert.Nil(t, evidence, "an unavailable provider must not return embedded or other evidence")
+				})
 			}
 		})
 	}
 }
 
-func TestEmptyProvider_TeeAttestation(t *testing.T) {
-	tests := []struct {
-		name     string
-		teeNonce []byte
-		wantErr  bool
-	}{
-		{
-			name:     "should return error for empty nonce",
-			teeNonce: []byte{},
-			wantErr:  true,
-		},
-		{
-			name:     "should return error for valid nonce",
-			teeNonce: make([]byte, 64),
-			wantErr:  true,
-		},
-		{
-			name:     "should return error for nil nonce",
-			teeNonce: nil,
-			wantErr:  true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			p := &EmptyProvider{}
-			got, err := p.TeeAttestation(tt.teeNonce)
-
-			assert.Error(t, err)
-			assert.Nil(t, got)
-			assert.Contains(t, err.Error(), "EmptyProvider should not be used")
-		})
-	}
-}
-
-func TestEmptyProvider_VTpmAttestation(t *testing.T) {
-	tests := []struct {
-		name      string
-		vTpmNonce []byte
-		wantErr   bool
-	}{
-		{
-			name:      "should return embedded attestation for empty nonce",
-			vTpmNonce: []byte{},
-			wantErr:   false,
-		},
-		{
-			name:      "should return embedded attestation for valid nonce",
-			vTpmNonce: make([]byte, 32),
-			wantErr:   false,
-		},
-		{
-			name:      "should return embedded attestation for nil nonce",
-			vTpmNonce: nil,
-			wantErr:   false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			p := &EmptyProvider{}
-			got, err := p.VTpmAttestation(tt.vTpmNonce)
-
-			require.NoError(t, err)
-			assert.Equal(t, asb.EmbeddedAttestation, got)
-		})
-	}
-}
-
-func TestEmptyProvider_AzureAttestationToken(t *testing.T) {
-	tests := []struct {
+func TestEmptyProviderVTpmAttestationRequiresNonemptySample(t *testing.T) {
+	// These tests run serially because they temporarily replace the package's
+	// embedded sample. Collection success does not verify hardware evidence.
+	saved := asb.EmbeddedAttestation
+	t.Cleanup(func() { asb.EmbeddedAttestation = saved })
+	require.NotEmpty(t, saved)
+	fixtures := []struct {
 		name    string
-		nonce   []byte
+		value   []byte
 		wantErr bool
 	}{
-		{
-			name:    "should return nil for empty nonce",
-			nonce:   []byte{},
-			wantErr: false,
-		},
-		{
-			name:    "should return nil for valid nonce",
-			nonce:   make([]byte, 32),
-			wantErr: false,
-		},
-		{
-			name:    "should return nil for nil nonce",
-			nonce:   nil,
-			wantErr: false,
-		},
+		{name: "embedded sample", value: saved},
+		{name: "nil sample", value: nil, wantErr: true},
+		{name: "empty sample", value: []byte{}, wantErr: true},
 	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			p := &EmptyProvider{}
-			got, err := p.AzureAttestationToken(tt.nonce)
-
-			require.NoError(t, err)
-			assert.Nil(t, got)
+	nonces := []struct {
+		name  string
+		value []byte
+	}{
+		{name: "nil", value: nil},
+		{name: "empty", value: []byte{}},
+		{name: "nonempty", value: make([]byte, 32)},
+	}
+	p := &EmptyProvider{}
+	for _, fixture := range fixtures {
+		t.Run(fixture.name, func(t *testing.T) {
+			asb.EmbeddedAttestation = fixture.value
+			for _, nonce := range nonces {
+				t.Run(nonce.name, func(t *testing.T) {
+					evidence, err := p.VTpmAttestation(nonce.value)
+					if fixture.wantErr {
+						require.Error(t, err)
+						assert.Nil(t, evidence)
+						return
+					}
+					require.NoError(t, err)
+					assert.Equal(t, saved, evidence)
+				})
+			}
 		})
 	}
 }

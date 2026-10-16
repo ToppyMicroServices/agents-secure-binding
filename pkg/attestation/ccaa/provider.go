@@ -73,6 +73,9 @@ func (p *Provider) TeeAttestation(reportData []byte) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("CC attestation-agent GetEvidence failed: %w", err)
 	}
+	if resp == nil || len(resp.Evidence) == 0 {
+		return nil, errors.New("CC attestation-agent GetEvidence returned empty evidence")
+	}
 
 	return resp.Evidence, nil
 }
@@ -88,6 +91,9 @@ func (p *Provider) VTpmAttestation(nonce []byte) ([]byte, error) {
 	})
 	if err != nil {
 		return nil, fmt.Errorf("CC attestation-agent GetEvidence failed: %w", err)
+	}
+	if resp == nil || len(resp.Evidence) == 0 {
+		return nil, errors.New("CC attestation-agent GetEvidence returned empty evidence")
 	}
 
 	return resp.Evidence, nil
@@ -107,6 +113,9 @@ func (p *Provider) Attestation(reportData []byte, nonce []byte) ([]byte, error) 
 	})
 	if err != nil {
 		return nil, fmt.Errorf("CC attestation-agent GetEvidence failed: %w", err)
+	}
+	if resp == nil || len(resp.Evidence) == 0 {
+		return nil, errors.New("CC attestation-agent GetEvidence returned empty evidence")
 	}
 
 	return resp.Evidence, nil
@@ -131,7 +140,13 @@ func (p *Provider) AzureAttestationToken(nonce []byte) ([]byte, error) {
 		if evidenceErr != nil {
 			return nil, fmt.Errorf("CC attestation-agent Azure token not supported: GetToken failed: %w, GetEvidence fallback failed: %v", err, evidenceErr)
 		}
+		if evidenceResp == nil || len(evidenceResp.Evidence) == 0 {
+			return nil, fmt.Errorf("CC attestation-agent Azure token not supported: GetToken failed: %w, GetEvidence fallback returned empty evidence", err)
+		}
 		return evidenceResp.Evidence, nil
+	}
+	if resp == nil || len(resp.Token) == 0 {
+		return nil, errors.New("CC attestation-agent GetToken returned empty token")
 	}
 
 	return resp.Token, nil

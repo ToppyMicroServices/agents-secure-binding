@@ -4,6 +4,7 @@ package attestation
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -73,6 +74,9 @@ func (c *client) GetAttestation(ctx context.Context, reportData [64]byte, nonce 
 	if err != nil {
 		return nil, err
 	}
+	if resp == nil || len(resp.EatToken) == 0 {
+		return nil, errors.New("attestation service returned empty attestation token")
+	}
 
 	return resp.EatToken, nil
 }
@@ -109,6 +113,9 @@ func (c *client) GetRawEvidence(ctx context.Context, reportData [64]byte, nonce 
 	if err != nil {
 		return nil, err
 	}
+	if resp == nil || len(resp.Evidence) == 0 {
+		return nil, errors.New("attestation service returned empty evidence")
+	}
 
 	return resp.Evidence, nil
 }
@@ -124,6 +131,9 @@ func (c *client) GetAzureToken(ctx context.Context, nonce [32]byte) ([]byte, err
 	resp, err := c.client.FetchAzureToken(ctx, req)
 	if err != nil {
 		return nil, err
+	}
+	if resp == nil || len(resp.Token) == 0 {
+		return nil, errors.New("attestation service returned empty Azure token")
 	}
 
 	return resp.Token, nil
