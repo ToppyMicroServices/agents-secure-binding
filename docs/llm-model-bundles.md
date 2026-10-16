@@ -193,7 +193,13 @@ Missing or extra base tensors and a missing adapter tensor were rejected.
 An A2A round trip used the sharded model for Agent A and the LoRA model for
 Agent B, with simulated attestation. The tested environment was Python 3.14.6,
 PyTorch 2.14.1, Transformers 5.19.0, PEFT 0.21.2, Safetensors 0.8.0, and
-tokenizers 0.23.3. CUDA/MPS execution and production checkpoints remain untested.
+tokenizers 0.23.3. That run did not cover pretrained checkpoints or CUDA/MPS.
+
+On 2026-10-16 JST, a real SmolLM2-135M-Instruct checkpoint and a locally trained
+PEFT LoRA passed two A2A round trips and eleven artifact-rejection cases on a
+Mac CPU. See the [real-model validation record](real-model-lora-cpu-validation.md)
+for source pins, training evidence, results, and reproduction steps. CUDA/MPS
+execution remains untested.
 
 To reproduce this test with those dependencies installed in a virtual environment:
 
