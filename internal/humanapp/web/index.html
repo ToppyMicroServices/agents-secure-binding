@@ -19,7 +19,7 @@
       <div class="intro">
         <p class="eyebrow">AGENT → HUMAN → ACTION</p>
         <h1 id="login-heading">実行する前に、<br>あなたが確認する。</h1>
-        <p class="lead">Agentが提案した設定変更を、差分を見て承認・拒否します。変更するのは、このアプリ内の練習用設定だけです。OSや外部サービスの設定は変更しません。</p>
+        <p class="lead">Agentが提案した設定変更を、差分を見て許可・拒否・該当なし・判断不明から選びます。許可した場合だけ、このアプリ内の練習用設定を変更します。OSや外部サービスの設定は変更しません。</p>
         <div class="flow" aria-label="提案、確認、適用の流れ"><span>01 <strong>提案</strong></span><i aria-hidden="true">→</i><span>02 <strong>確認</strong></span><i aria-hidden="true">→</i><span>03 <strong>適用</strong></span></div>
       </div>
       <form id="login-form" class="panel login-panel">
@@ -36,7 +36,7 @@
 
     <section id="dashboard" hidden aria-labelledby="dashboard-heading">
       <div class="page-heading">
-        <div><p class="eyebrow">HUMAN REVIEW INBOX</p><h1 id="dashboard-heading">変更を確認する</h1><p class="muted">承認した変更を、このアプリ内の練習用設定に適用します。OSや外部サービスには影響しません。</p></div>
+        <div><p class="eyebrow">HUMAN REVIEW INBOX</p><h1 id="dashboard-heading">変更を確認する</h1><p class="muted">許可した変更だけを、このアプリ内の練習用設定に適用します。該当なし・判断不明では変更しません。OSや外部サービスには影響しません。</p></div>
         <div class="toolbar"><button id="refresh-button" class="button secondary" type="button">一覧を更新</button><button id="logout-button" class="button quiet" type="button">ログアウト</button></div>
       </div>
       <div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
@@ -74,7 +74,7 @@
       <div class="change-comparison"><div><span class="small muted">変更前</span><strong class="before-value"></strong><span class="small muted before-revision"></span></div><span class="change-arrow" aria-hidden="true">→</span><div><span class="small muted">提案された変更後</span><strong class="proposed-value"></strong><span class="small muted">local / maintenance_mode</span></div></div>
       <p class="operation-outcome" hidden></p>
       <details class="operation-details"><summary>操作の詳細</summary><dl><dt>操作ID</dt><dd class="operation-id"></dd><dt>提案digest</dt><dd class="proposal-digest"></dd><dt>提案日時</dt><dd class="created-at"></dd><dt class="decided-label" hidden>判断日時</dt><dd class="decided-at" hidden></dd></dl></details>
-      <div class="operation-actions"><p class="small muted">この差分を確認して判断してください。</p><div><button class="button secondary decline-button" type="button">拒否する</button><button class="button primary approve-button" type="button">承認する <span aria-hidden="true">→</span></button></div></div>
+      <div class="operation-actions"><p class="small muted">対象外なら「該当なし」、判断できなければ「判断不明」を選べます。許可した場合だけ変更します。</p><div><button class="button secondary not-applicable-button" type="button">該当なし</button><button class="button secondary undetermined-button" type="button">判断不明</button><button class="button secondary decline-button" type="button">拒否する</button><button class="button primary approve-button" type="button">許可する <span aria-hidden="true">→</span></button></div></div>
     </article>
   </template>
 </body>

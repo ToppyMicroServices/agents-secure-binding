@@ -128,7 +128,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		flags.StringVar(&agentCfg.operationID, "operation-id", "", "proposal identifier; generated when omitted")
 		flags.StringVar(&agentCfg.receipt, "receipt", "", "save or resume an immutable proposal receipt")
 		flags.BoolVar(&agentCfg.enabled, "enabled", true, "requested local maintenance_mode value (use --enabled=false to disable)")
-		flags.BoolVar(&agentCfg.wait, "wait", false, "poll until the proposal is applied, denied, or stale")
+		flags.BoolVar(&agentCfg.wait, "wait", false, "poll until the proposal reaches a terminal state")
 		flags.DurationVar(&agentCfg.poll, "poll-interval", time.Second, "interval between freshly authenticated status requests")
 		flags.DurationVar(&agentCfg.timeout, "timeout", 0, "stop waiting after this duration; zero waits until interrupted")
 	case commandInspect:
@@ -581,7 +581,12 @@ func runInspection(ctx context.Context, command humanapp.Command, execute execut
 }
 
 func terminal(state string) bool {
-	return state == humanapp.StateApplied || state == humanapp.StateDenied || state == humanapp.StateStale
+	switch state {
+	case humanapp.StateApplied, humanapp.StateDenied, humanapp.StateNotApplicable, humanapp.StateUndetermined, humanapp.StateStale:
+		return true
+	default:
+		return false
+	}
 }
 
 func checkedResponse(raw []byte, commandID, operationID, digest string) (humanapp.Response, error) {

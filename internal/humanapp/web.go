@@ -264,12 +264,18 @@ func (h *webHandler) authorizeMutation(w http.ResponseWriter, r *http.Request) (
 
 func (h *webHandler) decision(w http.ResponseWriter, r *http.Request) {
 	var input struct {
-		OperationID      string  `json:"operation_id"`
-		ProposalDigest   string  `json:"proposal_digest"`
-		ExpectedRevision *uint64 `json:"expected_revision"`
-		Approve          *bool   `json:"approve"`
+		OperationID      string          `json:"operation_id"`
+		ProposalDigest   string          `json:"proposal_digest"`
+		ExpectedRevision *uint64         `json:"expected_revision"`
+		Decision         json.RawMessage `json:"decision"`
+		Approve          json.RawMessage `json:"approve"`
 	}
-	if decodeJSON(http.MaxBytesReader(w, r.Body, MaxRequestBytes), &input) != nil || input.ExpectedRevision == nil || input.Approve == nil {
+	if decodeJSON(http.MaxBytesReader(w, r.Body, MaxRequestBytes), &input) != nil || input.ExpectedRevision == nil {
+		webError(w, 400, "INVALID_REQUEST", "対象の変更を再読み込みしてください。", false)
+		return
+	}
+	kind, ok := webDecisionKind(input.Decision, input.Approve)
+	if !ok {
 		webError(w, 400, "INVALID_REQUEST", "対象の変更を再読み込みしてください。", false)
 		return
 	}
@@ -278,16 +284,35 @@ func (h *webHandler) decision(w http.ResponseWriter, r *http.Request) {
 		webError(w, 500, "INTERNAL_ERROR", "要求を作成できませんでした。", false)
 		return
 	}
-	kind := KindDecline
-	if *input.Approve {
-		kind = KindApprove
-	}
 	command := Command{CommandID: id.String(), Kind: kind, OperationID: input.OperationID, ProposalDigest: input.ProposalDigest, ExpectedRevision: *input.ExpectedRevision}
 	if command.Validate() != nil {
 		webError(w, 400, "INVALID_REQUEST", "対象の変更を再読み込みしてください。", false)
 		return
 	}
 	h.executeCommand(w, r, command)
+}
+
+func webDecisionKind(decision, approve json.RawMessage) (string, bool) {
+	// Presence matters: even a null legacy field must not accompany decision.
+	if (len(decision) == 0) == (len(approve) == 0) {
+		return "", false
+	}
+	if len(decision) != 0 {
+		var kind string
+		if json.Unmarshal(decision, &kind) != nil || !isDecisionKind(kind) {
+			return "", false
+		}
+		return kind, true
+	}
+	// Preserve the original boolean-only API without treating null as decline.
+	var legacy *bool
+	if json.Unmarshal(approve, &legacy) != nil || legacy == nil {
+		return "", false
+	}
+	if *legacy {
+		return KindApprove, true
+	}
+	return KindDecline, true
 }
 
 func (h *webHandler) executeCommand(w http.ResponseWriter, r *http.Request, command Command) {

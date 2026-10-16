@@ -99,7 +99,16 @@ function displayDate(value) {
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? "—" : new Intl.DateTimeFormat("ja-JP", {dateStyle:"medium", timeStyle:"short"}).format(date);
 }
-const stateLabels = {PENDING_REVIEW:"確認待ち", APPLIED:"適用済み", DENIED:"拒否済み", STALE:"更新の競合"};
+const stateLabels = {PENDING_REVIEW:"確認待ち", APPLIED:"適用済み", DENIED:"拒否済み", NOT_APPLICABLE:"該当なし", UNDETERMINED:"判断不明", OUTCOME_UNKNOWN:"処理結果不明", STALE:"更新の競合"};
+const decisionChoices = {
+  APPROVE: {selector:".approve-button", heading:"この変更を許可しますか？", description:"確認した差分をローカル設定に適用します。提案後に設定が変わっている場合は適用しません。", confirm:"許可して適用"},
+  DECLINE: {selector:".decline-button", heading:"この提案を拒否しますか？", description:"この提案による設定変更は行いません。拒否の判断を記録します。", confirm:"拒否を確定"},
+  NOT_APPLICABLE: {selector:".not-applicable-button", heading:"この提案は該当なしですか？", description:"自分の判断対象ではないことを記録します。許可として扱わず、この提案による設定変更は行いません。", confirm:"該当なしを確定"},
+  UNDETERMINED: {selector:".undetermined-button", heading:"この提案を判断できませんか？", description:"情報不足などで判断できないことを記録します。許可として扱わず、この提案による設定変更は行いません。これは送信後の処理結果不明とは別の判断です。", confirm:"判断不明を確定"},
+};
+function validDecision(decision) {
+  return typeof decision === "string" && Object.prototype.hasOwnProperty.call(decisionChoices, decision);
+}
 
 function operationCard(operation) {
   const card = element("operation-template").content.firstElementChild.cloneNode(true);
@@ -108,6 +117,7 @@ function operationCard(operation) {
   find(".state-tag").textContent = stateLabels[operation.state] || "状態を確認してください";
   if (operation.state === "APPLIED") find(".state-tag").classList.add("applied");
   if (operation.state === "DENIED") find(".state-tag").classList.add("denied");
+  if (operation.state === "NOT_APPLICABLE" || operation.state === "UNDETERMINED") find(".state-tag").classList.add("no-change");
   if (operation.state === "STALE") find(".state-tag").classList.add("stale");
   find(".before-value").textContent = displaySetting(operation.before.enabled);
   find(".before-revision").textContent = "revision " + operation.before.revision;
@@ -122,10 +132,16 @@ function operationCard(operation) {
   }
   const outcome = find(".operation-outcome");
   if (operation.state === "APPLIED") {
-    outcome.textContent = "承認された変更を適用しました。" + (operation.after ? " 適用後 revision " + operation.after.revision : "");
+    outcome.textContent = "許可された変更を適用しました。" + (operation.after ? " 適用後 revision " + operation.after.revision : "");
     outcome.hidden = false;
   } else if (operation.state === "DENIED") {
     outcome.textContent = "この提案は拒否されました。この提案による設定変更はありません。";
+    outcome.hidden = false;
+  } else if (operation.state === "NOT_APPLICABLE") {
+    outcome.textContent = "自分の判断対象ではないとして、該当なしを記録しました。この提案による設定変更はありません。";
+    outcome.hidden = false;
+  } else if (operation.state === "UNDETERMINED") {
+    outcome.textContent = "判断できないという回答を記録しました。この提案による設定変更はありません。処理結果不明とは別の判断です。";
     outcome.hidden = false;
   } else if (operation.state === "STALE") {
     outcome.textContent = "提案後に設定が変わりました。Agentから最新の設定に対する提案が必要です。";
@@ -133,14 +149,16 @@ function operationCard(operation) {
   }
   const actions = find(".operation-actions");
   actions.hidden = operation.state !== "PENDING_REVIEW";
-  if (unknownOperations.has(operation.operation_id)) {
-    outcome.textContent = "結果確認待ちです。「一覧を更新」で現在の状態を確認してください。";
+  const outcomeUnknown = unknownOperations.has(operation.operation_id) || operation.state === "OUTCOME_UNKNOWN";
+  if (outcomeUnknown) {
+    find(".state-tag").textContent = stateLabels.OUTCOME_UNKNOWN;
+    outcome.textContent = "処理結果不明です。判断が記録・適用されたかを確認できません。再送せず「一覧を更新」で現在の状態を確認してください。人間の回答である「判断不明」とは異なります。";
     outcome.hidden = false;
-    find(".approve-button").disabled = true;
-    find(".decline-button").disabled = true;
   }
-  find(".approve-button").addEventListener("click", () => openDecision(operation, true));
-  find(".decline-button").addEventListener("click", () => openDecision(operation, false));
+  for (const [decision, choice] of Object.entries(decisionChoices)) {
+    find(choice.selector).disabled = outcomeUnknown || operation.state !== "PENDING_REVIEW";
+    find(choice.selector).addEventListener("click", () => openDecision(operation, decision));
+  }
   return card;
 }
 
@@ -227,16 +245,26 @@ async function refreshInbox(manual = false) {
   }
 }
 
-function openDecision(operation, approve) {
+function openDecision(operation, decision) {
   if (deciding) return;
-  selectedDecision = {operation, approve};
-  element("decision-heading").textContent = approve ? "この変更を承認しますか？" : "この提案を拒否しますか？";
-  element("decision-description").textContent = approve ? "確認した差分をローカル設定に適用します。提案後に設定が変わっている場合は適用しません。" : "この提案による設定変更は行いません。拒否の判断を記録します。";
+  if (!validDecision(decision)) {
+    selectedDecision = null;
+    element("decision-dialog").close();
+    setNotice("有効な判断を選んでください。", true);
+    return;
+  }
+  if (operation.state !== "PENDING_REVIEW" || unknownOperations.has(operation.operation_id)) return;
+  const choice = decisionChoices[decision];
+  selectedDecision = {operation, decision};
+  element("decision-heading").textContent = choice.heading;
+  element("decision-description").textContent = choice.description;
   element("decision-change").textContent = shortSetting(operation.before.enabled) + " → " + shortSetting(operation.change.enabled);
   element("decision-operation").textContent = operation.operation_id;
   element("decision-warning").textContent = "Gatewayがこの判断を人への帰属として送信します。Human本人の鍵による署名ではありません。";
-  element("confirm-decision").textContent = approve ? "承認して適用" : "拒否を確定";
-  element("confirm-decision").classList.toggle("danger", !approve);
+  element("confirm-decision").textContent = choice.confirm;
+  element("confirm-decision").classList.toggle("primary", decision === "APPROVE");
+  element("confirm-decision").classList.toggle("danger", decision === "DECLINE");
+  element("confirm-decision").classList.toggle("secondary", decision === "NOT_APPLICABLE" || decision === "UNDETERMINED");
   element("decision-dialog").showModal();
   element("cancel-decision").focus();
 }
@@ -248,14 +276,20 @@ element("decision-dialog").addEventListener("cancel", (event) => { if (deciding)
 element("decision-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   if (!selectedDecision || deciding) return;
-  const {operation, approve} = selectedDecision;
+  const {operation, decision} = selectedDecision;
+  if (!validDecision(decision) || operation.state !== "PENDING_REVIEW" || unknownOperations.has(operation.operation_id)) {
+    selectedDecision = null;
+    element("decision-dialog").close();
+    setNotice("判断を送信できません。一覧を更新して確認してください。", true);
+    return;
+  }
   inboxGeneration++;
   deciding = true;
   element("confirm-decision").disabled = true;
   element("cancel-decision").disabled = true;
   element("decision-description").textContent = "判断を送信しています…";
   try {
-    const response = await post("/api/decision", {operation_id:operation.operation_id, proposal_digest:operation.proposal_digest, expected_revision:operation.before.revision, approve});
+    const response = await post("/api/decision", {operation_id:operation.operation_id, proposal_digest:operation.proposal_digest, expected_revision:operation.before.revision, decision});
     const result = response.operation;
     setNotice(result ? "操作 " + result.operation_id + "：" + (stateLabels[result.state] || result.state) : "判断の応答を受信しました。一覧で結果を確認してください。");
   } catch (error) {

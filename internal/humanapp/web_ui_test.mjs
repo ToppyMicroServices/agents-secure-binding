@@ -6,6 +6,8 @@ import test from "node:test";
 import vm from "node:vm";
 
 const source = readFileSync(new URL("web/app.js", import.meta.url), "utf8");
+const markup = readFileSync(new URL("web/index.html", import.meta.url), "utf8");
+const choiceSelectors = [".approve-button", ".decline-button", ".not-applicable-button", ".undetermined-button"];
 
 class Element {
   constructor() {
@@ -14,7 +16,9 @@ class Element {
     this.hidden = false;
     this.textContent = "";
     this.mutations = 0;
-    this.classList = {toggle() {}};
+    this.disabled = false;
+    const classes = new Set();
+    this.classList = {toggle(name, enabled) { if (enabled) classes.add(name); else classes.delete(name); }, add(name) { classes.add(name); }, contains(name) { return classes.has(name); }};
     this.details = {open: false};
     this.listeners = new Map();
   }
@@ -44,7 +48,25 @@ class Element {
   }
 }
 
-function application() {
+class OperationCard extends Element {
+  constructor() {
+    super();
+    this.parts = new Map([[".operation-details", this.details]]);
+    const template = markup.match(/<template id="operation-template">([\s\S]*?)<\/template>/)[1];
+    for (const attribute of template.matchAll(/class="([^"]+)"/g)) {
+      for (const name of attribute[1].split(" ")) {
+        if (!this.parts.has("." + name)) this.parts.set("." + name, new Element());
+      }
+    }
+  }
+  querySelector(selector) {
+    assert.ok(this.parts.has(selector), `template is missing ${selector}`);
+    return this.parts.get(selector);
+  }
+  cloneNode() { return new OperationCard(); }
+}
+
+function application({realCards = false} = {}) {
   const nodes = new Map();
   const element = (id) => {
     if (!nodes.has(id)) nodes.set(id, new Element());
@@ -56,12 +78,14 @@ function application() {
     document: {getElementById: element, addEventListener() {}},
     makeCard: () => new Element(),
   });
+  element("operation-template").content = {firstElementChild: new OperationCard()};
   // Do not start network login. Exercise the shipped render and refresh
   // functions with only operation-card markup replaced by a minimal DOM node.
   assert.match(source, /\nstart\(\);\s*$/);
   vm.runInContext(source.replace(/\nstart\(\);\s*$/, "\n"), context);
-  vm.runInContext("operationCard = () => makeCard(); loggedIn = true;", context);
-  const api = vm.runInContext("({renderOperationLists, refreshInbox, openDecision, showLogin, activateSession, unknownOperations})", context);
+  if (!realCards) vm.runInContext("operationCard = () => makeCard();", context);
+  vm.runInContext("loggedIn = true;", context);
+  const api = vm.runInContext("({operationCard, renderOperationLists, refreshInbox, openDecision, showLogin, activateSession, unknownOperations})", context);
   return {element, context, ...api};
 }
 
@@ -142,6 +166,112 @@ const reviewedOperation = {
 const appliedOperation = {...reviewedOperation, state: "APPLIED", after: {enabled: true, revision: 1}};
 const inbox = (operation, setting) => ({operations: [operation], setting});
 
+const decisions = [
+  {decision:"APPROVE", selector:".approve-button", state:"APPLIED", label:"適用済み", heading:"この変更を許可しますか？", confirm:"許可して適用"},
+  {decision:"DECLINE", selector:".decline-button", state:"DENIED", label:"拒否済み", heading:"この提案を拒否しますか？", confirm:"拒否を確定"},
+  {decision:"NOT_APPLICABLE", selector:".not-applicable-button", state:"NOT_APPLICABLE", label:"該当なし", heading:"この提案は該当なしですか？", confirm:"該当なしを確定"},
+  {decision:"UNDETERMINED", selector:".undetermined-button", state:"UNDETERMINED", label:"判断不明", heading:"この提案を判断できませんか？", confirm:"判断不明を確定"},
+];
+
+for (const choice of decisions) {
+  test(`${choice.decision} sends an explicit decision and renders its own final result`, async () => {
+    const app = application({realCards: true});
+    const result = {...reviewedOperation, state: choice.state, decided_at:"2026-10-16T01:00:00Z"};
+    const setting = choice.decision === "APPROVE" ? appliedOperation.after : reviewedOperation.before;
+    if (choice.decision === "APPROVE") result.after = setting;
+    const sent = [];
+    app.context.fetch = async (path, options) => {
+      if (path === "/api/decision") {
+        sent.push(JSON.parse(options.body));
+        return response({operation: result});
+      }
+      assert.equal(path, "/api/inbox");
+      return response(inbox(result, setting));
+    };
+    const card = app.operationCard(reviewedOperation);
+    card.querySelector(choice.selector).dispatch("click");
+    assert.equal(app.element("decision-dialog").open, true);
+    assert.equal(app.element("decision-heading").textContent, choice.heading);
+    assert.equal(app.element("confirm-decision").textContent, choice.confirm);
+    assert.equal(app.element("confirm-decision").classList.contains("primary"), choice.decision === "APPROVE");
+    if (choice.decision !== "APPROVE") assert.match(app.element("decision-description").textContent, /設定変更は行いません/);
+    if (choice.decision === "UNDETERMINED") assert.match(app.element("decision-description").textContent, /処理結果不明とは別/);
+    await app.element("decision-form").dispatch("submit");
+    assert.deepEqual(sent, [{operation_id:reviewedOperation.operation_id, proposal_digest:reviewedOperation.proposal_digest, expected_revision:0, decision:choice.decision}]);
+    assert.equal(app.element("pending-list").children.length, 0);
+    const history = app.element("history-list").children[0];
+    assert.equal(history.querySelector(".state-tag").textContent, choice.label);
+    assert.equal(history.querySelector(".operation-actions").hidden, true);
+    assert.equal(history.querySelector(".operation-outcome").hidden, false);
+    for (const selector of choiceSelectors) assert.equal(history.querySelector(selector).disabled, true);
+    if (choice.decision !== "APPROVE") assert.match(history.querySelector(".operation-outcome").textContent, /設定変更はありません/);
+    assert.equal(app.unknownOperations.size, 0, "human uncertainty must not become transport uncertainty");
+    assert.equal(app.element("current-setting").textContent, choice.decision === "APPROVE" ? "ON · 有効" : "OFF · 無効");
+    assert.equal(app.element("current-revision").textContent, choice.decision === "APPROVE" ? "revision 1" : "revision 0");
+    assert.match(app.element("notice").textContent, new RegExp(choice.label));
+  });
+
+  test(`an uncertain ${choice.decision} submission blocks all four choices until a fresh manual read`, async () => {
+    const app = application({realCards: true});
+    let posts = 0;
+    app.context.fetch = async (path) => {
+      if (path === "/api/decision") {
+        posts++;
+        return response({message:"処理結果不明", outcome_unknown:true}, 503);
+      }
+      assert.equal(path, "/api/inbox");
+      return response(inbox(reviewedOperation, reviewedOperation.before));
+    };
+    app.openDecision(reviewedOperation, choice.decision);
+    await app.element("decision-form").dispatch("submit");
+    const card = app.element("pending-list").children[0];
+    assert.equal(card.querySelector(".state-tag").textContent, "処理結果不明");
+    assert.match(card.querySelector(".operation-outcome").textContent, /人間の回答である「判断不明」とは異なります/);
+    for (const selector of choiceSelectors) {
+      assert.equal(card.querySelector(selector).disabled, true);
+      card.querySelector(selector).dispatch("click");
+      assert.equal(app.element("decision-dialog").open, false);
+      await app.element("decision-form").dispatch("submit");
+    }
+    assert.equal(posts, 1);
+    await app.refreshInbox();
+    assert.equal(app.unknownOperations.has(reviewedOperation.operation_id), true);
+    await app.refreshInbox(true);
+    const refreshed = app.element("pending-list").children[0];
+    assert.equal(refreshed.querySelector(".state-tag").textContent, "確認待ち");
+    for (const selector of choiceSelectors) assert.equal(refreshed.querySelector(selector).disabled, false);
+  });
+}
+
+test("an explicit OUTCOME_UNKNOWN state is not a human UNDETERMINED answer", () => {
+  const app = application({realCards:true});
+  const card = app.operationCard({...reviewedOperation, state:"OUTCOME_UNKNOWN"});
+  assert.equal(card.querySelector(".state-tag").textContent, "処理結果不明");
+  assert.equal(card.querySelector(".operation-actions").hidden, true);
+  assert.match(card.querySelector(".operation-outcome").textContent, /記録・適用されたかを確認できません/);
+  for (const selector of choiceSelectors) {
+    assert.equal(card.querySelector(selector).disabled, true);
+    card.querySelector(selector).dispatch("click");
+    assert.equal(app.element("decision-dialog").open, false);
+  }
+});
+
+test("unknown, missing, and boolean choices never fall back to permission or send a request", async () => {
+  const app = application();
+  let requests = 0;
+  app.context.fetch = () => { requests++; throw new Error("unexpected request"); };
+  for (const invalid of [undefined, null, "", "approve", "UNKNOWN", "OUTCOME_UNKNOWN", "__proto__", "constructor", true, false]) {
+    app.openDecision(reviewedOperation, "APPROVE");
+    app.openDecision(reviewedOperation, invalid);
+    assert.equal(app.element("decision-dialog").open, false);
+    await app.element("decision-form").dispatch("submit");
+  }
+  app.openDecision(reviewedOperation, "APPROVE");
+  vm.runInContext("delete selectedDecision.decision", app.context);
+  await app.element("decision-form").dispatch("submit");
+  assert.equal(requests, 0);
+});
+
 for (const arrival of ["during", "after"]) {
   test(`an inbox response from before approval arriving ${arrival} the decision cannot restore old state`, async () => {
     const app = application();
@@ -159,7 +289,7 @@ for (const arrival of ["during", "after"]) {
     const card = app.element("pending-list").children[0];
     card.details.open = true;
     const reading = app.refreshInbox();
-    app.openDecision(reviewedOperation, true);
+    app.openDecision(reviewedOperation, "APPROVE");
     const submitting = app.element("decision-form").dispatch("submit");
     if (arrival === "during") {
       oldRead.resolve(response(inbox(reviewedOperation, reviewedOperation.before)));
@@ -195,7 +325,7 @@ test("an old manual read and its queued automatic refresh cannot clear an uncert
     return ++reads === 1 ? oldRead.promise : Promise.resolve(response(inbox(reviewedOperation, reviewedOperation.before)));
   };
   const reading = app.refreshInbox(true);
-  app.openDecision(reviewedOperation, true);
+  app.openDecision(reviewedOperation, "APPROVE");
   await app.element("decision-form").dispatch("submit");
   oldRead.resolve(response(inbox(reviewedOperation, reviewedOperation.before)));
   await reading;

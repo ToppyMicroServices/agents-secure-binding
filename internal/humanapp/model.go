@@ -24,24 +24,30 @@ import (
 )
 
 const (
-	ActorAgent       = "agent:local-proposer"
-	ActorGateway     = "gateway:local-human"
-	HumanParticipant = "human:local-owner"
-	Assurance        = "gateway-asserted-for-human"
-	KindPropose      = "PROPOSE"
-	KindApprove      = "APPROVE"
-	KindDecline      = "DECLINE"
-	KindStatus       = "STATUS"
-	KindInbox        = "INBOX"
-	StatePending     = "PENDING_REVIEW"
-	StateApplied     = "APPLIED"
-	StateDenied      = "DENIED"
-	StateStale       = "STALE"
-	Tenant           = "local"
-	SettingName      = "maintenance_mode"
-	ChallengePath    = "/v1/challenge"
-	CommandPath      = "/v1/commands"
-	MaxRequestBytes  = 16 << 10
+	ActorAgent         = "agent:local-proposer"
+	ActorGateway       = "gateway:local-human"
+	HumanParticipant   = "human:local-owner"
+	Assurance          = "gateway-asserted-for-human"
+	KindPropose        = "PROPOSE"
+	KindApprove        = "APPROVE"
+	KindDecline        = "DECLINE"
+	KindNotApplicable  = "NOT_APPLICABLE"
+	KindUndetermined   = "UNDETERMINED"
+	KindStatus         = "STATUS"
+	KindInbox          = "INBOX"
+	StatePending       = "PENDING_REVIEW"
+	StateApplied       = "APPLIED"
+	StateDenied        = "DENIED"
+	StateNotApplicable = "NOT_APPLICABLE"
+	// StateUndetermined records a Human's inability to decide. The decision
+	// itself is known and durable; it is not an unknown execution outcome.
+	StateUndetermined = "UNDETERMINED"
+	StateStale        = "STALE"
+	Tenant            = "local"
+	SettingName       = "maintenance_mode"
+	ChallengePath     = "/v1/challenge"
+	CommandPath       = "/v1/commands"
+	MaxRequestBytes   = 16 << 10
 )
 
 var (
@@ -130,7 +136,7 @@ func (c Command) Validate() error {
 		if _, err := protectedchange.CanonicalActionContext(*c.Change); err != nil {
 			return ErrInvalid
 		}
-	case KindApprove, KindDecline:
+	case KindApprove, KindDecline, KindNotApplicable, KindUndetermined:
 		if c.Change != nil || !digestPattern.MatchString(c.ProposalDigest) {
 			return ErrInvalid
 		}
@@ -149,7 +155,16 @@ func (c Command) Validate() error {
 }
 
 func (c Command) Mutation() bool {
-	return c.Kind == KindPropose || c.Kind == KindApprove || c.Kind == KindDecline
+	return c.Kind == KindPropose || isDecisionKind(c.Kind)
+}
+
+func isDecisionKind(kind string) bool {
+	switch kind {
+	case KindApprove, KindDecline, KindNotApplicable, KindUndetermined:
+		return true
+	default:
+		return false
+	}
 }
 
 func ActorAllowed(actor, kind string) bool {
@@ -157,7 +172,7 @@ func ActorAllowed(actor, kind string) bool {
 	case ActorAgent:
 		return kind == KindPropose || kind == KindStatus || kind == KindInbox
 	case ActorGateway:
-		return kind == KindApprove || kind == KindDecline || kind == KindStatus || kind == KindInbox
+		return isDecisionKind(kind) || kind == KindStatus || kind == KindInbox
 	default:
 		return false
 	}

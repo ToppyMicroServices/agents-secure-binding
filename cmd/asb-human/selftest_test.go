@@ -22,7 +22,7 @@ func TestSelfTestRunsAuthenticatedWorkflowAndRemovesTemporaryState(t *testing.T)
 	if err := runSelfTest(ctx, &output, parent); err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"authenticated loopback", "Simulated approval: APPLIED", "Simulated denial: DENIED", "original outcomes recovered; no repeated effect"} {
+	for _, want := range []string{"authenticated loopback", "Simulated approval: APPLIED", "Simulated denial: DENIED", "Simulated not-applicable: NOT_APPLICABLE", "Simulated undetermined: UNDETERMINED", "original outcomes recovered; no repeated effect"} {
 		if !strings.Contains(output.String(), want) {
 			t.Errorf("missing %q in %s", want, output.String())
 		}

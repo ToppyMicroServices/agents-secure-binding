@@ -197,6 +197,55 @@ func TestRejectedProposalPreservesReceiptWithoutRebasing(t *testing.T) {
 	}
 }
 
+func TestAgentStopsForNonAuthorizingDecisions(t *testing.T) {
+	for _, state := range []string{humanapp.StateDenied, humanapp.StateNotApplicable, humanapp.StateUndetermined} {
+		for _, poll := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/poll=%t", state, poll), func(t *testing.T) {
+				path := filepath.Join(t.TempDir(), "receipt.json")
+				proposal := proposalForTest("reviewed", 7)
+				if err := saveReceipt(path, proposal); err != nil {
+					t.Fatal(err)
+				}
+				digest, err := humanapp.CommandDigest(proposal)
+				if err != nil {
+					t.Fatal(err)
+				}
+				calls := 0
+				execute := func(_ context.Context, command humanapp.Command) ([]byte, error) {
+					calls++
+					resultState := state
+					if calls == 1 {
+						if command.Kind != humanapp.KindPropose {
+							t.Fatal("did not reuse the saved proposal")
+						}
+						if poll {
+							resultState = humanapp.StatePending
+						}
+					} else if !poll || calls != 2 || command.Kind != humanapp.KindStatus {
+						t.Fatalf("unexpected polling after a terminal decision: %+v", command)
+					}
+					return responseForTest(t, command, digest, resultState), nil
+				}
+				var output bytes.Buffer
+				cfg := agentOptions{receipt: path, wait: true, poll: time.Millisecond, timeout: time.Second}
+				if err := runAgent(context.Background(), cfg, execute, &output); err != nil {
+					t.Fatalf("known decision was reported as an unknown outcome: %v", err)
+				}
+				wantCalls := 1
+				if poll {
+					wantCalls = 2
+				}
+				if calls != wantCalls {
+					t.Fatalf("requests = %d, want %d", calls, wantCalls)
+				}
+				if !strings.Contains(output.String(), `"state":"`+state+`"`) || strings.Contains(output.String(), humanapp.StateApplied) || strings.Contains(output.String(), "OUTCOME_UNKNOWN") {
+					t.Fatalf("lost non-authorizing decision: %s", output.String())
+				}
+			})
+		}
+	}
+}
+
 type failOnWriteNumber struct {
 	writes, failAt int
 	err            error

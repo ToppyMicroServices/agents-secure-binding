@@ -167,25 +167,59 @@ func TestStoreRestoresPendingAndOriginalAppliedResponse(t *testing.T) {
 	requireSetting(t, status, true, 1)
 }
 
-func TestStoreDeclinePersistsWithoutSettingEffect(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "state.sqlite")
-	store := openTestStore(t, path)
-	_, proposed := executeStore(t, store, testProposal("denied", true, 0), ActorAgent, "propose")
-	decision := testDecision("decline", KindDecline, *proposed.Operation)
-	original, denied := executeStore(t, store, decision, ActorGateway, "decline")
-	if denied.Operation.State != StateDenied || denied.Operation.After != nil {
-		t.Fatalf("denied = %+v", denied.Operation)
+func TestStoreNonAllowDecisionsPersistWithoutSettingEffect(t *testing.T) {
+	for _, scenario := range []struct{ kind, state string }{
+		{KindDecline, StateDenied},
+		{KindNotApplicable, StateNotApplicable},
+		{KindUndetermined, StateUndetermined},
+	} {
+		t.Run(scenario.kind, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "state.sqlite")
+			store := openTestStore(t, path)
+			_, proposed := executeStore(t, store, testProposal("proposal", true, 0), ActorAgent, "propose")
+			decision := testDecision("decision", scenario.kind, *proposed.Operation)
+			original, decided := executeStore(t, store, decision, ActorGateway, "decision")
+			if decided.Operation.State != scenario.state || decided.Operation.After != nil || decided.Operation.DecidedAt == nil ||
+				decided.Operation.Reviewer != ActorGateway || decided.Operation.HumanParticipant != HumanParticipant || decided.Operation.Assurance != Assurance {
+				t.Fatalf("decision = %+v", decided.Operation)
+			}
+			requireSetting(t, decided, false, 0)
+			if err := store.Close(); err != nil {
+				t.Fatal(err)
+			}
+			store = openTestStore(t, path)
+			recovered, decided := executeStore(t, store, decision, ActorGateway, "retry")
+			if !bytes.Equal(original, recovered) {
+				t.Fatal("original non-authorizing decision was not preserved")
+			}
+			requireSetting(t, decided, false, 0)
+			// A later approval cannot reinterpret this terminal Human response.
+			if _, err := store.Execute(t.Context(), testDecision("later-approval", KindApprove, *proposed.Operation), testStoreAuth(ActorGateway, "later-proof")); !errors.Is(err, ErrConflict) {
+				t.Fatalf("later approval = %v", err)
+			}
+			_, status := executeStore(t, store, testStatus(*proposed.Operation), ActorAgent, "status")
+			if status.Operation.State != scenario.state || status.Operation.After != nil {
+				t.Fatalf("reopened decision changed: %+v", status.Operation)
+			}
+			requireSetting(t, status, false, 0)
+			_, inbox := executeStore(t, store, Command{CommandID: "inbox", Kind: KindInbox}, ActorGateway, "inbox")
+			if inbox.Inbox.Pending != 0 || len(inbox.Operations) != 1 || inbox.Operations[0].State != scenario.state {
+				t.Fatalf("decision was treated as pending or lost: %+v", inbox)
+			}
+			archiveDir := t.TempDir()
+			if err := os.Chmod(archiveDir, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			archive := filepath.Join(archiveDir, "snapshot.sqlite")
+			manifest, err := store.ExportSnapshot(t.Context(), archive)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := VerifyStoreArchive(t.Context(), archive, manifest); err != nil {
+				t.Fatalf("archive rejected durable decision: %v", err)
+			}
+		})
 	}
-	requireSetting(t, denied, false, 0)
-	if err := store.Close(); err != nil {
-		t.Fatal(err)
-	}
-	store = openTestStore(t, path)
-	recovered, denied := executeStore(t, store, decision, ActorGateway, "retry")
-	if !bytes.Equal(original, recovered) {
-		t.Fatal("decline response was not preserved")
-	}
-	requireSetting(t, denied, false, 0)
 }
 
 func TestStoreStaleReviewCannotApply(t *testing.T) {
@@ -295,7 +329,7 @@ func TestStoreRequiresAuthorizedActorAndExactlyOneReplayCommit(t *testing.T) {
 func TestStoreAgentCannotMakeHumanDecision(t *testing.T) {
 	store := openTestStore(t, filepath.Join(t.TempDir(), "state.sqlite"))
 	_, proposed := executeStore(t, store, testProposal("proposal", true, 0), ActorAgent, "propose")
-	for _, kind := range []string{KindApprove, KindDecline} {
+	for _, kind := range []string{KindApprove, KindDecline, KindNotApplicable, KindUndetermined} {
 		_, err := store.Execute(context.Background(), testDecision("decision-"+kind, kind, *proposed.Operation), testStoreAuth(ActorAgent, "proof-"+kind))
 		if !errors.Is(err, ErrUnauthorized) {
 			t.Fatalf("%s error = %v", kind, err)
@@ -364,8 +398,8 @@ func TestStoreConcurrentDecisionsHaveOneWinner(t *testing.T) {
 	store := openTestStore(t, filepath.Join(t.TempDir(), "state.sqlite"))
 	_, proposed := executeStore(t, store, testProposal("proposal", true, 0), ActorAgent, "proposal")
 	var group sync.WaitGroup
-	results := make(chan error, 2)
-	for _, kind := range []string{KindApprove, KindDecline} {
+	results := make(chan error, 4)
+	for _, kind := range []string{KindApprove, KindDecline, KindNotApplicable, KindUndetermined} {
 		group.Go(func() {
 			_, err := store.Execute(context.Background(), testDecision("decision-"+kind, kind, *proposed.Operation), testStoreAuth(ActorGateway, "proof-"+kind))
 			results <- err
@@ -383,15 +417,18 @@ func TestStoreConcurrentDecisionsHaveOneWinner(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if successes != 1 || conflicts != 1 {
+	if successes != 1 || conflicts != 3 {
 		t.Fatalf("successes=%d conflicts=%d", successes, conflicts)
 	}
 	_, status := executeStore(t, store, testStatus(*proposed.Operation), ActorGateway, "status")
 	switch status.Operation.State {
 	case StateApplied:
 		requireSetting(t, status, true, 1)
-	case StateDenied:
+	case StateDenied, StateNotApplicable, StateUndetermined:
 		requireSetting(t, status, false, 0)
+		if status.Operation.After != nil {
+			t.Fatal("non-authorizing winner has a setting effect")
+		}
 	default:
 		t.Fatalf("unexpected terminal state %s", status.Operation.State)
 	}
