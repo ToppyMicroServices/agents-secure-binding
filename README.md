@@ -53,8 +53,8 @@ SQLite installation is needed.
 go run ./cmd/asb-human self-test
 ```
 
-The self-test submits, approves, and declines proposals over real authenticated
-loopback connections, then checks saved results after reopening the database.
+The self-test submits proposals and checks all four Human decisions over real
+authenticated loopback connections, then checks saved results after reopening the database.
 It prints a final `PASS` line or exits with an error. It simulates the Human
 reviewer, uses temporary state, and removes that state when it finishes. No
 browser interaction is needed. This tests local software behavior, not hardware
@@ -68,11 +68,16 @@ go run ./cmd/asb-human demo --data-dir ./.asb-human
 
 Open the private login link printed in the terminal. A separate Agent process
 proposes changing the app's own `maintenance_mode` setting. Review the before
-and after values in the browser, then approve or decline:
+and after values in the browser, then choose a decision:
 
 - Approval shows 「適用済み」 in the browser (`APPLIED` in the Agent result)
   and saves the new setting.
 - Decline shows 「拒否済み」 (`DENIED`) and leaves the setting unchanged.
+- Not applicable shows 「該当なし」 (`NOT_APPLICABLE`) and leaves the setting unchanged.
+- Unable to decide shows 「判断不明」 (`UNDETERMINED`) and leaves the setting unchanged.
+
+「判断不明」 records the Human's judgment. 「処理結果不明」 means the result of a
+request has not been confirmed and requires a status check.
 
 The Agent prints the result. Press Ctrl+C to stop the service; the decision,
 setting, and recovery receipts remain in `.asb-human`. The browser UI is shared

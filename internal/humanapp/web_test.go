@@ -12,6 +12,7 @@ import (
 	"net/http/cookiejar"
 	"net/http/httptest"
 	"net/url"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -238,11 +239,84 @@ func TestWebSessionExpiresAndHTTPSCookieIsSecure(t *testing.T) {
 	}
 }
 
+func TestWebFourWayDecisionsPersistWithoutGrantingNonApproval(t *testing.T) {
+	tests := []struct {
+		name  string
+		field string
+		value any
+		kind  string
+		state string
+	}{
+		{"approve", "decision", KindApprove, KindApprove, StateApplied},
+		{"decline", "decision", KindDecline, KindDecline, StateDenied},
+		{"not applicable", "decision", KindNotApplicable, KindNotApplicable, StateNotApplicable},
+		{"undetermined", "decision", KindUndetermined, KindUndetermined, StateUndetermined},
+		{"legacy approve", "approve", true, KindApprove, StateApplied},
+		{"legacy decline", "approve", false, KindDecline, StateDenied},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "state.sqlite")
+			store := openTestStore(t, path)
+			_, proposed := executeStore(t, store, testProposal("web-change", true, 0), ActorAgent, "proposal")
+			var dispatched Command
+			// Exercise HTTP parsing and durable storage with an already-verified
+			// gateway identity; transport tests cover ASB proof verification.
+			handler := newTestWebHandler(t, func(ctx context.Context, command Command) ([]byte, error) {
+				dispatched = command
+				return store.Execute(ctx, command, testStoreAuth(ActorGateway, command.CommandID))
+			})
+			session := loginWebTest(t, handler)
+			input := map[string]any{
+				"operation_id": proposed.Operation.OperationID, "proposal_digest": proposed.Operation.ProposalDigest,
+				"expected_revision": proposed.Operation.Before.Revision, test.field: test.value,
+			}
+			result := webTestRequest(t, handler, http.MethodPost, "/api/decision", input, session)
+			if result.Code != http.StatusOK {
+				t.Fatalf("decision: %d %s", result.Code, result.Body.String())
+			}
+			if dispatched.Kind != test.kind {
+				t.Fatalf("dispatched %s, want %s", dispatched.Kind, test.kind)
+			}
+			var response Response
+			if err := json.Unmarshal(result.Body.Bytes(), &response); err != nil {
+				t.Fatal(err)
+			}
+			operation := response.Operation
+			if operation == nil || operation.State != test.state || operation.DecidedAt == nil || operation.Reviewer != ActorGateway || operation.HumanParticipant != HumanParticipant {
+				t.Fatalf("decision was not recorded: %+v", operation)
+			}
+			approved := test.kind == KindApprove
+			wantRevision := uint64(0)
+			if approved {
+				wantRevision = 1
+			}
+			requireSetting(t, response, approved, wantRevision)
+			if (operation.After != nil) != approved {
+				t.Fatalf("unexpected setting effect for %s: %+v", test.kind, operation.After)
+			}
+			if strings.Contains(result.Body.String(), "OUTCOME_UNKNOWN") || strings.Contains(result.Body.String(), "outcome_unknown") {
+				t.Fatal("a recorded human decision was confused with an unknown processing outcome")
+			}
+			if err := store.Close(); err != nil {
+				t.Fatal(err)
+			}
+			store = openTestStore(t, path)
+			_, persisted := executeStore(t, store, testStatus(*operation), ActorGateway, "read-after-restart")
+			if persisted.Operation == nil || persisted.Operation.State != test.state {
+				t.Fatalf("decision lost after restart: %+v", persisted.Operation)
+			}
+			requireSetting(t, persisted, approved, wantRevision)
+		})
+	}
+}
+
 func TestWebRequiresSessionOriginCSRFAndExactDecisionFields(t *testing.T) {
 	calls := 0
 	handler := newTestWebHandler(t, func(context.Context, Command) ([]byte, error) { calls++; return []byte(`{}`), nil })
 	session := loginWebTest(t, handler)
-	valid := `{"operation_id":"change-1","proposal_digest":"sha256:` + strings.Repeat("b", 64) + `","expected_revision":2,"approve":false}`
+	fields := `{"operation_id":"change-1","proposal_digest":"sha256:` + strings.Repeat("b", 64) + `","expected_revision":2,`
+	valid := fields + `"approve":false}`
 	tests := []struct {
 		name   string
 		edit   func(*http.Request)
@@ -261,6 +335,27 @@ func TestWebRequiresSessionOriginCSRFAndExactDecisionFields(t *testing.T) {
 		{"missing revision", nil, `{"operation_id":"change-1","proposal_digest":"sha256:` + strings.Repeat("b", 64) + `","approve":false}`, 400},
 		{"missing digest", nil, `{"operation_id":"change-1","expected_revision":2,"approve":false}`, 400},
 		{"unrecognized field", nil, strings.TrimSuffix(valid, "}") + `,"actor":"gateway:other"}`, 400},
+		{"unknown decision", nil, fields + `"decision":"ALLOW"}`, 400},
+		{"outcome unknown is not a decision", nil, fields + `"decision":"OUTCOME_UNKNOWN"}`, 400},
+		{"lowercase decision", nil, fields + `"decision":"approve"}`, 400},
+		{"empty decision", nil, fields + `"decision":""}`, 400},
+		{"null decision", nil, fields + `"decision":null}`, 400},
+		{"boolean decision", nil, fields + `"decision":true}`, 400},
+		{"number decision", nil, fields + `"decision":1}`, 400},
+		{"array decision", nil, fields + `"decision":["APPROVE"]}`, 400},
+		{"object decision", nil, fields + `"decision":{"kind":"APPROVE"}}`, 400},
+		{"null legacy decision", nil, fields + `"approve":null}`, 400},
+		{"string legacy decision", nil, fields + `"approve":"true"}`, 400},
+		{"number legacy decision", nil, fields + `"approve":1}`, 400},
+		{"conflicting decision fields", nil, fields + `"decision":"DECLINE","approve":true}`, 400},
+		{"matching decision fields", nil, fields + `"decision":"APPROVE","approve":true}`, 400},
+		{"null legacy alongside decision", nil, fields + `"decision":"APPROVE","approve":null}`, 400},
+		{"null decision alongside legacy", nil, fields + `"decision":null,"approve":true}`, 400},
+		{"both null decision fields", nil, fields + `"decision":null,"approve":null}`, 400},
+		{"duplicate decisions", nil, fields + `"decision":"DECLINE","decision":"APPROVE"}`, 400},
+		{"duplicate legacy decisions", nil, fields + `"approve":false,"approve":true}`, 400},
+		{"incorrect decision field case", nil, fields + `"Decision":"APPROVE"}`, 400},
+		{"trailing document", nil, valid + `{}`, 400},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -286,22 +381,26 @@ func TestWebRequiresSessionOriginCSRFAndExactDecisionFields(t *testing.T) {
 }
 
 func TestWebUnknownOutcomeIsNotRetriedAndDetailsAreRedacted(t *testing.T) {
-	calls := 0
-	handler := newTestWebHandler(t, func(context.Context, Command) ([]byte, error) {
-		calls++
-		return nil, errors.New("private transport details")
-	})
-	session := loginWebTest(t, handler)
-	response := webTestRequest(t, handler, "POST", "/api/decision", map[string]any{"operation_id": "change-1", "proposal_digest": "sha256:" + strings.Repeat("c", 64), "expected_revision": 0, "approve": true}, session)
-	var body struct {
-		Code    string `json:"code"`
-		Unknown bool   `json:"outcome_unknown"`
-	}
-	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
-		t.Fatal(err)
-	}
-	if response.Code != 503 || body.Code != "OUTCOME_UNKNOWN" || !body.Unknown || calls != 1 || strings.Contains(response.Body.String(), "private transport details") {
-		t.Fatal("unknown execution must remain visible without retries or private errors")
+	for _, kind := range []string{KindApprove, KindDecline, KindNotApplicable, KindUndetermined} {
+		t.Run(kind, func(t *testing.T) {
+			calls := 0
+			handler := newTestWebHandler(t, func(context.Context, Command) ([]byte, error) {
+				calls++
+				return nil, errors.New("private transport details")
+			})
+			session := loginWebTest(t, handler)
+			response := webTestRequest(t, handler, "POST", "/api/decision", map[string]any{"operation_id": "change-1", "proposal_digest": "sha256:" + strings.Repeat("c", 64), "expected_revision": 0, "decision": kind}, session)
+			var body struct {
+				Code    string `json:"code"`
+				Unknown bool   `json:"outcome_unknown"`
+			}
+			if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+				t.Fatal(err)
+			}
+			if response.Code != 503 || body.Code != "OUTCOME_UNKNOWN" || !body.Unknown || calls != 1 || strings.Contains(response.Body.String(), "private transport details") {
+				t.Fatal("unknown execution must remain visible without retries or private errors")
+			}
+		})
 	}
 }
 

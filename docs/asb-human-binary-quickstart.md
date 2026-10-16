@@ -35,7 +35,7 @@ To make a decision yourself in the browser:
 
 ## What to expect
 
-`self-test` prints progress, checks an approval and a decline over real
+`self-test` prints progress, checks all four Human decisions over real
 authenticated loopback connections, and verifies saved results after reopening
 SQLite. It simulates the Human reviewer, uses its own temporary state, and
 removes that state when it finishes. Success ends with:
@@ -46,10 +46,11 @@ PASS: local approval self-test completed.
 
 `demo` starts the service and a separate Agent process. Open the private login
 link printed in the terminal on the same computer. Review the proposal, then
-approve or decline and confirm. The Japanese UI shows 「適用済み」 for approval
-or 「拒否済み」 for decline; the Agent prints `APPLIED` or `DENIED`. The only
-possible effect is a change to this app's own `maintenance_mode` Boolean in
-its local SQLite database.
+choose 「許可する」「拒否する」「該当なし」 or 「判断不明」 and confirm. The Agent
+prints `APPLIED`, `DENIED`, `NOT_APPLICABLE`, or `UNDETERMINED`. Only approval
+changes this app's own `maintenance_mode` Boolean in its local SQLite database.
+「判断不明」 is a saved Human judgment; 「処理結果不明」 means the request's result
+has not been confirmed and needs a status check.
 
 Press Ctrl+C to stop the service. `demo` keeps keys, decisions, and recovery
 receipts in `.asb-human`; protect that directory and the login link. Each new

@@ -229,6 +229,49 @@ these runner images. It does not establish browser rendering on those OSes,
 Windows PowerShell 5.1 support, live SNP/TDX qualification, or a TDX strict
 collateral success fixture. No paid runner, merge, tag or release was used.
 
+## Four Human decisions — 2026-10-16
+
+Checked locally on macOS 26.7.1 arm64 with Go 1.26.9 and Node 22.16.0.
+The candidate is based on main commit
+`2e5a8136b183a748d7aed58e85c9f12c4c76f8fc`.
+
+The application and CLI race suites passed (44.670s and 27.634s). They cover
+all four decisions, non-authorizing results after SQLite reopen and snapshot
+verification, conflicting decisions, and rejection of stored non-authorizing
+results with an effect. The API accepts four explicit decisions and the legacy
+Boolean-only requests; missing, invalid, null, duplicate, and mixed decision
+fields are rejected. Transport failures remain `OUTCOME_UNKNOWN`, including
+when the submitted Human judgment is `UNDETERMINED`.
+
+All 19 Node UI tests passed. They cover the four request payloads, distinct
+result labels, uncertain submissions blocking all choices until a fresh manual
+read, and the existing session/polling races. Scoped `go vet` and
+golangci-lint 2.11.1 passed. The compiled executable's `self-test` passed over
+authenticated loopback connections and recovered all four original results
+after reopening SQLite without another setting effect.
+
+Commands used (with writable temporary Go and linter caches):
+
+```text
+go test -race -count=1 -timeout=15m ./internal/humanapp ./cmd/asb-human
+go vet ./internal/humanapp ./cmd/asb-human
+golangci-lint run ./internal/humanapp/... ./cmd/asb-human/...
+node --test internal/humanapp/web_ui_test.mjs
+go build -o /private/tmp/asb-four-way-qa/asb-human ./cmd/asb-human
+/private/tmp/asb-four-way-qa/asb-human self-test
+```
+
+The compiled service was also exercised through the in-app browser with a
+fresh temporary database and four proposals. Each decision had its own
+confirmation dialog. `NOT_APPLICABLE`, `UNDETERMINED`, and `DECLINE` each left
+the setting OFF at revision 0. `APPROVE` then changed it to ON at revision 1.
+The history showed all four distinct outcomes, with no pending proposals.
+The full page was visually inspected and no browser warnings or errors were
+reported. These were test decisions, not evidence of a person's identity.
+
+This entry records local macOS checks. Remote CI and Linux/Windows runtime
+checks were not run for this candidate at this checkpoint.
+
 ## Remaining boundaries
 
 These results establish a local Developer Preview. They do not establish

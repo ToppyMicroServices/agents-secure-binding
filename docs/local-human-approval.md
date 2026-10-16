@@ -2,7 +2,8 @@
 
 `asb-human` lets an Agent propose a change and wait for your decision in a
 browser. Approving changes one Boolean, `maintenance_mode`, in the app's own
-SQLite database. Declining leaves that setting unchanged. Nothing is sent to
+SQLite database. Declining, marking a proposal not applicable, or being unable
+to decide leaves that setting unchanged. Nothing is sent to
 an external service, and no real server configuration is changed.
 
 This is an experimental preview for one trusted computer and OS user. It is
@@ -28,8 +29,8 @@ The command prints its progress and ends with:
 PASS: local approval self-test completed.
 ```
 
-It uses real TLS 1.3/mTLS and ASB verification to submit a proposal, simulate
-approval and decline, and check saved results after reopening SQLite. It picks
+It uses real TLS 1.3/mTLS and ASB verification to submit proposals, simulate
+all four decisions, and check saved results after reopening SQLite. It picks
 a free loopback port and removes its private temporary state when it finishes.
 The Human reviewer is simulated: this is a software check, not evidence of
 Human identity or hardware security. A failed check exits with an error. The
@@ -45,8 +46,8 @@ go run ./cmd/asb-human demo --data-dir ./.asb-human
 1. Open the private login link printed in the terminal, on the same computer.
 2. Review the pending proposal and its before/after values. The separate Agent
    process requests `maintenance_mode=true` by default.
-3. Choose 「承認する」 (approve) or 「拒否する」 (decline), then confirm. The Japanese UI
-   shows 「適用済み」 or 「拒否済み」; the Agent result uses `APPLIED` or `DENIED`.
+3. Choose 「許可する」 (approve), 「拒否する」 (decline), 「該当なし」 (not applicable),
+   or 「判断不明」 (unable to decide), then confirm. Only approval can apply a change.
 4. Press Ctrl+C when you are finished. The service stays running after the
    Agent receives its result.
 
@@ -108,7 +109,7 @@ restore the executable bit with `chmod +x asb-human` before running it.
 | The browser cannot connect | Keep `demo` or `serve` running and use the exact printed link on the same computer. The browser connects to the web port, not the core TLS port. |
 | The login no longer works after a restart | Open the newly printed login link. Browser sessions are not retained across service restarts; saved decisions are. |
 | The data directory is not private, or initialization is incomplete | For a new trial, choose a new, unused `--data-dir` path. Do not delete an existing directory to repair it: it may contain keys, decisions, and receipts. |
-| The Agent is still waiting | A person must approve or decline in the browser. `self-test` is the unattended check; `demo` does not approve on your behalf. |
+| The Agent is still waiting | A person must choose one of the four decisions in the browser. `self-test` is the unattended check; `demo` does not decide on your behalf. |
 | An operation is `STALE` | Another approved change advanced the setting after this proposal was created. This proposal has no effect. Review the current state before intentionally creating a new one. |
 | A saved proposal is rejected with `CONFLICT` | Keep its receipt and inspect it. Repeating the same rejected command cannot resolve a revision or identifier conflict. See the recovery guidance below before creating a replacement. |
 | The response is unavailable or the outcome is unknown | Keep the receipt and follow the recovery steps below. Do not assume the change failed and submit a replacement. |
@@ -149,6 +150,8 @@ using fresh authentication until the operation reaches a terminal state:
 | `PENDING_REVIEW` | Waiting for a decision; the setting is unchanged. |
 | `APPLIED` | Approved and applied to the local database. |
 | `DENIED` | Declined; this proposal did not change the setting. |
+| `NOT_APPLICABLE` | The person says this proposal is outside their review scope; no change was applied. |
+| `UNDETERMINED` | The person cannot decide, for example because information is missing; no change was applied. |
 | `STALE` | The reviewed setting revision is no longer current; no change was applied. |
 
 A successful command exit alone does not mean approval. Read
@@ -161,6 +164,42 @@ both `agent` and `inspect`:
 ./asb-human serve --data-dir ./.asb-human --core-listen 127.0.0.1:9091 --web-listen 127.0.0.1:9090
 ./asb-human agent --data-dir ./.asb-human --core-address 127.0.0.1:9091 --wait
 ```
+
+## Four Human decisions
+
+These distinctions also matter for a Human reviewer. A refusal, an out-of-scope
+request, and insufficient information are different answers. None authorizes
+the proposed change.
+
+The browser sends `POST /api/decision` with `operation_id`, `proposal_digest`,
+`expected_revision`, and one explicit `decision` value:
+
+| Human answer | `decision` | Result for a current proposal |
+| --- | --- | --- |
+| 許可 | `APPROVE` | `APPLIED`; the setting changes. |
+| 拒否 | `DECLINE` | `DENIED`; the setting is unchanged. |
+| 該当なし | `NOT_APPLICABLE` | `NOT_APPLICABLE`; the setting is unchanged. |
+| 判断不明 | `UNDETERMINED` | `UNDETERMINED`; the setting is unchanged. |
+
+The existing session, same-origin, and CSRF checks still apply. For older
+clients, `approve: true` or `approve: false` alone maps to `APPROVE` or `DECLINE`.
+A request containing both `decision` and `approve` is rejected, as are missing,
+null, or unknown decision values.
+
+All four answers finish the proposal. Its decision is immutable; repeating a
+saved command recovers the same result. If more information later permits a
+new review, create a new proposal with a new operation ID and receipt. Keep the
+original decision as history. A proposal that became `STALE` still has no effect.
+
+`UNDETERMINED` is a recorded Human answer. `OUTCOME_UNKNOWN` instead means the
+service could not confirm the result of a request, for example after losing a
+response. It is not a fifth Human answer or an operation state to treat as
+approval. Refresh or inspect the original operation before trying another
+action, as described below.
+
+See the [related-check review](decision-semantics-review.md) for how these
+answers differ from proof verification, task acceptance, quorum approvals,
+and execution outcomes.
 
 ## Recover an interrupted proposal
 

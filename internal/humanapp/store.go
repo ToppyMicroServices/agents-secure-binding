@@ -374,6 +374,10 @@ func executeCommand(ctx context.Context, tx *sql.Tx, command Command, actor stri
 	switch command.Kind {
 	case KindDecline:
 		operation.State = StateDenied
+	case KindNotApplicable:
+		operation.State = StateNotApplicable
+	case KindUndetermined:
+		operation.State = StateUndetermined
 	case KindApprove:
 		if setting.Revision != operation.Before.Revision {
 			operation.State = StateStale
@@ -481,7 +485,7 @@ func decodeStoredOperation(operationID, digest string, proposal, document []byte
 		if operation.DecidedAt != nil || operation.After != nil || operation.Reviewer != "" || operation.HumanParticipant != "" || operation.Assurance != "" {
 			return Operation{}, storeError(errors.New("invalid pending operation"))
 		}
-	case StateApplied, StateDenied, StateStale:
+	case StateApplied, StateDenied, StateNotApplicable, StateUndetermined, StateStale:
 		if operation.DecidedAt == nil || operation.Reviewer != ActorGateway || operation.HumanParticipant != HumanParticipant || operation.Assurance != Assurance {
 			return Operation{}, storeError(errors.New("invalid decision provenance"))
 		}

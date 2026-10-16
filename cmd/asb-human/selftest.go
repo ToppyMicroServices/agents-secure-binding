@@ -90,6 +90,7 @@ func runSelfTest(ctx context.Context, stdout io.Writer, temporaryParent string) 
 		actor   string
 		command humanapp.Command
 		result  []byte
+		state   string
 	}
 	var original []recordedCommand
 	for _, scenario := range []struct {
@@ -99,6 +100,8 @@ func runSelfTest(ctx context.Context, stdout io.Writer, temporaryParent string) 
 	}{
 		{"approval", humanapp.KindApprove, humanapp.StateApplied, true, 0},
 		{"denial", humanapp.KindDecline, humanapp.StateDenied, false, 1},
+		{"not-applicable", humanapp.KindNotApplicable, humanapp.StateNotApplicable, false, 1},
+		{"undetermined", humanapp.KindUndetermined, humanapp.StateUndetermined, false, 1},
 	} {
 		proposal := humanapp.Command{
 			CommandID: "self-test-propose-" + scenario.id, Kind: humanapp.KindPropose,
@@ -116,7 +119,7 @@ func runSelfTest(ctx context.Context, stdout io.Writer, temporaryParent string) 
 		if proposed.Operation.Before.Revision != scenario.revision || proposed.Operation.Proposer != humanapp.ActorAgent || proposed.Operation.Change != *proposal.Change {
 			return errors.New("pending proposal does not preserve the agent's requested change")
 		}
-		original = append(original, recordedCommand{humanapp.ActorAgent, proposal, raw})
+		original = append(original, recordedCommand{humanapp.ActorAgent, proposal, raw, humanapp.StatePending})
 		decision := humanapp.Command{
 			CommandID: "self-test-decide-" + scenario.id, Kind: scenario.decision,
 			OperationID: proposal.OperationID, ExpectedRevision: scenario.revision, ProposalDigest: digest,
@@ -134,9 +137,9 @@ func runSelfTest(ctx context.Context, stdout io.Writer, temporaryParent string) 
 				return errors.New("approved change was not applied exactly once")
 			}
 		} else if operation.After != nil {
-			return errors.New("denied change unexpectedly reports an effect")
+			return errors.New("non-authorizing decision unexpectedly reports an effect")
 		}
-		original = append(original, recordedCommand{humanapp.ActorGateway, decision, raw})
+		original = append(original, recordedCommand{humanapp.ActorGateway, decision, raw, scenario.state})
 		if err := selfTestSetting(ctx, core.agent, true, 1); err != nil {
 			return fmt.Errorf("setting after %s: %w", scenario.id, err)
 		}
@@ -174,11 +177,7 @@ func runSelfTest(ctx context.Context, stdout io.Writer, temporaryParent string) 
 		if err != nil {
 			return err
 		}
-		state := humanapp.StateApplied
-		if saved.command.Kind == humanapp.KindDecline {
-			state = humanapp.StateDenied
-		}
-		if _, _, err := selfTestOperation(ctx, core.agent, status, saved.command.ProposalDigest, state); err != nil {
+		if _, _, err := selfTestOperation(ctx, core.agent, status, saved.command.ProposalDigest, saved.state); err != nil {
 			return fmt.Errorf("live status after restart: %w", err)
 		}
 	}
