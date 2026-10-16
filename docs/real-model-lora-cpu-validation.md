@@ -41,19 +41,19 @@ approval or a behavioral safety assessment.
 
 | Case | Expected and observed | Seconds |
 | --- | --- | ---: |
-| Approved base / base + LoRA, v1 | A2A allowed; nonempty outputs from both agents | 17.890 |
-| Approved base / base + LoRA, draft06-v2 | A2A allowed; nonempty outputs from both agents | 23.932 |
-| Base weight byte changed | Agent B rejected the digest mismatch | 0.667 |
-| LoRA weight byte changed | Agent B rejected the digest mismatch | 0.982 |
-| Tokenizer byte changed | Agent B rejected the digest mismatch | 1.029 |
-| Model configuration byte changed | Agent B rejected the digest mismatch | 0.236 |
-| Adapter configuration byte changed | Agent B rejected the digest mismatch | 1.142 |
-| Chat template changed | Agent B rejected the digest mismatch | 0.973 |
-| Declared LoRA weights missing | Agent B rejected the missing regular file | 0.987 |
-| Adapter removed from manifest | Agent B rejected the changed manifest | 0.182 |
-| Adapter added to base-only manifest | Agent B rejected the changed manifest | 0.183 |
-| Adapter changed and its manifest entry rehashed | Agent B rejected the manifest against the original approval pin | 0.225 |
-| Agent A's approved manifest changed | Agent A rejected it before the conversation | 6.933 |
+| Approved base / base + LoRA, v1 | A2A allowed; nonempty outputs from both agents | 18.937 |
+| Approved base / base + LoRA, draft06-v2 | A2A allowed; nonempty outputs from both agents | 18.396 |
+| Base weight byte changed | Agent B rejected the digest mismatch | 0.772 |
+| LoRA weight byte changed | Agent B rejected the digest mismatch | 0.648 |
+| Tokenizer byte changed | Agent B rejected the digest mismatch | 0.661 |
+| Model configuration byte changed | Agent B rejected the digest mismatch | 0.195 |
+| Adapter configuration byte changed | Agent B rejected the digest mismatch | 0.597 |
+| Chat template changed | Agent B rejected the digest mismatch | 0.684 |
+| Declared LoRA weights missing | Agent B rejected the missing regular file | 0.657 |
+| Adapter removed from manifest | Agent B rejected the changed manifest | 0.190 |
+| Adapter added to base-only manifest | Agent B rejected the changed manifest | 0.140 |
+| Adapter changed and its manifest entry rehashed | Agent B rejected the manifest against the original approval pin | 1.081 |
+| Agent A's approved manifest changed | Agent A rejected it before the conversation | 8.976 |
 
 Positive checks required exit code 0, the expected observed protocol profile,
 one passing A2A scenario, Agent B readiness, and nonempty generated text from
@@ -67,6 +67,11 @@ The rejection phase is established by the exact configuration error and the
 runtime's validation-before-launch ordering. No inference counter was
 instrumented. All mutations were restored, and the final manifest, file size,
 file hash, and Python executable checks passed.
+
+After PR review, the runner also checks scoped Git status before building to
+reject tracked or untracked runtime changes. A separate probe with an untracked
+Go source was rejected before the build started. The complete 13-case suite
+was then rerun successfully; the table and JSON contain this rerun.
 
 ## Environment and reproduction
 
@@ -101,7 +106,7 @@ its adapter/log remain in `attempts/float32-adapter-reload/`. No production
 runtime changes were needed.
 
 The local evidence directory is
-`build/model-validation/2026-10-16/`; it includes `REPORT.md`, `results/evidence.json`,
+`build/model-validation/2026-10-16/review-r2/`; it includes `REPORT.md`, `results/evidence.json`,
 per-case logs/reports, `training.json`, `approval.json`, and `SHA256SUMS`.
 `real-model-lora-cpu-evidence.zip` contains those records and the trained
 adapter, excluding the downloadable base checkpoint and built executable.

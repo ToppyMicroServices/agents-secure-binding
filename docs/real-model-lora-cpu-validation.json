@@ -29,15 +29,15 @@
         "platform": "SIMULATED"
       },
       "cli_report_status": "PASS",
-      "duration_seconds": 17.89,
+      "duration_seconds": 18.937,
       "exit_code": 0,
       "expected": "accept",
-      "log_sha256": "sha256:f4fde5721a25c7a92ca951a3bb87186c0b3cd3a7853ccc845fc1e2130951872c",
+      "log_sha256": "sha256:461b51b30abdd971c4ce15ab50f561fe87c4bc42854cf5dfd65429b22c8cc0e3",
       "mutation": null,
       "name": "approved_v1",
       "observed_profile": "direct-agent-v1+llm-conversation-v1",
       "profile": "v1",
-      "report_sha256": "sha256:32d5693507db92e5a6bf8131df49c9d6562bbb1e86ac469718f5af62fa5e4338",
+      "report_sha256": "sha256:853382bcd3ac3c897cdc8c764e2bdadff10327c887822755cb6f981c03fd2a4e",
       "status": "PASS",
       "timed_out": false
     },
@@ -50,15 +50,15 @@
         "platform": "SIMULATED"
       },
       "cli_report_status": "PASS",
-      "duration_seconds": 23.932,
+      "duration_seconds": 18.396,
       "exit_code": 0,
       "expected": "accept",
-      "log_sha256": "sha256:a898a9c7d900d92c8b23ac4aec36f12ab7b71e80a694deea7d5581441ba8d940",
+      "log_sha256": "sha256:e699e1f151a7c199fd983b7459487102d3d902505c1d9ea346afd00507f83637",
       "mutation": null,
       "name": "approved_v2",
       "observed_profile": "draft06-v2+llm-conversation-v1",
       "profile": "draft06-v2",
-      "report_sha256": "sha256:0c16ddae4b8d466912fc417cbb084769859b6a7c10045413d603b07a13d7753a",
+      "report_sha256": "sha256:e0a3b092d4c9c7325da30bd3e0a327d40e6966d520e9251c0768abe0bb7d144b",
       "status": "PASS",
       "timed_out": false
     },
@@ -69,11 +69,11 @@
         "platform": "SIMULATED"
       },
       "cli_report_status": "ERROR",
-      "duration_seconds": 0.667,
+      "duration_seconds": 0.772,
       "exit_code": 1,
       "expected": "reject",
       "expected_error": "configure Agent B LLM: llm runtime: digest mismatch",
-      "log_sha256": "sha256:7f2cec84a47cd79625ba5a00ae1093830a4150c8ddb4c0419307938d683e9cc4",
+      "log_sha256": "sha256:767e59554f41fd4ab810670a4cb0254d1ec1c98df71e1ae647d20082cbfae278",
       "mutation": {
         "changed_sha256": "sha256:4923905a6becf95c535aa099092d8a16f3fede69b4f170a5045260b26ec2a69a",
         "file": "model/model.safetensors",
@@ -85,7 +85,7 @@
       "phase": "pre-runtime artifact validation",
       "phase_evidence": "exact configuration error plus NewManagedModel call ordering; no inference counter is instrumented",
       "profile": "v1",
-      "report_sha256": "sha256:7c9b18c260e06b44ba49681483aa4ad991dcd2b1b8b0e8002db95669c8b44bf2",
+      "report_sha256": "sha256:87863763083f67cd32ca81b36eef368d552ca176c3e45fd9c83b2cd9830973dd",
       "status": "PASS",
       "timed_out": false
     },
@@ -96,11 +96,11 @@
         "platform": "SIMULATED"
       },
       "cli_report_status": "ERROR",
-      "duration_seconds": 0.982,
+      "duration_seconds": 0.648,
       "exit_code": 1,
       "expected": "reject",
       "expected_error": "configure Agent B LLM: llm runtime: digest mismatch",
-      "log_sha256": "sha256:dfeae7c051971ffb3e37e86cf15e2690e603a9f075893d8fa88499e750294224",
+      "log_sha256": "sha256:8006c18d803e1591767e0c1e6fbf938131038091b74caefd4ba62a1116165e16",
       "mutation": {
         "changed_sha256": "sha256:8faff8f150ee025e8db8bb838a9a5e221b7d8b4613c2855a4b1effac6f5ba6ff",
         "file": "adapter/adapter_model.safetensors",
@@ -112,7 +112,7 @@
       "phase": "pre-runtime artifact validation",
       "phase_evidence": "exact configuration error plus NewManagedModel call ordering; no inference counter is instrumented",
       "profile": "v1",
-      "report_sha256": "sha256:a5d55feb244725a3d73108b01f2c0f7cd033f38cee5da646a0e14c20e7c519a0",
+      "report_sha256": "sha256:7fbab9998a0c681399e348e189f15eb67745714df624e02b583f6086f3524222",
       "status": "PASS",
       "timed_out": false
     },
@@ -123,11 +123,11 @@
         "platform": "SIMULATED"
       },
       "cli_report_status": "ERROR",
-      "duration_seconds": 1.029,
+      "duration_seconds": 0.661,
       "exit_code": 1,
       "expected": "reject",
       "expected_error": "configure Agent B LLM: llm runtime: digest mismatch",
-      "log_sha256": "sha256:b1daee876ddf3121dd53e7e2341712ce57531082345b90a0bdb28b865cb39d30",
+      "log_sha256": "sha256:0f82a5ddf298b69230e832e1c7e7b7beec65ed3c9eb57c38dfc9c73086d5b32e",
       "mutation": {
         "changed_sha256": "sha256:43b773edc50519e63b5dd2761bf3dea6a87fc295c39b2cd2630e6cdc75b91375",
         "file": "model/tokenizer.json",
@@ -139,7 +139,7 @@
       "phase": "pre-runtime artifact validation",
       "phase_evidence": "exact configuration error plus NewManagedModel call ordering; no inference counter is instrumented",
       "profile": "v1",
-      "report_sha256": "sha256:4c5e12e7be693c4b1b5732035b9ab46eec548dc1d6de20bb1c08f1be81ad2863",
+      "report_sha256": "sha256:195cc946cddd179fd81cd0a1e907dd88ac55a89193310449edc2ddb4e7efe6e0",
       "status": "PASS",
       "timed_out": false
     },
@@ -150,11 +150,11 @@
         "platform": "SIMULATED"
       },
       "cli_report_status": "ERROR",
-      "duration_seconds": 0.236,
+      "duration_seconds": 0.195,
       "exit_code": 1,
       "expected": "reject",
       "expected_error": "configure Agent B LLM: llm runtime: digest mismatch",
-      "log_sha256": "sha256:041756d05450717a30d13923ececc6642d86d67576af057ce4da08aa667a90e4",
+      "log_sha256": "sha256:b57b5ef8dca71e172e97e1152e3b7c4676c334b20c6a2900b666e101f94b1863",
       "mutation": {
         "changed_sha256": "sha256:3645bda13bd24b1525f27746a2a2eb10888f42806b2a7668a8144dedcf3343d5",
         "file": "model/config.json",
@@ -166,7 +166,7 @@
       "phase": "pre-runtime artifact validation",
       "phase_evidence": "exact configuration error plus NewManagedModel call ordering; no inference counter is instrumented",
       "profile": "v1",
-      "report_sha256": "sha256:458d67f2ee5765de850cd56471253ba0ea79575342c980277ea1fd42b8fdf9ba",
+      "report_sha256": "sha256:70d442e86ec3f7b4f049ee89508c7813ade058924d643a50a5ec9cd0ea546710",
       "status": "PASS",
       "timed_out": false
     },
@@ -177,11 +177,11 @@
         "platform": "SIMULATED"
       },
       "cli_report_status": "ERROR",
-      "duration_seconds": 1.142,
+      "duration_seconds": 0.597,
       "exit_code": 1,
       "expected": "reject",
       "expected_error": "configure Agent B LLM: llm runtime: digest mismatch",
-      "log_sha256": "sha256:3ebc7b401a7179f7a02807eec10a25f28238bae17d3ae2dca3ce992f84172482",
+      "log_sha256": "sha256:a3f079aa7c3d7d4207bbec0b113908bd08733da55b184c04fde2f8f2d9ac1857",
       "mutation": {
         "changed_sha256": "sha256:21a582613b850880132c26e7b8010d4a3695eea5497a31896a8487006cc64e16",
         "file": "adapter/adapter_config.json",
@@ -193,7 +193,7 @@
       "phase": "pre-runtime artifact validation",
       "phase_evidence": "exact configuration error plus NewManagedModel call ordering; no inference counter is instrumented",
       "profile": "v1",
-      "report_sha256": "sha256:82b5dc771b19a1405c8e97960ca1fe1d93b93aaa7916670bc3f959fb558f00bd",
+      "report_sha256": "sha256:4264f2622ee7f1ea055209aad5f74f19c745c7cea40756aafa8737d95917711a",
       "status": "PASS",
       "timed_out": false
     },
@@ -204,11 +204,11 @@
         "platform": "SIMULATED"
       },
       "cli_report_status": "ERROR",
-      "duration_seconds": 0.973,
+      "duration_seconds": 0.684,
       "exit_code": 1,
       "expected": "reject",
       "expected_error": "configure Agent B LLM: llm runtime: digest mismatch",
-      "log_sha256": "sha256:736f6c486277bec8933077109885a80f3f469fdd28c9eae23129cfc5c0329765",
+      "log_sha256": "sha256:66c65b9aecbf02949ccd114a44278b5cce2a054a9403d5e6b1f0879c34d1e586",
       "mutation": {
         "changed_sha256": "sha256:489a9e9cc74415cb15fc616568cd9a4974a1e0652530f912577ccd98fc01692b",
         "changed_value": {
@@ -372,7 +372,7 @@
       "phase": "pre-runtime artifact validation",
       "phase_evidence": "exact configuration error plus NewManagedModel call ordering; no inference counter is instrumented",
       "profile": "v1",
-      "report_sha256": "sha256:874a0885e9a842834ae5812207912a2bfd14fe7acb34629095d3580cfb3221f7",
+      "report_sha256": "sha256:644572c1a810783993f14c17af3f83ef7da5e299828619d4b105a76f530e8f5c",
       "status": "PASS",
       "timed_out": false
     },
@@ -383,11 +383,11 @@
         "platform": "SIMULATED"
       },
       "cli_report_status": "ERROR",
-      "duration_seconds": 0.987,
+      "duration_seconds": 0.657,
       "exit_code": 1,
       "expected": "reject",
       "expected_error": "configure Agent B LLM: llm runtime: invalid configuration: bundle file must be regular and not a symlink",
-      "log_sha256": "sha256:f6abb61542815bd54990d8d9b12d83be016d62d45eaee51725f98959e06cbc27",
+      "log_sha256": "sha256:32bc52f75a5763e21df8aedeefd24dde7fd95304c960e91f70c3dd941811d82a",
       "mutation": {
         "operation": "remove declared file"
       },
@@ -396,7 +396,7 @@
       "phase": "pre-runtime artifact validation",
       "phase_evidence": "exact configuration error plus NewManagedModel call ordering; no inference counter is instrumented",
       "profile": "v1",
-      "report_sha256": "sha256:8804729c3b3dfba6faadf2bc1e630ea45d496ac6a0c943233a38021e9b304f32",
+      "report_sha256": "sha256:ab721dab568532ce330d1485a34456564249e17566f9a1e2c22b913d61cb7887",
       "status": "PASS",
       "timed_out": false
     },
@@ -407,11 +407,11 @@
         "platform": "SIMULATED"
       },
       "cli_report_status": "ERROR",
-      "duration_seconds": 0.182,
+      "duration_seconds": 0.19,
       "exit_code": 1,
       "expected": "reject",
       "expected_error": "configure Agent B LLM: llm runtime: digest mismatch",
-      "log_sha256": "sha256:367dab1ebe4f56caa1c7812934336101aa3dee25f401434307e6b1007aaa236f",
+      "log_sha256": "sha256:4c8c043f231895e9c83a538991d848a4033ba1b7315c6998d91b42132b966b5e",
       "mutation": {
         "changed_sha256": "sha256:105205faa4787f5acbe7a18f6b4ee5e94c4036990c138470692abe815fc67483",
         "changed_value": {
@@ -459,7 +459,7 @@
       "phase": "pre-runtime artifact validation",
       "phase_evidence": "exact configuration error plus NewManagedModel call ordering; no inference counter is instrumented",
       "profile": "v1",
-      "report_sha256": "sha256:e113e9b30d0875fe5629ac75284ee8d480689d86c2ed277955dde7e894e0e3be",
+      "report_sha256": "sha256:c81e8f6b7d2ef58c3d4413850378766626e27b67fab86ebb189b3b5d2be368bb",
       "status": "PASS",
       "timed_out": false
     },
@@ -470,11 +470,11 @@
         "platform": "SIMULATED"
       },
       "cli_report_status": "ERROR",
-      "duration_seconds": 0.183,
+      "duration_seconds": 0.14,
       "exit_code": 1,
       "expected": "reject",
       "expected_error": "configure Agent B LLM: llm runtime: digest mismatch",
-      "log_sha256": "sha256:30f661699a86658ba9b08a81b34558ca3c0ed2923b9fa1b8e4c76b875a1c6e3b",
+      "log_sha256": "sha256:57532c9401261226455ef546ca9570516b55c9294f5a034e9a3bfe3d4f4e5b18",
       "mutation": {
         "changed_sha256": "sha256:e40275b80ce9d1892e255ac65823b417d2ef169b384f41a792fe5da6cc70187e"
       },
@@ -483,7 +483,7 @@
       "phase": "pre-runtime artifact validation",
       "phase_evidence": "exact configuration error plus NewManagedModel call ordering; no inference counter is instrumented",
       "profile": "v1",
-      "report_sha256": "sha256:2226d72b08235d6632c17169ae11b5e94a88b00633a6b11f06ded9dc54d48f51",
+      "report_sha256": "sha256:356671c3e5f2f8990310b9d3cd307073d72fdf037b2141dbe4303d4486fc2eff",
       "status": "PASS",
       "timed_out": false
     },
@@ -494,11 +494,11 @@
         "platform": "SIMULATED"
       },
       "cli_report_status": "ERROR",
-      "duration_seconds": 0.225,
+      "duration_seconds": 1.081,
       "exit_code": 1,
       "expected": "reject",
       "expected_error": "configure Agent B LLM: llm runtime: digest mismatch",
-      "log_sha256": "sha256:ebd2756d36c3da474dba1d915a27335848cc1a7bc4232c490563b59eb6814f08",
+      "log_sha256": "sha256:bec4668e53f1e83673864460e1064cd01f5fc90ba2f4994fe6f893cb9e2ce6fe",
       "mutation": {
         "manifest": {
           "changed_sha256": "sha256:9164b21a27d88db3bc914065be15155991fb22b3c2bd53a1511d83482c2d25fb",
@@ -568,7 +568,7 @@
       "phase": "pre-runtime artifact validation",
       "phase_evidence": "exact configuration error plus NewManagedModel call ordering; no inference counter is instrumented",
       "profile": "v1",
-      "report_sha256": "sha256:fa887b31c23e6ec7a0a925e28b5eecf96b572f858f69a630ac93f1c8fb9f55e1",
+      "report_sha256": "sha256:027b247740630ce0c833898363e9965190381b2515ad2b5c747db84cd2f1547d",
       "status": "PASS",
       "timed_out": false
     },
@@ -579,11 +579,11 @@
         "platform": "SIMULATED"
       },
       "cli_report_status": "ERROR",
-      "duration_seconds": 6.933,
+      "duration_seconds": 8.976,
       "exit_code": 1,
       "expected": "reject",
       "expected_error": "configure Agent A LLM: llm runtime: digest mismatch",
-      "log_sha256": "sha256:87b00eee1abdf017342fe90f0048583bd1fbe1d9f1003b2af4030111668d0fc4",
+      "log_sha256": "sha256:cd87a5a547391bd06668896bcc800419231d308713d543b99d7689dbd9077038",
       "mutation": {
         "changed_sha256": "sha256:e40275b80ce9d1892e255ac65823b417d2ef169b384f41a792fe5da6cc70187e",
         "changed_value": {
@@ -646,7 +646,7 @@
       "phase": "pre-runtime artifact validation",
       "phase_evidence": "exact configuration error plus NewManagedModel call ordering; no inference counter is instrumented",
       "profile": "v1",
-      "report_sha256": "sha256:c86e70e04f61da9a2d24926252f267869c97286109fc6c8b10845dfc9236bd3e",
+      "report_sha256": "sha256:69ee47320ae634d73054509eca073f82194f1853e2a6268ab61a136748ddd6c6",
       "status": "PASS",
       "timed_out": false
     }
@@ -654,19 +654,19 @@
   "date_jst": "2026-10-16",
   "device": "cpu",
   "evidence_archive": {
-    "checksummed_files": 89,
+    "checksummed_files": 91,
     "excludes": [
       "downloadable base model files",
       "built executable",
       "temporary private A2A state"
     ],
     "name": "real-model-lora-cpu-evidence.zip",
-    "sha256": "sha256:25a5a5afd8819a11c922b98312257d2daca30c23b9d20d9f4a306389c9980ccd",
-    "size_bytes": 164726,
+    "sha256": "sha256:2af58e5aa8f347968cddab7130c092166ee99761ea7502e23d18faa1920887e7",
+    "size_bytes": 165921,
     "verification": "ZIP integrity and every archived file SHA-256 passed"
   },
-  "evidence_sha256": "sha256:777e9e81abc69c2bc94e2d9e3d87efbcd6b76f945f25d245bbdd9062fea6d0ed",
-  "finished_at_utc": "2026-10-15T15:25:30.320014+00:00",
+  "evidence_sha256": "sha256:f727cc7211126ac1c5115d2cb1e75eb6bd86af0a740e87e02ce7b9669729d532",
+  "finished_at_utc": "2026-10-16T01:49:13.278204+00:00",
   "go_version": "go version go1.26.9 darwin/arm64",
   "limits": [
     "test-only artifact approval; no model-wide safety claim",
@@ -676,9 +676,19 @@
     "Linux/Windows and other pretrained checkpoints not tested",
     "Positive transcripts invent details; instruction following and behavioral safety were not scored"
   ],
-  "local_evidence_directory": "build/model-validation/2026-10-16",
+  "local_evidence_directory": "build/model-validation/2026-10-16/review-r2",
   "machine": "arm64",
   "platform": "macOS-26.7.1-arm64-arm-64bit-Mach-O",
+  "preflight_checks": [
+    {
+      "build_started": false,
+      "exit_code": 1,
+      "log_sha256": "sha256:ffb9b9d68deb8ffe715edd9f0d8650a43485bc7fcae2efb0129b8eace0acedca",
+      "runner_sha256": "sha256:46f0c41384f3c018466ef6afc8887f986c45f4b4fef87a2397c0d1be6147f777",
+      "scenario": "untracked runtime Go source rejected before build",
+      "status": "PASS"
+    }
+  ],
   "preparation_attempts": {
     "completed": "BF16 adapter training and exact reload passed",
     "first": "FP32 adapter reload equality failed; retained under attempts/float32-adapter-reload"
@@ -694,10 +704,10 @@
     "transformers": "5.19.0"
   },
   "python": "3.14.6 (main, Jun 10 2026, 10:03:53) [Clang 21.0.0 (clang-2100.0.123.102)]",
-  "runner_sha256": "sha256:356ff5967810d10873339d29e9dd4527665cff298b10f556ee3dd98a49278725",
+  "runner_sha256": "sha256:46f0c41384f3c018466ef6afc8887f986c45f4b4fef87a2397c0d1be6147f777",
   "runtime_script_sha256": "sha256:f70e926556ee7d0c9fe9d3d995dbf89d505f75266bf4f6df24a12654b4f6deca",
   "schema": "asb.real-model-validation-record/v1",
-  "source_commit": "2f547ae147b130ff26fea63c478124c0b3894f10",
+  "source_commit": "c02946e7d32b713ec8265f0e9147571658ef1c13",
   "source_files": [
     {
       "path": "config.json",
@@ -732,7 +742,8 @@
   ],
   "source_repository": "HuggingFaceTB/SmolLM2-135M-Instruct",
   "source_revision": "12fd25f77366fa6b3b4b768ec3050bf629380bac",
-  "started_at_utc": "2026-10-15T15:24:34.222861+00:00",
+  "source_tree_diff": "",
+  "started_at_utc": "2026-10-15T23:48:08.494945+00:00",
   "status": "PASS",
   "training": {
     "active_adapters": [
