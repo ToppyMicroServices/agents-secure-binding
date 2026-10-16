@@ -17,6 +17,76 @@ import (
 	"google.golang.org/grpc"
 )
 
+type collectionResponseClient struct {
+	nilResponse bool
+	payload     []byte
+	err         error
+}
+
+func (m collectionResponseClient) FetchAttestation(context.Context, *attestation_v1.AttestationRequest, ...grpc.CallOption) (*attestation_v1.AttestationResponse, error) {
+	if m.nilResponse {
+		return nil, m.err
+	}
+	return &attestation_v1.AttestationResponse{EatToken: m.payload}, m.err
+}
+
+func (m collectionResponseClient) FetchRawEvidence(context.Context, *attestation_v1.AttestationRequest, ...grpc.CallOption) (*attestation_v1.RawEvidenceResponse, error) {
+	if m.nilResponse {
+		return nil, m.err
+	}
+	return &attestation_v1.RawEvidenceResponse{Evidence: m.payload}, m.err
+}
+
+func (m collectionResponseClient) FetchAzureToken(context.Context, *attestation_v1.AzureTokenRequest, ...grpc.CallOption) (*attestation_v1.AzureTokenResponse, error) {
+	if m.nilResponse {
+		return nil, m.err
+	}
+	return &attestation_v1.AzureTokenResponse{Token: m.payload}, m.err
+}
+
+func TestCollectionRequiresNonemptyResponse(t *testing.T) {
+	methods := []struct {
+		name string
+		call func(Client) ([]byte, error)
+	}{
+		{"attestation", func(c Client) ([]byte, error) {
+			return c.GetAttestation(context.Background(), [64]byte{}, [32]byte{}, attestation.SNP)
+		}},
+		{"raw evidence", func(c Client) ([]byte, error) {
+			return c.GetRawEvidence(context.Background(), [64]byte{}, [32]byte{}, attestation.SNP)
+		}},
+		{"Azure token", func(c Client) ([]byte, error) { return c.GetAzureToken(context.Background(), [32]byte{}) }},
+	}
+	cases := []struct {
+		name     string
+		response collectionResponseClient
+	}{
+		{"nil response", collectionResponseClient{nilResponse: true}},
+		{"nil payload", collectionResponseClient{}},
+		{"empty payload", collectionResponseClient{payload: []byte{}}},
+		{"nonempty payload", collectionResponseClient{payload: []byte{0, 0xff, 1}}},
+		{"RPC error", collectionResponseClient{nilResponse: true, err: context.DeadlineExceeded}},
+		{"payload with RPC error", collectionResponseClient{payload: []byte("partial"), err: context.DeadlineExceeded}},
+	}
+	for _, method := range methods {
+		for _, tc := range cases {
+			t.Run(method.name+"/"+tc.name, func(t *testing.T) {
+				got, err := method.call(&client{client: tc.response})
+				if tc.response.err == nil && len(tc.response.payload) > 0 {
+					require.NoError(t, err)
+					require.Equal(t, tc.response.payload, got)
+					return
+				}
+				require.Error(t, err)
+				require.Nil(t, got)
+				if tc.response.err != nil {
+					require.ErrorIs(t, err, tc.response.err)
+				}
+			})
+		}
+	}
+}
+
 func unixSocketPath(t *testing.T, name string) string {
 	t.Helper()
 	dir, err := os.MkdirTemp("", "asb-grpc-")
@@ -28,6 +98,7 @@ func unixSocketPath(t *testing.T, name string) string {
 // mockAttestationServer is a mock implementation of the AttestationServiceServer.
 type mockAttestationServer struct {
 	attestation_v1.UnimplementedAttestationServiceServer
+	emptyResponses         bool
 	fetchAttestationCalled bool
 	fetchRawEvidenceCalled bool
 	fetchAzureTokenCalled  bool
@@ -48,6 +119,9 @@ func (m *mockAttestationServer) FetchAttestation(ctx context.Context, req *attes
 	if m.attestationErr != nil {
 		return nil, m.attestationErr
 	}
+	if m.emptyResponses {
+		return &attestation_v1.AttestationResponse{}, nil
+	}
 
 	return &attestation_v1.AttestationResponse{
 		EatToken: []byte("mock-attestation-quote"),
@@ -63,6 +137,9 @@ func (m *mockAttestationServer) FetchRawEvidence(ctx context.Context, req *attes
 	if m.rawEvidenceErr != nil {
 		return nil, m.rawEvidenceErr
 	}
+	if m.emptyResponses {
+		return &attestation_v1.RawEvidenceResponse{}, nil
+	}
 
 	return &attestation_v1.RawEvidenceResponse{
 		Evidence: []byte("mock-raw-evidence"),
@@ -76,10 +153,49 @@ func (m *mockAttestationServer) FetchAzureToken(ctx context.Context, req *attest
 	if m.azureTokenErr != nil {
 		return nil, m.azureTokenErr
 	}
+	if m.emptyResponses {
+		return &attestation_v1.AzureTokenResponse{}, nil
+	}
 
 	return &attestation_v1.AzureTokenResponse{
 		Token: []byte("mock-azure-token"),
 	}, nil
+}
+
+func TestCollectionRejectsEmptyRPCPayload(t *testing.T) {
+	socketPath := unixSocketPath(t, "empty.sock")
+	listener, err := net.Listen("unix", socketPath)
+	require.NoError(t, err)
+	defer listener.Close()
+
+	grpcServer := grpc.NewServer()
+	attestation_v1.RegisterAttestationServiceServer(grpcServer, &mockAttestationServer{emptyResponses: true})
+	go func() { _ = grpcServer.Serve(listener) }()
+	defer grpcServer.Stop()
+
+	c, err := NewClient(socketPath)
+	require.NoError(t, err)
+	defer c.Close()
+
+	calls := []struct {
+		name string
+		call func() ([]byte, error)
+	}{
+		{"attestation", func() ([]byte, error) {
+			return c.GetAttestation(context.Background(), [64]byte{}, [32]byte{}, attestation.SNP)
+		}},
+		{"raw evidence", func() ([]byte, error) {
+			return c.GetRawEvidence(context.Background(), [64]byte{}, [32]byte{}, attestation.SNP)
+		}},
+		{"Azure token", func() ([]byte, error) { return c.GetAzureToken(context.Background(), [32]byte{}) }},
+	}
+	for _, call := range calls {
+		t.Run(call.name, func(t *testing.T) {
+			payload, err := call.call()
+			require.Error(t, err)
+			require.Nil(t, payload)
+		})
+	}
 }
 
 // TestNewClient tests creating a new attestation client.

@@ -3,6 +3,7 @@
 package ccaa
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"testing"
@@ -11,6 +12,94 @@ import (
 	"github.com/ToppyMicroServices/agents-secure-binding/v2/internal/proto/attestation-agent/mocks"
 	"github.com/stretchr/testify/mock"
 )
+
+func TestEvidenceCollectionRequiresNonemptyResponse(t *testing.T) {
+	methods := []struct {
+		name string
+		call func(*Provider) ([]byte, error)
+	}{
+		{"TEE", func(p *Provider) ([]byte, error) { return p.TeeAttestation(make([]byte, 64)) }},
+		{"vTPM", func(p *Provider) ([]byte, error) { return p.VTpmAttestation(make([]byte, 32)) }},
+		{"combined", func(p *Provider) ([]byte, error) { return p.Attestation(make([]byte, 64), make([]byte, 32)) }},
+	}
+	cases := []struct {
+		name     string
+		response *attestation_agent.GetEvidenceResponse
+		err      error
+	}{
+		{"nil response", nil, nil},
+		{"nil evidence", &attestation_agent.GetEvidenceResponse{}, nil},
+		{"empty evidence", &attestation_agent.GetEvidenceResponse{Evidence: []byte{}}, nil},
+		{"nonempty evidence", &attestation_agent.GetEvidenceResponse{Evidence: []byte{0, 0xff, 1}}, nil},
+		{"RPC error", nil, context.DeadlineExceeded},
+		{"evidence with RPC error", &attestation_agent.GetEvidenceResponse{Evidence: []byte("partial")}, context.DeadlineExceeded},
+	}
+	for _, method := range methods {
+		for _, tc := range cases {
+			t.Run(method.name+"/"+tc.name, func(t *testing.T) {
+				mockClient := mocks.NewAttestationAgentServiceClient(t)
+				mockClient.EXPECT().GetEvidence(mock.Anything, mock.Anything).Return(tc.response, tc.err).Once()
+				got, err := method.call(&Provider{client: mockClient})
+				if tc.err == nil && len(tc.response.GetEvidence()) > 0 {
+					if err != nil || !bytes.Equal(got, tc.response.Evidence) {
+						t.Fatalf("collection = %x, %v; want original evidence", got, err)
+					}
+					return
+				}
+				if err == nil || got != nil {
+					t.Fatalf("collection = %x, %v; want nil payload and error", got, err)
+				}
+				if tc.err != nil && !errors.Is(err, tc.err) {
+					t.Fatalf("collection error %v does not preserve %v", err, tc.err)
+				}
+			})
+		}
+	}
+}
+
+func TestAzureCollectionRequiresNonemptyResponse(t *testing.T) {
+	cases := []struct {
+		name     string
+		token    *attestation_agent.GetTokenResponse
+		tokenErr error
+		evidence *attestation_agent.GetEvidenceResponse
+		fallback error
+		want     []byte
+	}{
+		{name: "nil token response"},
+		{name: "nil token", token: &attestation_agent.GetTokenResponse{}},
+		{name: "empty token", token: &attestation_agent.GetTokenResponse{Token: []byte{}}},
+		{name: "nonempty token", token: &attestation_agent.GetTokenResponse{Token: []byte{0, 0xff, 1}}, want: []byte{0, 0xff, 1}},
+		{name: "nil fallback response", tokenErr: context.DeadlineExceeded},
+		{name: "nil fallback evidence", tokenErr: context.DeadlineExceeded, evidence: &attestation_agent.GetEvidenceResponse{}},
+		{name: "empty fallback evidence", tokenErr: context.DeadlineExceeded, evidence: &attestation_agent.GetEvidenceResponse{Evidence: []byte{}}},
+		{name: "nonempty fallback evidence", tokenErr: context.DeadlineExceeded, evidence: &attestation_agent.GetEvidenceResponse{Evidence: []byte("evidence")}, want: []byte("evidence")},
+		{name: "fallback error", tokenErr: context.DeadlineExceeded, fallback: context.Canceled},
+		{name: "fallback evidence with error", tokenErr: context.DeadlineExceeded, evidence: &attestation_agent.GetEvidenceResponse{Evidence: []byte("partial")}, fallback: context.Canceled},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			mockClient := mocks.NewAttestationAgentServiceClient(t)
+			mockClient.EXPECT().GetToken(mock.Anything, mock.Anything).Return(tc.token, tc.tokenErr).Once()
+			if tc.tokenErr != nil {
+				mockClient.EXPECT().GetEvidence(mock.Anything, mock.Anything).Return(tc.evidence, tc.fallback).Once()
+			}
+			got, err := (&Provider{client: mockClient}).AzureAttestationToken(make([]byte, 32))
+			if tc.want != nil {
+				if err != nil || !bytes.Equal(got, tc.want) {
+					t.Fatalf("collection = %x, %v; want %x, nil", got, err, tc.want)
+				}
+				return
+			}
+			if err == nil || got != nil {
+				t.Fatalf("collection = %x, %v; want nil payload and error", got, err)
+			}
+			if tc.tokenErr != nil && !errors.Is(err, tc.tokenErr) {
+				t.Fatalf("collection error %v does not preserve %v", err, tc.tokenErr)
+			}
+		})
+	}
+}
 
 func TestNewProviderRejectsRemotePlaintextTCP(t *testing.T) {
 	provider, err := NewProvider("192.0.2.10:50002")

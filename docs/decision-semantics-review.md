@@ -59,11 +59,11 @@ consistent with that store. Replacing it with an external store that can lose
 a response after commit would require a separate unknown-outcome contract and
 reconciliation. The sample does not establish that external behavior.
 
-Evidence collection is also separate from verification. The legacy
-`EmptyProvider` can return an empty Azure token without an error in the NoCC
-configuration. That response is not verified attestation or permission.
-An optional or simulated evidence source must not be described as a successful
-required hardware check.
+Evidence collection is also separate from verification. The initial review
+found that legacy `EmptyProvider.AzureAttestationToken` returned empty bytes
+without an error. The follow-up below corrects that collection contract.
+An optional or simulated evidence source is not a successful required hardware
+check.
 
 ## Validation
 
@@ -94,3 +94,40 @@ golangci-lint 2.11.1 passed for the diversion-policy repair.
 These checks used local fixtures. No new model was downloaded, opt-in real
 Safetensors inference was not enabled, and no live SNP/TDX or external-provider
 evidence was qualified by this review.
+
+## Empty collection follow-up — 2026-10-16
+
+The legacy Azure collector now returns an error when no attester is configured.
+CC-agent responses, configured MAA token responses, and all three legacy gRPC
+client methods reject nil or empty results. Provider/RPC errors still take
+precedence over any partial payload. The service rejects empty provider output
+before returning raw evidence, an Azure token, or an encoded EAT.
+
+The Azure handler was also named `GetAzureToken`, while the generated server
+dispatches `FetchAzureToken`. Thus the earlier empty-success observation
+described a direct method call; the actual Azure RPC returned `Unimplemented`.
+The handler now implements the existing proto method. An in-memory gRPC test
+uses generated clients and server registration to cover the real dispatch.
+The protobuf and public client signatures are unchanged.
+
+This change preserves existing nonempty sample behavior: embedded vTPM sample
+bytes remain available, and the `UNSPECIFIED` EAT path remains labeled `NoCC`.
+An empty embedded sample is rejected. The CC-agent's nonempty Azure evidence
+fallback is also preserved. None of these collection results establishes
+hardware authenticity, freshness, or a verified Azure token; callers still
+need evidence validation.
+
+Local validation passed for all five changed Go packages:
+
+```sh
+go test -race -count=1 ./cmd/attestation-service ./pkg/attestation ./pkg/attestation/azure ./pkg/attestation/ccaa ./pkg/clients/grpc/attestation
+go vet ./cmd/attestation-service ./pkg/attestation ./pkg/attestation/azure ./pkg/attestation/ccaa ./pkg/clients/grpc/attestation
+golangci-lint run ./cmd/attestation-service ./pkg/attestation ./pkg/attestation/azure ./pkg/attestation/ccaa ./pkg/clients/grpc/attestation
+```
+
+The regression cases cover nil responses, nil and empty payloads, upstream
+errors with partial payloads, exact preservation of nonempty results, and the
+existing sample paths. They include generated gRPC dispatch and Unix-socket
+client calls. Lint reported zero issues, and `git diff --check` passed.
+These checks used local fixtures; no live hardware or external MAA service
+was tested.

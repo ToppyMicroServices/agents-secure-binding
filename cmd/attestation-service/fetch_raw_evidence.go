@@ -40,8 +40,8 @@ func (s *service) FetchRawEvidence(ctx context.Context, req *attestationpb.Attes
 		s.logger.Info(fmt.Sprintf("[ATTESTATION-SERVICE] Fetching sample/unspecified attestation: reportData_len=%d",
 			len(req.ReportData)))
 
-		// Use TeeAttestation interface - for EmptyProvider this generates dynamic JSON sample quote
-		// For CC AA, this calls the agent to get a real quote (if supported)
+		// Ask the configured provider for sample evidence. EmptyProvider rejects
+		// TEE collection; a configured CC agent may supply a sample.
 		var reportData [64]byte
 		copy(reportData[:], req.ReportData)
 		binaryReport, err = s.provider.TeeAttestation(reportData[:])
@@ -56,6 +56,9 @@ func (s *service) FetchRawEvidence(ctx context.Context, req *attestationpb.Attes
 	}
 
 	if err != nil {
+		return nil, err
+	}
+	if err := requireCollectedEvidence(binaryReport); err != nil {
 		return nil, err
 	}
 

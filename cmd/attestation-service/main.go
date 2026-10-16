@@ -27,6 +27,8 @@ import (
 	"github.com/caarlos0/env/v11"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 const (
@@ -330,6 +332,9 @@ func (s *service) FetchAttestation(ctx context.Context, req *attestationpb.Attes
 	}
 
 	// Create EAT claims from binary report
+	if err := requireCollectedEvidence(binaryReport); err != nil {
+		return nil, err
+	}
 	nonce := req.ReportData
 	if len(req.Nonce) > 0 {
 		nonce = req.Nonce
@@ -382,12 +387,22 @@ func convertPlatformType(pt attestationpb.PlatformType) attestation.PlatformType
 	}
 }
 
-func (s *service) GetAzureToken(ctx context.Context, req *attestationpb.AzureTokenRequest) (*attestationpb.AzureTokenResponse, error) {
+func (s *service) FetchAzureToken(ctx context.Context, req *attestationpb.AzureTokenRequest) (*attestationpb.AzureTokenResponse, error) {
 	var nonce [32]byte
 	copy(nonce[:], req.Nonce)
 	token, err := s.provider.AzureAttestationToken(nonce[:])
 	if err != nil {
 		return nil, err
 	}
+	if err := requireCollectedEvidence(token); err != nil {
+		return nil, err
+	}
 	return &attestationpb.AzureTokenResponse{Token: token}, nil
+}
+
+func requireCollectedEvidence(evidence []byte) error {
+	if len(evidence) == 0 {
+		return status.Error(codes.Unavailable, "attestation provider returned empty evidence")
+	}
+	return nil
 }
