@@ -17,7 +17,7 @@ func TestEvaluateAcceptsClientVisibleDiversion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Evaluate() error = %v", err)
 	}
-	if !decision.Allowed {
+	if !decision.Allowed || !decision.Audit.Allowed {
 		t.Fatal("Evaluate() decision is not allowed")
 	}
 	if decision.Audit.PolicyID != policy.PolicyID {
@@ -87,9 +87,15 @@ func TestEvaluateRejectsClientVisibleDiversionWithoutNotice(t *testing.T) {
 	request := testRequest()
 	request.ClientNotified = false
 
-	_, err := policy.Evaluate(request)
+	decision, err := policy.Evaluate(request)
 	if !errors.Is(err, ErrClientNoticeRequired) {
 		t.Fatalf("Evaluate() error = %v, want %v", err, ErrClientNoticeRequired)
+	}
+	if decision.Allowed || decision.Audit.Allowed {
+		t.Fatalf("Evaluate() recorded permission without required notice: %#v", decision)
+	}
+	if decision.Audit.RuleID != policy.Rules[0].RuleID {
+		t.Fatalf("audit rule id = %q, want %q", decision.Audit.RuleID, policy.Rules[0].RuleID)
 	}
 }
 

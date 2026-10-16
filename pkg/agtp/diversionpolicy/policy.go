@@ -152,7 +152,6 @@ func (p Policy) Evaluate(req Request) (Decision, error) {
 			Visibility:     req.Visibility,
 			Trigger:        req.Trigger,
 			ReasonCode:     req.ReasonCode,
-			Allowed:        rule.Allowed,
 		}
 		if rule.RequireClientNotice && !req.ClientNotified {
 			return Decision{Audit: audit}, ErrClientNoticeRequired
@@ -160,6 +159,7 @@ func (p Policy) Evaluate(req Request) (Decision, error) {
 		if !rule.Allowed {
 			return Decision{Audit: audit}, ErrDenied
 		}
+		audit.Allowed = true
 		return Decision{Allowed: true, Audit: audit}, nil
 	}
 

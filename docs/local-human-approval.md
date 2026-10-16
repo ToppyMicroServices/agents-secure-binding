@@ -197,6 +197,10 @@ response. It is not a fifth Human answer or an operation state to treat as
 approval. Refresh or inspect the original operation before trying another
 action, as described below.
 
+See the [related-check review](decision-semantics-review.md) for how these
+answers differ from proof verification, task acceptance, quorum approvals,
+and execution outcomes.
+
 ## Recover an interrupted proposal
 
 The Agent saves a receipt **before** it submits a proposal. The
