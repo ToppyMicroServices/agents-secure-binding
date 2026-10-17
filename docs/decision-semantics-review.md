@@ -185,6 +185,12 @@ sh scripts/check-asb-core-boundary.sh
 The EA, transport, and composed platform suites passed after the Finished-only
 repair. Lint version 2.11.1 reported zero issues, and `git diff --check` passed.
 
+The first CI attempt caught the new test's direct CBOR import still classified
+as indirect in the Cocos module. That metadata was corrected without changing
+dependency versions. From `integrations/cocos`, `GOWORK=off go mod tidy -diff`,
+`GOWORK=off go mod verify`, `GOWORK=off go test -race -count=1 ./platformmodule`,
+and `GOWORK=off go vet ./platformmodule` then passed.
+
 The package suites also retain existing successful and explicit software-only
 cases. Evidence is offline with generated test trust roots. The CC JSON is a
 representative fixture, not a live agent response. These additions do not
