@@ -228,6 +228,9 @@ func validateAuthenticator(session *Session, st *tls.ConnectionState, role Role,
 		if err := session.MarkContextUsed(reqCtx); err != nil {
 			return nil, err
 		}
+		if attPolicy != nil && attPolicy.RequiresAttestation() {
+			return nil, eaattestation.ErrMissingAttestation
+		}
 		return &ValidationResult{
 			Context: append([]byte(nil), reqCtx...),
 			Empty:   true,
