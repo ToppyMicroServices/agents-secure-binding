@@ -86,7 +86,7 @@ func TestPrepareSEVSNPCertificateCache(t *testing.T) {
 }
 
 func TestFullModuleVerificationRequiresBothPolicies(t *testing.T) {
-	_, err := verifyFullModulePath(platformSNP, nil, nil, nil, nil, runOptions{})
+	_, _, err := verifyFullModulePath(platformSNP, nil, nil, nil, nil, runOptions{})
 	if err == nil {
 		t.Fatal("verifyFullModulePath() accepted missing policy inputs")
 	}

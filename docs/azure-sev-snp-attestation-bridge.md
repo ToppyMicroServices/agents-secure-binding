@@ -35,8 +35,12 @@ For each accepted TLS session and canonical action:
    `production.AzureSNPChallenge(attestation_binder_sha256)`.
 3. The confidential workload supplies that ASCII value as the Azure guest
    attestation nonce.
-4. The bridge requires the signed token's `nonce` claim to match the challenge
-   exactly before it signs an ASB result.
+4. The bridge requires the signed token's nonce to match the challenge exactly
+   before it signs an ASB result. It accepts either a plain top-level `nonce`
+   or the guest client's `x-ms-runtime.client-payload.nonce`, which is encoded
+   with standard Base64. The nested value is decoded only after JWT signature,
+   issuer, key, and lifetime checks. Malformed encodings and conflicting values
+   are rejected.
 
 A token collected for another TLS session, action, or verifier nonce therefore
 cannot be converted into a result for the current binder. A deployment must
@@ -80,6 +84,13 @@ Secure Boot enabled:
 6. Repeat with a second session and require rejection of the first token under
    the second binder.
 
+Microsoft's guest client documents `AttestationClient -a <provider> -n
+<challenge> -o token`. Capture its output privately. Its current sample can
+print an error and still exit successfully, so an exit code alone is not a
+positive result: the returned JWT must pass the bridge's full verification.
+Do not copy a nonce into a returned JWT or infer the allowed measurement from
+the token being tested.
+
 The negative run must also reject a wrong issuer, unknown or disabled MAA key,
 expired or stale token, wrong policy hash, wrong launch measurement, low guest
 SVN, debug enabled, migration enabled, and bridge-key revocation.
@@ -105,5 +116,7 @@ there is no software-only attestation fallback.
 Primary references:
 
 - <https://learn.microsoft.com/en-us/azure/confidential-computing/guest-attestation-confidential-vms>
+- [Microsoft guest-client invocation and signed nonce layout](https://learn.microsoft.com/en-us/azure/confidential-computing/skr-flow-confidential-vm-sev-snp#guest-attestation-client)
+- [Guest-client error handling inspected at commit 47a35799](https://github.com/Azure/confidential-computing-cvm-guest-attestation/blob/47a35799748934ad494f396e202f053408dd342f/cvm-attestation-sample-app/main.cpp#L104-L145)
 - <https://learn.microsoft.com/en-us/azure/attestation/claim-sets>
 - <https://learn.microsoft.com/en-us/rest/api/attestation/metadata-configuration/get?view=rest-attestation-2022-08-01>
