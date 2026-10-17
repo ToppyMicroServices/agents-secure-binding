@@ -131,3 +131,69 @@ existing sample paths. They include generated gRPC dispatch and Unix-socket
 client calls. Lint reported zero issues, and `git diff --check` passed.
 These checks used local fixtures; no live hardware or external MAA service
 was tested.
+
+## Nonempty and sample evidence follow-up — 2026-10-17
+
+The required verification paths were checked at base commit `0d7b8359`.
+The nonempty malformed and sample inputs below were already rejected. An
+additional connection test found that a valid Finished-only empty authenticator
+bypassed the required attestation policy. This follow-up repairs that path and
+adds regression coverage for both findings.
+
+| Path | Added regression coverage |
+| --- | --- |
+| [Core payload verification](../pkg/atls/eaattestation/verification_test.go) | Real TLS binding with verifier doubles: every supplied statement needs its own verifier; rejection propagates and returns no partially verified payload. Positive controls cover accepted evidence and accepted results. |
+| [SNP/TDX compatibility verifier](../integrations/cocos/platformmodule/sample_evidence_test.go) | Rejects malformed EAT, unsigned sample claims, trusted signed NoCC/vTPM/sample claims, and sample bytes relabeled as SNP or TDX. Inputs include the actual embedded fixture, the service's 96-byte NoCC layout, and representative CC sample JSON. |
+| [Required exported authenticator](../integrations/cocos/platformmodule/required_evidence_test.go) | Real TLS/EA signatures and binder with the concrete SNP verifier: valid signed SNP test evidence succeeds; malformed EAT, signed NoCC, and a trusted EAT wrapping a forged SNP signature return no validation result. |
+| [Required connection](../pkg/atls/internal_transport/required_attestation_test.go) | A valid TLS peer sends a Finished-only empty authenticator with identity policy disabled. Required attestation must reject it without returning a connection; optional attestation preserves the empty-response behavior. |
+| [Production bridge and profile](../pkg/production/required_evidence_test.go) | Concrete MAA token verification rejects nonempty opaque/sample input, unsigned JWTs, damaged signatures, forged trusted key IDs, and NoCC claims. Required profile verification rejects altered signatures/payloads and disallowed sample measurements, returns no accepted identity, and does not commit replay state. |
+
+The embedded fixture can parse as an SNP ABI report. When relabeled as SNP,
+it fails cryptographic authentication; rejection is not attributed to a
+parser error or an unavailable network. A valid signed SNP fixture succeeds
+under the same local trust and measurement policy. The NoCC sample includes
+the correct report data and nonce, showing that copied session values alone
+do not qualify it as hardware evidence.
+
+These tests distinguish the outer EAT signature from verification of its raw
+hardware report. Legacy `VerifyWithCoRIM` helpers compare measurements; that
+operation alone is not cryptographic evidence verification. The compatibility
+path exercises the SNP/TDX module before measurement appraisal. The production
+profile separately trusts a configured verifier's signed appraisal and an
+explicit measurement allowlist.
+
+Before the repair, the required connection regression returned a non-nil
+connection and no error. The EA-level regression also returned `Empty: true`
+without error when evidence, results, or both verifiers were configured. The
+Finished-only branch now returns `ErrMissingAttestation` when attestation is
+required, after validating Finished and consuming the request context. Optional
+empty responses retain their existing meaning; invalid Finished messages still
+fail their cryptographic check.
+
+Local validation passed:
+
+```sh
+go test -race -count=1 ./pkg/atls/eaattestation ./pkg/production ./integrations/cocos/platformmodule
+go test -race -count=1 ./pkg/atls/ea ./pkg/atls/eaattestation
+go test -race -count=1 ./pkg/atls/internal_transport
+go test -race -count=1 ./integrations/cocos/platformmodule
+go vet ./pkg/atls/ea ./pkg/atls/eaattestation ./pkg/atls/internal_transport ./pkg/production ./integrations/cocos/platformmodule
+golangci-lint run ./pkg/atls/ea ./pkg/atls/eaattestation ./pkg/atls/internal_transport ./pkg/production ./integrations/cocos/platformmodule
+sh scripts/check-asb-core-boundary.sh
+```
+
+The EA, transport, and composed platform suites passed after the Finished-only
+repair. Lint version 2.11.1 reported zero issues, and `git diff --check` passed.
+
+The first CI attempt caught the new test's direct CBOR import still classified
+as indirect in the Cocos module. That metadata was corrected without changing
+dependency versions. From `integrations/cocos`, `GOWORK=off go mod tidy -diff`,
+`GOWORK=off go mod verify`, `GOWORK=off go test -race -count=1 ./platformmodule`,
+and `GOWORK=off go vet ./platformmodule` then passed.
+
+The package suites also retain existing successful and explicit software-only
+cases. Evidence is offline with generated test trust roots. The CC JSON is a
+representative fixture, not a live agent response. These additions do not
+qualify live SNP/TDX hardware, Azure, or a full successful TDX appraisal, and
+cannot establish safety for an arbitrary custom verifier or a policy that
+explicitly authorizes sample measurements.

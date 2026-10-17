@@ -10,6 +10,7 @@ require (
 	github.com/ToppyMicroServices/agents-secure-binding/v2 v2.0.0-rc.2
 	github.com/caarlos0/env/v11 v11.4.0
 	github.com/fatih/color v1.18.0
+	github.com/fxamacker/cbor/v2 v2.9.0
 	github.com/go-kit/kit v0.13.0
 	github.com/google/go-sev-guest v0.14.1
 	github.com/google/go-tdx-guest v0.3.2-0.20241009005452-097ee70d0843
@@ -43,7 +44,6 @@ require (
 	github.com/envoyproxy/go-control-plane/envoy v1.37.0 // indirect
 	github.com/envoyproxy/protoc-gen-validate v1.3.3 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
-	github.com/fxamacker/cbor/v2 v2.9.0 // indirect
 	github.com/go-jose/go-jose/v4 v4.1.4 // indirect
 	github.com/go-kit/log v0.2.1 // indirect
 	github.com/go-logfmt/logfmt v0.6.1 // indirect
