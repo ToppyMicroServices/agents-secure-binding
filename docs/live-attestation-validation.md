@@ -1,6 +1,6 @@
 # Live attestation validation
 
-## Status — 2026-10-17
+## Status — 2026-10-18
 
 **Live hardware and live Azure validation have not run.** No hardware quote or
 Azure Attestation token was acquired in this attempt. Local tests below must
@@ -20,6 +20,37 @@ Environment discovery on 2026-10-17 found:
 The live run is waiting for these execution inputs. A test must use an
 independently approved measurement and policy; deriving its allowlist from the
 evidence under test would not validate the intended deployment.
+
+## Provisioning attempt — 2026-10-18
+
+The owner authorized a total USD 5 limit for a temporary GCP direct-SNP VM
+and an Azure confidential VM, followed by deletion of their VMs, disks, and
+IP addresses. After the owner reported excessive local load and an abrupt
+stop, work resumed with one operation at a time. No local build or test was
+run during this resumed attempt. Future local Go commands are limited to
+`GOMAXPROCS=1`, `go ... -p=1`, and test parallelism of one.
+
+| Check or action | Observed result |
+| --- | --- |
+| Azure authentication | Azure CLI 2.90.0 authenticated successfully; the selected subscription was enabled. |
+| Azure service registration | Registered `Microsoft.Compute` and `Microsoft.Quota`. These operations did not create a VM. |
+| Central India quota | Regional vCPU limit 10, usage 0; `standardDCASv5Family` limit 0, usage 0. Requesting a limit of 2 returned `QuotaNotAvailableForResource`. |
+| East US fallback quota | Regional vCPU limit 10, usage 0; `standardDCASv5Family` limit 0, usage 0. Requesting a limit of 2 returned the same error. |
+| GCP authentication | The selected account was signed out. Sign-in stopped at a CAPTCHA identity challenge; no project or billing target was confirmed. |
+| Azure resource inventory after the attempts | `az resource list` returned zero resources, including zero VMs, managed disks, and public IP addresses. |
+| Provisioning and cleanup | No VM, disk, or IP was created on either provider by this task; there was no test resource to delete. |
+| Live evidence and verdicts | NOT RUN. No fresh hardware report or MAA token was collected; neither live success nor live rejection was established. |
+
+No billable test resource was created. A billing export or final invoice was
+not checked. The quota errors are provisioning failures, not evidence that
+ASB rejected an invalid attestation. Azure documents support requests as the
+next route for `QuotaNotAvailableForResource`.
+[Azure quota error reference](https://learn.microsoft.com/en-us/rest/api/quota/#troubleshooting-quota-api-errors)
+
+PR #75 at `90a04122cf7e900940660dd170d54ead540b4042` had 39 successful
+checks when inspected on 2026-10-18. Those checks cover the preparation code;
+they do not establish live qualification. The PR remains a draft pending
+the requested live results. Any subsequent commit needs its own CI check.
 
 ## Preparation findings
 
