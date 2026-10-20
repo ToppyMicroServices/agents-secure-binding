@@ -293,4 +293,11 @@ GOWORK=off go run ./cmd/hardware-attestation-redteam \
   --evidence-dir /runner/evidence/asb-snp
 ```
 
-No live SNP or TDX result is recorded for this change.
+Full verification requires both fresh controls to succeed, then checks stale
+binding, malformed evidence, modified EAT/report signatures, and
+NoCC/CC/embedded samples with their original and forged platform labels. A
+successful `summary.json` records 13 named outcomes with evidence fingerprints.
+
+No live SNP or TDX result is recorded for this change. See the
+[live validation record](live-attestation-validation.md) for the environment
+status, local regression results, and remaining execution inputs.

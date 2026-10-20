@@ -247,7 +247,10 @@ func normalizeAzureSNPClaims(claims jwt.MapClaims) (AzureSNPTokenClaims, error) 
 		return AzureSNPTokenClaims{}, ErrAzureSNPClaims
 	}
 	tokenID, _ := claims["jti"].(string)
-	nonce, _ := claims["nonce"].(string)
+	nonce, err := normalizeAzureSNPNonce(claims)
+	if err != nil {
+		return AzureSNPTokenClaims{}, err
+	}
 	policyHash, _ := claims["x-ms-policy-hash"].(string)
 	measurement, _ := teeClaims["x-ms-sevsnpvm-launchmeasurement"].(string)
 	attestationType, _ := teeClaims["x-ms-attestation-type"].(string)
@@ -284,6 +287,61 @@ func normalizeAzureSNPClaims(claims jwt.MapClaims) (AzureSNPTokenClaims, error) 
 		IssuedAt:         issuedAt.Time,
 		ExpiresAt:        expiresAt.Time,
 	}, nil
+}
+
+// normalizeAzureSNPNonce accepts the direct nonce claim or the guest library's
+// base64-encoded client payload. Only call it after authenticating the JWT.
+func normalizeAzureSNPNonce(claims jwt.MapClaims) (string, error) {
+	var nonce string
+	if direct, present := claims["nonce"]; present {
+		value, ok := direct.(string)
+		if !ok || !validAzureSNPNonce(value) {
+			return "", ErrAzureSNPClaims
+		}
+		nonce = value
+	}
+	if rawRuntime, present := claims["x-ms-runtime"]; present {
+		runtime, ok := rawRuntime.(map[string]any)
+		if !ok {
+			return "", ErrAzureSNPClaims
+		}
+		if rawPayload, present := runtime["client-payload"]; present {
+			payload, ok := rawPayload.(map[string]any)
+			if !ok {
+				return "", ErrAzureSNPClaims
+			}
+			if encoded, present := payload["nonce"]; present {
+				value, ok := encoded.(string)
+				if !ok || len(value) > base64.StdEncoding.EncodedLen(4096) {
+					return "", ErrAzureSNPClaims
+				}
+				decoded, err := base64.StdEncoding.Strict().DecodeString(value)
+				if err != nil || base64.StdEncoding.EncodeToString(decoded) != value || !validAzureSNPNonce(string(decoded)) {
+					return "", ErrAzureSNPClaims
+				}
+				if nonce != "" && nonce != string(decoded) {
+					return "", ErrAzureSNPClaims
+				}
+				nonce = string(decoded)
+			}
+		}
+	}
+	if nonce == "" {
+		return "", ErrAzureSNPClaims
+	}
+	return nonce, nil
+}
+
+func validAzureSNPNonce(value string) bool {
+	if len(value) == 0 || len(value) > 4096 {
+		return false
+	}
+	for i := range len(value) {
+		if value[i] < '!' || value[i] > '~' {
+			return false
+		}
+	}
+	return true
 }
 
 func exactUint64(value any) (uint64, bool) {

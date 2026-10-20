@@ -9,9 +9,11 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/rsa"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"io"
+	"strings"
 	"testing"
 	"time"
 
@@ -67,6 +69,150 @@ func TestAzureSNPAttestationBridgeIssuesVerifiableResult(t *testing.T) {
 	}
 	if result.ExpiresAt.After(fixture.now.Add(fixture.bridge.ResultTTL)) {
 		t.Fatalf("result expiry = %v, exceeds bridge TTL", result.ExpiresAt)
+	}
+}
+
+func TestAzureSNPAttestationBridgeAcceptsGuestNonce(t *testing.T) {
+	t.Parallel()
+	for _, matchingDirectNonce := range []bool{false, true} {
+		name := "nested only"
+		if matchingDirectNonce {
+			name = "matching direct and nested"
+		}
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			fixture := newAzureSNPBridgeFixture(t)
+			challenge := AzureSNPChallenge(fixture.binder)
+			fixture.claims["x-ms-runtime"] = map[string]any{
+				"client-payload": map[string]any{
+					"nonce": base64.StdEncoding.EncodeToString([]byte(challenge)),
+				},
+			}
+			if !matchingDirectNonce {
+				delete(fixture.claims, "nonce")
+			}
+			token := fixture.signToken(t, fixture.claims)
+			result, err := fixture.bridge.Issue(context.Background(), token, fixture.binder, fixture.now)
+			if err != nil {
+				t.Fatalf("Issue() error = %v", err)
+			}
+			policy := SignedAttestationPolicy{
+				TrustedKeys:         map[string]ed25519.PublicKey{fixture.bridge.VerifierKeyID: fixture.attesterPub},
+				PolicyID:            fixture.bridge.PolicyID,
+				AllowedMeasurements: []string{testAzureSNPMetric},
+				MaxAge:              time.Minute,
+				ClockSkew:           time.Second,
+			}
+			if err := policy.Verify(context.Background(), result, fixture.binder, fixture.now); err != nil {
+				t.Fatalf("SignedAttestationPolicy.Verify() error = %v", err)
+			}
+		})
+	}
+}
+
+func TestAzureSNPAttestationBridgeRejectsInvalidGuestNonce(t *testing.T) {
+	t.Parallel()
+	encoded := func(value string) string { return base64.StdEncoding.EncodeToString([]byte(value)) }
+	payload := func(value any) map[string]any {
+		return map[string]any{"client-payload": map[string]any{"nonce": value}}
+	}
+	tests := []struct {
+		name       string
+		runtime    any
+		direct     any
+		keepDirect bool
+		want       error
+	}{
+		{name: "missing nonce", runtime: map[string]any{}, want: ErrAzureSNPClaims},
+		{name: "missing client payload nonce", runtime: map[string]any{"client-payload": map[string]any{}}, want: ErrAzureSNPClaims},
+		{name: "null runtime", runtime: nil, want: ErrAzureSNPClaims},
+		{name: "runtime wrong type", runtime: "nonce", want: ErrAzureSNPClaims},
+		{name: "null payload", runtime: map[string]any{"client-payload": nil}, want: ErrAzureSNPClaims},
+		{name: "payload wrong type", runtime: map[string]any{"client-payload": "nonce"}, want: ErrAzureSNPClaims},
+		{name: "null nonce", runtime: payload(nil), want: ErrAzureSNPClaims},
+		{name: "nonce wrong type", runtime: payload(1), want: ErrAzureSNPClaims},
+		{name: "empty nonce", runtime: payload(""), want: ErrAzureSNPClaims},
+		{name: "blank nonce", runtime: payload(encoded(" ")), want: ErrAzureSNPClaims},
+		{name: "whitespace nonce", runtime: payload(encoded("a b")), want: ErrAzureSNPClaims},
+		{name: "control byte nonce", runtime: payload(encoded("a\x00b")), want: ErrAzureSNPClaims},
+		{name: "non ASCII nonce", runtime: payload(encoded("é")), want: ErrAzureSNPClaims},
+		{name: "invalid base64", runtime: payload("!"), want: ErrAzureSNPClaims},
+		{name: "missing base64 padding", runtime: payload("YQ"), want: ErrAzureSNPClaims},
+		{name: "nonzero base64 padding bits", runtime: payload("YR=="), want: ErrAzureSNPClaims},
+		{name: "base64 newline", runtime: payload("YQ==\n"), want: ErrAzureSNPClaims},
+		{name: "base64url alphabet", runtime: payload("____"), want: ErrAzureSNPClaims},
+		{name: "oversized nonce", runtime: payload(encoded(strings.Repeat("a", 4097))), want: ErrAzureSNPClaims},
+		{name: "conflicting direct nonce", runtime: payload(encoded("guest-nonce")), direct: "different", want: ErrAzureSNPClaims},
+		{name: "invalid direct nonce", runtime: payload(encoded("guest-nonce")), direct: 1, want: ErrAzureSNPClaims},
+		{name: "blank direct nonce", runtime: payload(encoded("guest-nonce")), direct: "", want: ErrAzureSNPClaims},
+		{name: "valid direct with null runtime", runtime: nil, keepDirect: true, want: ErrAzureSNPClaims},
+		{name: "valid direct with null payload", runtime: map[string]any{"client-payload": nil}, keepDirect: true, want: ErrAzureSNPClaims},
+		{name: "valid direct with malformed nested nonce", runtime: payload("!"), keepDirect: true, want: ErrAzureSNPClaims},
+		{name: "valid direct with empty nested nonce", runtime: payload(""), keepDirect: true, want: ErrAzureSNPClaims},
+		{name: "valid direct with conflicting nested nonce", runtime: payload(encoded("different")), keepDirect: true, want: ErrAzureSNPClaims},
+		{name: "wrong binder", runtime: payload(encoded(AzureSNPChallenge(testHash("other-binder")))), want: ErrAzureSNPBinding},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			fixture := newAzureSNPBridgeFixture(t)
+			if !tt.keepDirect {
+				delete(fixture.claims, "nonce")
+			}
+			fixture.claims["x-ms-runtime"] = tt.runtime
+			if tt.direct != nil {
+				fixture.claims["nonce"] = tt.direct
+			}
+			token := fixture.signToken(t, fixture.claims)
+			result, err := fixture.bridge.Issue(context.Background(), token, fixture.binder, fixture.now)
+			if !errors.Is(err, tt.want) {
+				t.Fatalf("Issue() error = %v, want %v", err, tt.want)
+			}
+			if len(result.Signature) != 0 {
+				t.Fatal("Issue() signed a result for a rejected nonce")
+			}
+		})
+	}
+}
+
+func TestAzureSNPAttestationBridgeAuthenticatesGuestNonce(t *testing.T) {
+	t.Parallel()
+	fixture := newAzureSNPBridgeFixture(t)
+	delete(fixture.claims, "nonce")
+	fixture.claims["x-ms-runtime"] = map[string]any{
+		"client-payload": map[string]any{
+			"nonce": base64.StdEncoding.EncodeToString([]byte(AzureSNPChallenge(fixture.binder))),
+		},
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodNone, fixture.claims)
+	token.Header["kid"] = testMAAKeyID
+	unsigned, err := token.SignedString(jwt.UnsafeAllowNoneSignatureType)
+	if err != nil {
+		t.Fatal(err)
+	}
+	guestPayload := fixture.claims["x-ms-runtime"].(map[string]any)["client-payload"].(map[string]any)
+	guestPayload["nonce"] = base64.StdEncoding.EncodeToString([]byte(AzureSNPChallenge(testHash("other-binder"))))
+	signed := fixture.signToken(t, fixture.claims)
+	guestPayload["nonce"] = base64.StdEncoding.EncodeToString([]byte(AzureSNPChallenge(fixture.binder)))
+	modifiedClaims, err := json.Marshal(fixture.claims)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parts := strings.Split(signed, ".")
+	parts[1] = base64.RawURLEncoding.EncodeToString(modifiedClaims)
+	for name, input := range map[string]string{
+		"unsigned": unsigned,
+		"tampered": strings.Join(parts, "."),
+	} {
+		t.Run(name, func(t *testing.T) {
+			result, err := fixture.bridge.Issue(context.Background(), input, fixture.binder, fixture.now)
+			if !errors.Is(err, ErrAzureMAAToken) {
+				t.Fatalf("Issue() error = %v, want %v", err, ErrAzureMAAToken)
+			}
+			if len(result.Signature) != 0 {
+				t.Fatal("Issue() signed a result for an unauthenticated token")
+			}
+		})
 	}
 }
 
