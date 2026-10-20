@@ -1,0 +1,284 @@
+{
+  "schema_version": 1,
+  "recorded_date_jst": "2026-10-21",
+  "scope": "GCP N2D AMD Milan SEV-SNP direct module qualification; not Azure, TDX, model identity, or a network aTLS handshake",
+  "constraints": {
+    "upgrade_allowed": false,
+    "maximum_concurrent_vms": 1,
+    "usage_budget_usd": 5,
+    "maximum_vm_lifetime_seconds": 1800,
+    "local_builds_or_tests_this_resume": false
+  },
+  "configuration": {
+    "machine_type": "n2d-highcpu-2",
+    "zone": "us-central1-c",
+    "confidential_type": "SEV_SNP",
+    "cpu_platform": "AMD Milan",
+    "boot_disk": "10 GiB pd-standard, autoDelete",
+    "vmpl": 0,
+    "expected_launch_vmsas": 2,
+    "service_account": "none",
+    "secure_boot": true
+  },
+  "source": {
+    "harness_revision": "90a04122cf7e900940660dd170d54ead540b4042",
+    "harness_unchanged_since_that_revision": true,
+    "helper_source": "integrations/cocos/cmd/gcp-firmware-policy/main.go",
+    "helper_test_source": "integrations/cocos/cmd/gcp-firmware-policy/main_test.go",
+    "artifacts": [
+      {
+        "file": "hardware-attestation-redteam",
+        "size_bytes": 19072834,
+        "sha256": "27cd2da557cae3c81519c88104edadf2db026abc69eafdcc57c952f3efca53de"
+      },
+      {
+        "file": "sev-attest",
+        "size_bytes": 8975356,
+        "sha256": "36df5f24179f45bd858dc2817a00d121f11851452691c2030df8e956d6d6b648"
+      },
+      {
+        "file": "gcp-policy-helper",
+        "size_bytes": 17995361,
+        "sha256": "330696b873da0d273b479ec28a80bc27c849be55a3d0a2c38440badef5e01d6e"
+      },
+      {
+        "file": "gcp-policy-helper.go",
+        "size_bytes": 9116,
+        "sha256": "5b5e232d11a8d089befc4bec4ab251849003f83605411c7bc915517b80268273"
+      },
+      {
+        "file": "gcp-policy-helper_test.go",
+        "size_bytes": 11356,
+        "sha256": "d8e7796fd1fce2113644feffb8729a6ca8c3738901b89845ea07cad4d4dd098d"
+      }
+    ]
+  },
+  "diagnostic_run": {
+    "diagnostic-summary": {
+      "candidate_policy": 196608,
+      "independently_authenticated_policy": 458752,
+      "candidate_guest_svn": 0,
+      "candidate_measurement_sha256": "0534d2f220aeef2b474d2a21e7bb1af361ae21c3e100b28c626dde6ee9c01b14",
+      "approved_measurement_sha256": "0534d2f220aeef2b474d2a21e7bb1af361ae21c3e100b28c626dde6ee9c01b14",
+      "candidate_report_authenticated": false
+    },
+    "probe-summary": {
+      "kernel": "7.0.0-1014-gcp",
+      "architecture": "x86_64",
+      "report_version": 5,
+      "guest_policy": 196608,
+      "guest_svn": 0,
+      "vmpl": 0,
+      "report_sha256": "d82b29e46cedc1cb2a2a558655bf6bd2ddf4ffc7b85bd41eadc07ebc12409d36",
+      "measurement_sha256": "0534d2f220aeef2b474d2a21e7bb1af361ae21c3e100b28c626dde6ee9c01b14",
+      "endorsement_sha256": "755eb63fabcc29d7d357ac13968925481f24df4615dacb7ddeeb90a87d574396",
+      "endorsement_authenticated": false
+    },
+    "policy-summary": {
+      "status": "google_signed_firmware_policy_prepared",
+      "timestamp_utc": "2026-10-20T16:25:30Z",
+      "google_root_sha256": "e876bc6978bf4f3da445f98a0a82363c8c0bae5a1fc033c6df65846a6cb0f18c",
+      "endorsement_sha256": "755eb63fabcc29d7d357ac13968925481f24df4615dacb7ddeeb90a87d574396",
+      "corim_sha256": "c8900c7d2b170bfab50a0443b7be333ff46085a92f0f3bc6a745119306d54eb5",
+      "platform_policy_sha256": "ae413cfaad5896c61e14e15b1550a4df28af1ff7f6d5c1f0643ae143a4b47011",
+      "expected_launch_vmsas": 2,
+      "vmpl": 0,
+      "live_hardware_tested": false,
+      "tcb_floor_enforced": false,
+      "guest_svn_floor_enforced": false
+    },
+    "run-record": {
+      "start_utc": "2026-10-20T16:25:30.804789+00:00",
+      "end_utc": "2026-10-20T16:25:31.156769+00:00",
+      "exit_code": 1,
+      "timed_out": false,
+      "vmpl": 0,
+      "launch_vmsas": 2
+    },
+    "outcome": {
+      "completed_utc": "2026-10-20T16:26:49.758225+00:00",
+      "status": "FAIL",
+      "remaining_resources": {
+        "instances": 0,
+        "disks": 0,
+        "addresses": 0
+      },
+      "max_concurrent_vms": 1,
+      "maximum_run_seconds": 1800,
+      "upgrade_performed": false
+    },
+    "hardware_log": "hardware attestation red-team failed: fresh_session_a control failed: no matching reference value found in CoRIM for SNP\n"
+  },
+  "fixed_run": {
+    "diagnostic-summary": {
+      "candidate_policy": 196608,
+      "independently_authenticated_policy": 458752,
+      "candidate_guest_svn": 0,
+      "candidate_measurement_sha256": "0534d2f220aeef2b474d2a21e7bb1af361ae21c3e100b28c626dde6ee9c01b14",
+      "approved_measurement_sha256": "0534d2f220aeef2b474d2a21e7bb1af361ae21c3e100b28c626dde6ee9c01b14",
+      "candidate_report_authenticated": false
+    },
+    "probe-summary": {
+      "kernel": "7.0.0-1014-gcp",
+      "architecture": "x86_64",
+      "report_version": 5,
+      "guest_policy": 196608,
+      "guest_svn": 0,
+      "vmpl": 0,
+      "report_sha256": "87d703471444584e4cb1664285dfe978cb3086394d7038bebe312f96a01c4acf",
+      "measurement_sha256": "0534d2f220aeef2b474d2a21e7bb1af361ae21c3e100b28c626dde6ee9c01b14",
+      "endorsement_sha256": "755eb63fabcc29d7d357ac13968925481f24df4615dacb7ddeeb90a87d574396",
+      "endorsement_authenticated": false
+    },
+    "policy-summary": {
+      "status": "google_signed_firmware_policy_prepared",
+      "timestamp_utc": "2026-10-20T16:45:40Z",
+      "google_root_sha256": "e876bc6978bf4f3da445f98a0a82363c8c0bae5a1fc033c6df65846a6cb0f18c",
+      "endorsement_sha256": "755eb63fabcc29d7d357ac13968925481f24df4615dacb7ddeeb90a87d574396",
+      "corim_sha256": "064e6b293b744a859bd473fbd48fc59bf10537c77e7eff410ecbb80f5d825d43",
+      "platform_policy_sha256": "0413c7df0ec3995d3f904f816c80e54c0deac157ac15888fa6c928b0a8c40e0d",
+      "expected_launch_vmsas": 2,
+      "vmpl": 0,
+      "live_hardware_tested": false,
+      "tcb_floor_enforced": false,
+      "guest_svn_floor_enforced": false
+    },
+    "run-record": {
+      "start_utc": "2026-10-20T16:45:40.650322+00:00",
+      "end_utc": "2026-10-20T16:47:41.108273+00:00",
+      "exit_code": 0,
+      "timed_out": false,
+      "vmpl": 0,
+      "launch_vmsas": 2
+    },
+    "outcome": {
+      "completed_utc": "2026-10-20T16:51:59.960511+00:00",
+      "status": "PASS",
+      "remaining_resources": {
+        "instances": 0,
+        "disks": 0,
+        "addresses": 0
+      },
+      "max_concurrent_vms": 1,
+      "maximum_run_seconds": 1800,
+      "upgrade_performed": false
+    },
+    "hardware_log": "WARN : 2026/10/20 16:45:41.105914 abi.go:955: Warning: Neither VCEK nor VLEK certificate found in data pages\nhardware attestation red-team passed: platform=snp evidence_a_sha256=05e2f95b3e44af334b97fba48752e9ae3c2316536ac424c85cf375bfc8797c33 evidence_b_sha256=373f627b57fbc8773fbb09ae342765cabb86a580e065a9cf991c43d6a3541cc6\n",
+    "verification_summary": {
+      "timestamp_utc": "2026-10-20T16:47:41Z",
+      "platform": "snp",
+      "evidence_a_sha256": "05e2f95b3e44af334b97fba48752e9ae3c2316536ac424c85cf375bfc8797c33",
+      "evidence_b_sha256": "373f627b57fbc8773fbb09ae342765cabb86a580e065a9cf991c43d6a3541cc6",
+      "challenge_a_sha256": "2dbabcc2af87756039aaf8d2d3aeeab3b231d245138ba514d7650fbee137a61b",
+      "challenge_b_sha256": "2b0ebe168d15ac27bd60793ad6c47d78d81b8c81f223b1781dc32216b21fac98",
+      "appraisal_contract_check": false,
+      "full_module_verification": true,
+      "eat_public_key_sha256": "54833712c018a75e38808c1e0f050641a592c418709bcfe7a8abc1292f93494d",
+      "checks": [
+        {
+          "name": "fresh_session_a",
+          "expected": "accept",
+          "observed": "accept",
+          "evidence_sha256": "1f1bce84facb585402474c95a1026d4554eae6ebe7de00d24be65ff5fb78fdc2"
+        },
+        {
+          "name": "fresh_session_b",
+          "expected": "accept",
+          "observed": "accept",
+          "evidence_sha256": "1a67f92dda5fef0ddb1fb6b2bee30fbf3983de6800232c7fac64f3edf233020d"
+        },
+        {
+          "name": "stale_session_a",
+          "expected": "reject",
+          "observed": "reject",
+          "evidence_sha256": "1f1bce84facb585402474c95a1026d4554eae6ebe7de00d24be65ff5fb78fdc2"
+        },
+        {
+          "name": "malformed_eat",
+          "expected": "reject",
+          "observed": "reject",
+          "evidence_sha256": "f5fa69b6be60e7556e6b40f63da8d813b634fc92297ea9df4eba3fababd87204"
+        },
+        {
+          "name": "tampered_eat_signature",
+          "expected": "reject",
+          "observed": "reject",
+          "evidence_sha256": "64d89188f2e00f9b29151a3bfeac6e28f530cfe51eb9bc7263449eea09ac479b"
+        },
+        {
+          "name": "tampered_report_signature",
+          "expected": "reject",
+          "observed": "reject",
+          "evidence_sha256": "28d71340a67845b212fd0cf16b6650872ee7f95e9f2917efa8ae4e519337e817"
+        },
+        {
+          "name": "malformed_report",
+          "expected": "reject",
+          "observed": "reject",
+          "evidence_sha256": "0f4e914913000787feed1f9cb552505f871c44eb6a831366cf5f28f37140ef15"
+        },
+        {
+          "name": "nocc_sample",
+          "expected": "reject",
+          "observed": "reject",
+          "evidence_sha256": "0aff3cec8bd6b891fb2de0980c5ef54f7e9a9210b22faaf16fefd972967a11b5"
+        },
+        {
+          "name": "relabeled_nocc_sample",
+          "expected": "reject",
+          "observed": "reject",
+          "evidence_sha256": "155951d6f3d37f3ddb99f9d7a27ae3f04daa97123c17c1f30b6f101e8b6c4cce"
+        },
+        {
+          "name": "cc_json_sample",
+          "expected": "reject",
+          "observed": "reject",
+          "evidence_sha256": "e3ddccc7d443f81fed03a0a5d8a3ad0dd2473b868ba1604d7bba56a05a9f772b"
+        },
+        {
+          "name": "relabeled_cc_json_sample",
+          "expected": "reject",
+          "observed": "reject",
+          "evidence_sha256": "62b0517968a1033e09d59aac62541d8b62210620214da9cc8756d71a5fc5f2aa"
+        },
+        {
+          "name": "embedded_vtpm_sample",
+          "expected": "reject",
+          "observed": "reject",
+          "evidence_sha256": "9b2cf42f51011eb433041b3304ae268df0bb55241d4b8ff11b85c50599f91d88"
+        },
+        {
+          "name": "relabeled_embedded_vtpm_sample",
+          "expected": "reject",
+          "observed": "reject",
+          "evidence_sha256": "a578b86644732d77b111c8c05639fde2594d056557fc3c4300a8a00790497fdc"
+        }
+      ]
+    }
+  },
+  "cloud_regression": {
+    "commands": [
+      "GOWORK=off GOMAXPROCS=1 GOMEMLIMIT=512MiB GOFLAGS=-p=1 go test -p=1 -parallel=1 -count=1 -v ./cmd/gcp-firmware-policy",
+      "go vet ./cmd/gcp-firmware-policy",
+      "go mod tidy -diff",
+      "go build -p=1 -trimpath -o ../../../gcp-policy-helper-fixed ./cmd/gcp-firmware-policy"
+    ],
+    "log": "=== RUN   TestSyntheticSignedControlPreparesCompatiblePolicies\n--- PASS: TestSyntheticSignedControlPreparesCompatiblePolicies (0.06s)\n=== RUN   TestInvalidControlsDoNotCreateOutput\n=== RUN   TestInvalidControlsDoNotCreateOutput/production_pin_rejects_synthetic_root\n=== RUN   TestInvalidControlsDoNotCreateOutput/tampered_signature\n=== RUN   TestInvalidControlsDoNotCreateOutput/malformed_endorsement\n=== RUN   TestInvalidControlsDoNotCreateOutput/wrong_measurement\n=== RUN   TestInvalidControlsDoNotCreateOutput/wrong_vmsa_count\n=== RUN   TestInvalidControlsDoNotCreateOutput/missing_vmsa_count\n=== RUN   TestInvalidControlsDoNotCreateOutput/missing_vmpl\n=== RUN   TestInvalidControlsDoNotCreateOutput/debug_policy\n=== RUN   TestInvalidControlsDoNotCreateOutput/future_timestamp\n=== RUN   TestInvalidControlsDoNotCreateOutput/missing_timestamp\n=== RUN   TestInvalidControlsDoNotCreateOutput/expired_signer\n--- PASS: TestInvalidControlsDoNotCreateOutput (0.26s)\n    --- PASS: TestInvalidControlsDoNotCreateOutput/production_pin_rejects_synthetic_root (0.00s)\n    --- PASS: TestInvalidControlsDoNotCreateOutput/tampered_signature (0.00s)\n    --- PASS: TestInvalidControlsDoNotCreateOutput/malformed_endorsement (0.00s)\n    --- PASS: TestInvalidControlsDoNotCreateOutput/wrong_measurement (0.00s)\n    --- PASS: TestInvalidControlsDoNotCreateOutput/wrong_vmsa_count (0.00s)\n    --- PASS: TestInvalidControlsDoNotCreateOutput/missing_vmsa_count (0.00s)\n    --- PASS: TestInvalidControlsDoNotCreateOutput/missing_vmpl (0.00s)\n    --- PASS: TestInvalidControlsDoNotCreateOutput/debug_policy (0.00s)\n    --- PASS: TestInvalidControlsDoNotCreateOutput/future_timestamp (0.00s)\n    --- PASS: TestInvalidControlsDoNotCreateOutput/missing_timestamp (0.00s)\n    --- PASS: TestInvalidControlsDoNotCreateOutput/expired_signer (0.00s)\n=== RUN   TestExistingOutputIsPreserved\n--- PASS: TestExistingOutputIsPreserved (0.11s)\n=== RUN   TestPairedPoliciesKeepAllowanceSemantics\n=== RUN   TestPairedPoliciesKeepAllowanceSemantics/stricter_migration_policy\n=== RUN   TestPairedPoliciesKeepAllowanceSemantics/equal_policy\n=== RUN   TestPairedPoliciesKeepAllowanceSemantics/debug_rejected\n=== RUN   TestPairedPoliciesKeepAllowanceSemantics/wrong_vmpl_rejected\n=== RUN   TestPairedPoliciesKeepAllowanceSemantics/wrong_measurement_rejected\n--- PASS: TestPairedPoliciesKeepAllowanceSemantics (0.08s)\n    --- PASS: TestPairedPoliciesKeepAllowanceSemantics/stricter_migration_policy (0.00s)\n    --- PASS: TestPairedPoliciesKeepAllowanceSemantics/equal_policy (0.00s)\n    --- PASS: TestPairedPoliciesKeepAllowanceSemantics/debug_rejected (0.00s)\n    --- PASS: TestPairedPoliciesKeepAllowanceSemantics/wrong_vmpl_rejected (0.00s)\n    --- PASS: TestPairedPoliciesKeepAllowanceSemantics/wrong_measurement_rejected (0.00s)\nPASS\nok  \tgithub.com/ToppyMicroServices/agents-secure-binding/integrations/cocos/cmd/gcp-firmware-policy\t0.516s\nBUILD_PASS"
+  },
+  "evidence_handling": "Only non-sensitive fingerprints, named verdicts and preparation summaries are published. No raw quotes, JWTs, private keys, account IDs or IP addresses. Probe/preparation flags remain false because those steps alone are not live full verification.",
+  "evidence_transfer_sha256": {
+    "diagnostic": "caad0ab9f3359d03269e7e199034c750080bf7ee2231b3429b604990f70a92ce",
+    "fixed": "5adba597c0dfb43fa7a1f834e073b6e552f3ae42f27f2cdd3b988afefd6b73e8"
+  },
+  "billing_observation": {
+    "date_jst": "2026-10-21",
+    "scope": "billing account month-to-date, October 1-21; not a final invoice",
+    "account_type": "Free trial account",
+    "gross_cost_jpy": 27,
+    "savings_jpy": 27,
+    "net_cost_jpy": 0,
+    "trial_credit_remaining_jpy": 47134,
+    "trial_credit_initial_jpy": 47159,
+    "reporting_lag_possible": true
+  }
+}
