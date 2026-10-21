@@ -4,6 +4,9 @@ on:
   pull_request:
     paths:
       - '.github/workflows/debian-distribution.yaml'
+      - '.github/workflows/s3-distribution.yaml'
+      - 'scripts/package-s3.py'
+      - 'scripts/test_package_s3.py'
       - 'scripts/build-asb-deb.py'
       - 'scripts/test_build_asb_deb.py'
       - 'scripts/check-asb-deb-lifecycle.py'
@@ -58,7 +61,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-go@v5
         with:
-          go-version: 1.26.9
+          go-version: 1.26.10
       - name: Test Debian builder rejection paths
         run: |
           python3 scripts/test_build_asb_deb.py

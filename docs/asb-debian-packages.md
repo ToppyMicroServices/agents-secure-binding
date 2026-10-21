@@ -28,7 +28,7 @@ run locally and do not modify cloud policies.
 
 ## Build from a reviewed source revision
 
-Use Linux amd64, initially Ubuntu 24.04, with Python 3.10+, Git, Go 1.26.9 and
+Use Linux amd64, initially Ubuntu 24.04, with Python 3.10+, Git, Go 1.26.10 and
 `dpkg`/`dpkg-deb`. The builder does not need root. Go may download its pinned
 toolchain and dependencies through the configured proxy. It performs no cloud
 or provider operations. Start from a clean checkout and use an output directory

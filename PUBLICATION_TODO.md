@@ -2,6 +2,10 @@
 
 Release blockers and evidence limits for the public draft.
 
+For the 22 October 2026 development closeout and current evidence, see
+[development status](docs/development-status.md). Historical checkpoints below
+retain their original dates and do not replace that record.
+
 ## Repository Identity
 
 The canonical repository is moving to
@@ -32,12 +36,15 @@ gate on the exact merged commit. Sign and push the directory-prefixed tag only
 after that gate succeeds, and wait for its tag-triggered gate before creating a
 release.
 
-No live SNP or TDX qualification has been completed. The Cocos release must not
-claim production readiness.
+The [live attestation record](docs/live-attestation-validation.md) now contains
+GCP direct-SNP qualification. The linked Azure follow-up covers token
+verification and exact challenges, with full bridge acceptance unqualified.
+TDX live qualification remains open. These results do not establish Cocos
+production readiness.
 
 ## Recorded CI and Red-Team Status
 
-Latest recorded signed implementation checkpoint (GitHub signature status:
+Historical signed implementation checkpoint (GitHub signature status:
 verified):
 
 | Commit | Workflow | Run | Result | Date |
@@ -57,7 +64,7 @@ Local pre-publication gate after the README/module-path/runtime hardening work:
 | unsigned local worktree after 0-RTT, gateway-route, and appraisal-contract changes | JWT/JWS fuzz gate | `go test -run '^$' -fuzz=FuzzVerifySessionIdentityJWTRejectsMalformedCompactTokens -fuzztime=60s ./pkg/agtp` | Success; 1,252,457 executions | 2026-06-30 08:34 UTC |
 
 This checkpoint is not a formal proof or a broad deployment security claim. The
-remote CI and Security Red Team run IDs above record the latest implementation
+remote CI and Security Red Team run IDs above record that historical
 checkpoint. The product gate is scoped to the Direct-Agent core and reference
 adapters. Inherited agent/manager runtime integration tests include VM, sudo,
 loopback listener, and Python package-install paths and remain separate

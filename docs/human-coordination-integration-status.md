@@ -5,6 +5,10 @@ prepared for main integration on 10 September 2026. It separates completed
 preview behavior from production qualification. A passing local gate does not
 by itself establish a merged revision, published release, or deployed service.
 
+The [22 October development status](development-status.md) records later main
+integration and hosted CI. The September checks below remain historical
+evidence for their stated revisions.
+
 ## Source revisions
 
 - Coordination implementation and its tests:
@@ -51,7 +55,7 @@ listed below; their named tests must pass on the revision being qualified.
 | `asb-ljs.12` | [Acceptance retry tests](../pkg/taskcoord/actionbinding/acceptance_test.go): exact-attempt canonical recovery after expiry, fresh expired-request rejection, cross-proof reconciliation and conflict checks; concurrent retries in `cardinality_test.go`. [SQLite tests](../pkg/taskcoord/sqlitestore/store_test.go) add restart preservation and independent-process canonical retries; [first-acceptance race tests](../pkg/taskcoord/sqlitestore/acceptance_race_test.go) preserve the original commit time. | The generic Task–Action SQLite adapter persists acceptance on one host; it is separate from the local approval application's database. This admission boundary does not make an external effect atomic or qualify relay/provider recovery under `asb-ljs.8`. |
 | `asb-ljs.13` | `TestHumanAssuranceVocabulary`, `TestAssuranceProvenanceAcceptsOnlyImplementedProfilePair`, detached audit/delegation provenance and schema spoofing tests. | `gateway-asserted-for-human` is derived from the verified profile. It does not prove presence, UI confirmation, legal consent or a Human-held key. |
 | `asb-ljs.14` | [ProVerif queries](../formal/proverif/human_ingress_acceptance.pv), [bounded TLA+ models](../formal/tla/HUMAN_RESULTS.md), reproducible runners and [model-to-Go mapping](../formal/HUMAN_COORDINATION_MAP.md). | Symbolic correspondence and finite safety checks; no machine-checked refinement to a production Store. |
-| `asb-ljs.15` | Dedicated `human-coordination-red-team` CI job; [documented misuse/fault/privacy coverage](human-coordination-red-team-tests.md), TLS multiplexing/resumption tests and bounded parser fuzz seeds. | Live telemetry, public outbox projection and provider qualification are not supplied by this gate. Repository ruleset enforcement of this status is a separate integration setting. |
+| `asb-ljs.15` | Dedicated `human-coordination-red-team` CI job; [documented misuse/fault/privacy coverage](human-coordination-red-team-tests.md), TLS multiplexing/resumption tests and bounded parser fuzz seeds. The required `product-security` job runs the shared Human gate, including the complete bounded package set and both Python transcript verifiers. | The standalone status is not separately required. Live telemetry, public outbox projection and provider qualification are not supplied by this gate. |
 | `asb-ljs.16` | [IETF review proposal](human-coordination-ietf-review.md), `TestHumanCoordinationIETFReviewTopics` and a fresh Datatracker read on 10 September 2026. | Repository review input only; no draft submission, WG adoption, IANA allocation or wire-format freeze. |
 
 ## gRPC dependency decision

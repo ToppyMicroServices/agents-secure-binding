@@ -11,6 +11,11 @@ support for other distributions or architectures needs separate installation
 and runtime evidence. Existing Go module and supported API boundaries remain
 unchanged.
 
+The [development status](development-status.md) separates completed packaging
+tooling from production signing and publication. Candidate qualification is
+recorded by the Debian workflow for the exact source and final package bytes;
+it does not grant a broader support status to a packaged component.
+
 ## Actual delivery units
 
 | Component | Source and current interface | Distribution boundary |

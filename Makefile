@@ -98,8 +98,8 @@ build-igvm:
 
 product-security-gate:
 	go mod verify
-	GOTOOLCHAIN=go1.26.9+auto go test $(DIRECT_AGENT_CORE_PKGS)
-	GOTOOLCHAIN=go1.26.9+auto go test -v -race -count=1 ./pkg/atls/identitypolicy ./pkg/clients ./pkg/production ./cmd/redis-failover-redteam $(PRODUCTION_CONSUMER_PKGS)
+	GOTOOLCHAIN=go1.26.10+auto go test $(DIRECT_AGENT_CORE_PKGS)
+	GOTOOLCHAIN=go1.26.10+auto go test -v -race -count=1 ./pkg/atls/identitypolicy ./pkg/clients ./pkg/production ./cmd/redis-failover-redteam $(PRODUCTION_CONSUMER_PKGS)
 	$(MAKE) human-coordination-gate
 	$(MAKE) fuzz-smoke
 	$(GOVULNCHECK) ./...
@@ -107,22 +107,22 @@ product-security-gate:
 human-coordination-gate:
 	python3 scripts/verify-action-transcript-v1.py
 	python3 scripts/verify-human-recovery-transcript-v1.py
-	GOWORK=off GOTOOLCHAIN=go1.26.9+auto go test -race -count=1 $(HUMAN_COORDINATION_PKGS)
+	GOWORK=off GOTOOLCHAIN=go1.26.10+auto go test -race -count=1 $(HUMAN_COORDINATION_PKGS)
 
 # Bounded, hardware-independent misuse gate. Long-running fuzz campaigns use
 # human-coordination-fuzz and are intentionally not dependencies of this target.
 human-coordination-red-team:
 	python3 scripts/verify-action-transcript-v1.py
 	python3 scripts/verify-human-recovery-transcript-v1.py
-	GOWORK=off GOTOOLCHAIN=go1.26.9+auto go test -v -race -count=1 $(HUMAN_COORDINATION_REDTEAM_PKGS)
+	GOWORK=off GOTOOLCHAIN=go1.26.10+auto go test -v -race -count=1 $(HUMAN_COORDINATION_REDTEAM_PKGS)
 
 human-coordination-fuzz:
-	GOWORK=off GOTOOLCHAIN=go1.26.9+auto go test -run '^$$' \
+	GOWORK=off GOTOOLCHAIN=go1.26.10+auto go test -run '^$$' \
 		-fuzz='^FuzzHumanIngressStrictJSONDifferential$$' \
 		-fuzztime=$(HUMAN_COORDINATION_FUZZTIME) ./pkg/taskcoord/asbbinding
 
 fuzz-smoke:
-	GOTOOLCHAIN=go1.26.9+auto go test -run '^$$' -fuzz=FuzzVerifySessionIdentityJWTRejectsMalformedCompactTokens -fuzztime=10s ./pkg/agtp
+	GOTOOLCHAIN=go1.26.10+auto go test -run '^$$' -fuzz=FuzzVerifySessionIdentityJWTRejectsMalformedCompactTokens -fuzztime=10s ./pkg/agtp
 
 check-asb-core-boundary:
 	sh ./scripts/check-asb-core-boundary.sh

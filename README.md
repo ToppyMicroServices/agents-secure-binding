@@ -41,7 +41,7 @@ profile requirements.
 
 ## Quick start
 
-Install [Go 1.26.9](https://go.dev/doc/install) and run these commands from this source checkout. The local app
+Install [Go 1.26.10](https://go.dev/doc/install) and run these commands from this source checkout. The local app
 below is a **current-branch experimental preview**, not part of `v2.0.0-rc.2`.
 The first run downloads Go dependencies and compiles the app; later runs reuse
 the build cache. No TEE device, LLM account, Node.js, Docker, or separate
@@ -119,7 +119,7 @@ that local policy.
 | Direct-Agent v1 verifier | **Supported release:** [`v1.1.1`](https://github.com/ToppyMicroServices/agents-secure-binding/releases/tag/v1.1.1) | Stable v1 product line and compatibility policy |
 | ASB v2 Go module | **Prerelease:** [`v2.0.0-rc.2`](https://github.com/ToppyMicroServices/agents-secure-binding/releases/tag/v2.0.0-rc.2) | Breaking module migration and platform-neutral evidence boundary |
 | macOS local lab | **Debug only** | Loopback, signed simulated evidence, no confidential execution |
-| Direct SNP module | **Experimental:** `v0.1.1` | Separate appraiser module; live qualification incomplete |
+| Direct SNP module | **Experimental:** `v0.1.1` | Separate appraiser module; [recorded GCP live qualification](docs/live-attestation-validation.md), with other deployment profiles unqualified |
 | Direct TDX module | **Experimental:** `v0.1.2` | Separate appraiser module; strict-collateral success fixture and live qualification incomplete |
 | Cocos adapter | **Experimental:** `v0.1.1` | Optional, independently versioned integration; not in the ASB root dependency graph |
 | Agent ↔ Human TaskCoord | **Experimental, current branch / next prerelease candidate** | Human Participant, gateway Actor, bounded TLS ingress, and a Redis/Valkey store candidate; live backend qualification incomplete |
@@ -131,6 +131,10 @@ that local policy.
 `v2.0.0-rc.2` does not include the current-branch Human Coordination
 surfaces; they are candidates for a later prerelease. No production-readiness
 claim is made for those candidates or for SNP, TDX, and Cocos.
+
+The [development status](docs/development-status.md) records the completed
+implementation, exact CI evidence, and separate operator qualification tasks.
+Debian/apt tooling is implemented; a production apt repository is not published.
 
 ### Cocos boundary
 
