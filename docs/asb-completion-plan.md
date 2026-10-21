@@ -1,9 +1,10 @@
 # ASB implementation completion
 
-Working plan, 20 September 2026. The inspected main revision is
-`41e37c018c34744fcca45a6f9581c77e03366224`; the GitHub main reference was checked
-on this date. This document does not change a supported API or declare a new
-production profile.
+Original working plan, 20 September 2026, based on
+`41e37c018c34744fcca45a6f9581c77e03366224`. The implementation below is now in
+main. The [22 October development status](development-status.md) records the
+verified revision, hosted CI and separate operator qualification work. This
+document does not change a supported API or declare a new production profile.
 
 Split-Knowledge is one application of ASB. ASB's implementation and integration
 evidence should stand on their own. Application disclosure policy, privacy
@@ -20,7 +21,7 @@ cloud qualification retain their existing separate status.
 | TaskCoord | Redis/Valkey mutation/outbox adapter; shared SQLite Human mutation, replay, outcome and outbox transactions | Managed-backend and delivery-provider qualification remain separate |
 | Task–Action binding | Shared SQLite implementation of the complete Store contract, using current TaskCoord Assignments in the same transaction | External execution dispatch still requires an application adapter and qualification |
 | Human relay | Scoped contact, Linux file persistence, SQLite reachability authority and read-only reconciliation of unknown provider outcomes | Bounded single-host implementation; the included provider is synthetic, and selected-provider/deployment qualification remains open |
-| Required CI | Main's required `product-security` status and a separate bounded Human red-team job | The required job previously omitted `strictjson`, `operationjournal` and independent Python transcript checks; this work connects them through the shared Make target |
+| Required CI | Main's required `product-security` status invokes the shared Human gate, including `strictjson`, `operationjournal` and both independent Python transcript checks | The standalone Human red-team status is not separately required; its bounded package coverage is included in the required gate |
 | Research evaluation | Separate component regression pilot and a proposed comparison protocol | No single integrated human-decision/delegation/effect experiment or participant study |
 
 The local approval application already has SQLite-backed approval and recovery.
@@ -53,8 +54,9 @@ A separate 5-second Human ingress fuzz smoke passed 17,609 executions, including
 recovery request seeds. This is bounded parser evidence, not exhaustive fuzzing.
 Scoped static checks for TaskCoord, Action binding, the SQLite adapter, Human
 ingress and schemas passed with zero issues using the cached golangci-lint
-v2.11.1 source. Hosted CI, main integration and release have not been performed
-for this patch.
+v2.11.1 source. Hosted CI and main integration were still pending at that
+September checkpoint; the development status records their later completion.
+Those local results do not establish a published release.
 
 ### 2. Complete generic Human ingress outcome recovery
 
@@ -144,7 +146,9 @@ qualification). `asb-vdf.2`, `.3` and `.4` concern hardware, managed-provider HA
 and managed signing respectively. Their open states do not establish a defect
 in the already supported software-only profile.
 
-Completion of a local increment, hosted CI, main integration, a release and a
-qualified deployment are separate checkpoints. This increment completes the three requested software implementation and local
-verification items. External dispatch, selected deployment qualification and
-release remain separate stages; the production conformance claim stays false.
+The three software implementation items are complete and integrated into main,
+with hosted CI recorded in the development status. The owner confirmed on
+22 October that operator-specific qualification remains separate from this
+development closeout. External dispatch, selected deployment qualification and
+release retain their own evidence requirements; the production conformance
+claim stays false.
