@@ -24,7 +24,7 @@ from urllib.parse import quote, unquote, urlsplit, urlunsplit
 
 
 ROOT = Path(__file__).resolve().parents[1]
-TOOLCHAIN = "go1.26.9"
+TOOLCHAIN = "go1.26.10"
 MODULE = "github.com/ToppyMicroServices/agents-secure-binding/v2"
 PROGRAMS = {
     "asb-tools": {"agents-secure-binding-cli": "./cmd/cli", "asb-leastprivilege": "./cmd/asb-leastprivilege", "asb-leastprivilege-proof": "./cmd/asb-leastprivilege-proof"},

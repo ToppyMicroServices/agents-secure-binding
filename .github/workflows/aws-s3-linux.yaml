@@ -72,7 +72,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: 1.26.9
+          go-version: 1.26.10
       - name: Verify dependencies
         run: go mod verify
       - name: Check reference evidence rejection cases
@@ -210,7 +210,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-go@v5
         with:
-          go-version: 1.26.9
+          go-version: 1.26.10
       - name: Load the Linux conformance binary
         uses: actions/download-artifact@v4
         with:

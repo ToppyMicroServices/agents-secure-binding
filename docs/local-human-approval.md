@@ -12,7 +12,7 @@ TDX, a GPU, an LLM account, Docker, Node.js, or a separate SQLite installation.
 
 ## Start here
 
-Install Go 1.26.9 and open a terminal in the repository root. Check `go version`
+Install Go 1.26.10 and open a terminal in the repository root. Check `go version`
 if you are unsure which version is active. The first `go run` downloads
 dependencies and compiles the app, so allow for that initial setup. The same
 commands work in macOS/Linux terminals and Windows PowerShell.

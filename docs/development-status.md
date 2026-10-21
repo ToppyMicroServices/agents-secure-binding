@@ -53,6 +53,13 @@ unfinished feature. The published stable release remains `v1.1.1`; the latest
 v2 prerelease remains `v2.0.0-rc.2`. This closeout does not create a new tag or
 include current-branch features retroactively in either release.
 
+During closeout, a fresh required vulnerability scan reported `GO-2026-6809`
+in Go 1.26.9's `crypto/x509`. Current build, test and package toolchains have
+been updated to Go 1.26.10, whose [official release record](https://go.dev/doc/devel/release#go1.26)
+includes the certificate fix. Historical test records and qualified binary
+hashes retain their original toolchains. The final checks and merge are tracked
+in [PR #76](https://github.com/ToppyMicroServices/agents-secure-binding/pull/76).
+
 The [Debian workflow](../.github/workflows/debian-distribution.yaml) checks the
 final packages from each candidate revision, including installation, upgrade
 from a different source, persistent state, removal, signature rejection and key
