@@ -211,17 +211,6 @@ class ModelLoadingTests(unittest.TestCase):
         self.tokenizer.decode.assert_called_once_with([4], skip_special_tokens=True)
 
 
-class UnixConnection(http.client.HTTPConnection):
-    def __init__(self, path):
-        super().__init__("localhost", timeout=3)
-        self.path = path
-
-    def connect(self):
-        self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        self.sock.settimeout(self.timeout)
-        self.sock.connect(self.path)
-
-
 class ProtocolTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix="asb-py-", dir="/tmp")
@@ -240,14 +229,21 @@ class ProtocolTests(unittest.TestCase):
         self.temp.cleanup()
 
     def request(self, method, path, payload=None):
-        connection = UnixConnection(self.path)
-        try:
+        body = b""
+        if payload is not None:
             body = payload.encode() if isinstance(payload, str) else json.dumps(payload).encode()
-            connection.request(method, path, body=body, headers={"Content-Type": "application/json"})
-            response = connection.getresponse()
-            return response.status, json.loads(response.read())
-        finally:
-            connection.close()
+        headers = (f"{method} {path} HTTP/1.0\r\nContent-Type: application/json\r\n"
+                   f"Content-Length: {len(body)}\r\n\r\n").encode()
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
+            connection.settimeout(3)
+            connection.connect(self.path)
+            # Health and unknown routes can reply without reading a body. Send
+            # the complete request together so an early close cannot interrupt
+            # a separate body write in this test client.
+            connection.sendall(headers + body)
+            with http.client.HTTPResponse(connection) as response:
+                response.begin()
+                return response.status, json.loads(response.read())
 
     def test_health_and_chat(self):
         status, health = self.request("GET", "/health")
