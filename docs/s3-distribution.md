@@ -31,15 +31,24 @@ the bounded Linux/AWS results and original report digests.
 
 ## Prepare and verify
 
-Maintainers obtain the binary from the recorded GitHub artifact
-`asb-s3-linux-36711947746`. Run from a reviewed checkout with Go 1.26.9:
+The original run's artifact list was empty when checked on 22 October 2026.
+Its retained report remains historical evidence, but the archive cannot be
+prepared without a retained copy of the exact qualified binary. Rebuilding the
+same source does not replace that copy or inherit its live qualification.
+
+PR CI tests the archive verifier and signer rejection paths. The S3 Linux and
+Debian workflows build and check current-source binaries separately. Historical
+archive preparation is an explicit workflow dispatch with an artifact run ID
+and name; it still rejects bytes that differ from `qualification.json` and does
+not publish a release. An unavailable artifact remains a preparation failure.
+
+With an independently retained copy, run from a reviewed checkout with the
+binary's recorded Go 1.26.6 toolchain (including its license files):
 
 ```sh
 mkdir -p build/s3-distribution
-gh run download 36711947746 --repo ToppyMicroServices/agents-secure-binding \
-  --name asb-s3-linux-36711947746 --dir build/s3-distribution/reference
-python3 scripts/package-s3.py create \
-  --binary build/s3-distribution/reference/asb-s3 \
+GOTOOLCHAIN=go1.26.6 python3 scripts/package-s3.py create \
+  --binary /absolute/path/to/retained/asb-s3 \
   --output build/s3-distribution/asb-s3-v0.1.0-rc.1-linux-amd64.tar.gz
 ```
 

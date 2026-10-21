@@ -5,6 +5,9 @@ on:
     branches: [main, feat/aws-s3-product, fix/s3-operational-qa]
     paths:
       - '.github/workflows/aws-s3-linux.yaml'
+      - '.github/workflows/s3-distribution.yaml'
+      - 'scripts/package-s3.py'
+      - 'scripts/test_package_s3.py'
       - 'pkg/leastprivilege/**'
       - 'internal/s3product/**'
       - 'cmd/asb-s3/**'
@@ -23,6 +26,9 @@ on:
   pull_request:
     paths:
       - '.github/workflows/aws-s3-linux.yaml'
+      - '.github/workflows/s3-distribution.yaml'
+      - 'scripts/package-s3.py'
+      - 'scripts/test_package_s3.py'
       - 'pkg/leastprivilege/**'
       - 'internal/s3product/**'
       - 'cmd/asb-s3/**'

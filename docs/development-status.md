@@ -58,6 +58,12 @@ final packages from each candidate revision, including installation, upgrade
 from a different source, persistent state, removal, signature rejection and key
 rotation. Its ephemeral signing keys do not qualify production apt publication.
 
+The older S3 archive's original GitHub artifact is no longer available. Its
+packager still requires the exact recorded bytes; preparation is separate from
+PR regression tests and current-source Linux/Debian validation. See the
+[S3 distribution record](s3-distribution.md). A new binary does not inherit the
+historical binary's live AWS qualification.
+
 ## Separate operator qualification
 
 These items remain unqualified and are not marked complete by the development

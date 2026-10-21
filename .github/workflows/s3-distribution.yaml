@@ -12,19 +12,45 @@ on:
       - 'docs/least-privilege-aws.md'
       - 'docs/least-privilege-execution.md'
       - 'LICENSE'
-  # Downloaded artifacts are inspected and executed only in a PR cache scope.
-  # Release preparation uses the reviewed CLI outside default-branch jobs.
+  workflow_dispatch:
+    inputs:
+      artifact_run_id:
+        description: Run containing the retained, exact qualified binary
+        type: string
+        required: true
+      artifact_name:
+        description: Artifact name containing asb-s3 at its root
+        type: string
+        required: true
 
 permissions:
   contents: read
-  actions: read
 
 jobs:
   distribution:
     runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Test archive and signer rejection paths
+        run: python3 -B -m unittest -v scripts/test_package_s3.py
+
+  # Historical release preparation requires retained qualified bytes. It must
+  # never rebuild them or transfer their live qualification to a new binary.
+  # Current-source Linux and Debian checks run separately on pull requests.
+  qualified-archive:
+    if: github.event_name == 'workflow_dispatch'
+    needs: distribution
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: read
     env:
       GOWORK: 'off'
+      GOTOOLCHAIN: go1.26.6
       PYTHONDONTWRITEBYTECODE: '1'
     steps:
       - uses: actions/checkout@v4
@@ -32,16 +58,18 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-go@v5
         with:
-          go-version: 1.26.9
+          go-version: 1.26.6
           cache: false
-      - name: Test archive and signer rejection paths
-        run: python3 -m unittest -v scripts/test_package_s3.py
       - name: Retrieve the exact qualified Linux artifact
         env:
           GH_TOKEN: ${{ github.token }}
+          ARTIFACT_RUN_ID: ${{ inputs.artifact_run_id }}
+          ARTIFACT_NAME: ${{ inputs.artifact_name }}
         run: |
-          gh run download 36711947746 --repo ToppyMicroServices/agents-secure-binding \
-            --name asb-s3-linux-36711947746 --dir "$RUNNER_TEMP/s3-reference"
+          [[ "$ARTIFACT_RUN_ID" =~ ^[0-9]+$ ]]
+          test -n "$ARTIFACT_NAME"
+          gh run download "$ARTIFACT_RUN_ID" --repo ToppyMicroServices/agents-secure-binding \
+            --name "$ARTIFACT_NAME" --dir "$RUNNER_TEMP/s3-reference"
       - name: Package and verify the candidate twice
         run: |
           mkdir -p build/s3-distribution
