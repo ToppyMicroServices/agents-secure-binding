@@ -38,9 +38,11 @@ same source does not replace that copy or inherit its live qualification.
 
 PR CI tests the archive verifier and signer rejection paths. The S3 Linux and
 Debian workflows build and check current-source binaries separately. Historical
-archive preparation is an explicit workflow dispatch with an artifact run ID
-and name; it still rejects bytes that differ from `qualification.json` and does
-not publish a release. An unavailable artifact remains a preparation failure.
+archive preparation is an explicit workflow dispatch on a reviewed
+`prepare-s3-archive/*` branch, with an artifact run ID and name. It cannot run on
+the default branch, and the workflow has no cache access. It still rejects bytes
+that differ from `qualification.json` and does not publish a release. An
+unavailable artifact remains a preparation failure.
 
 With an independently retained copy, run from a reviewed checkout with the
 binary's recorded Go 1.26.6 toolchain (including its license files):
