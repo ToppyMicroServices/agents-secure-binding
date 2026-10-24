@@ -8,15 +8,15 @@ require (
 	github.com/ToppyMicroServices/agents-secure-binding/modules/attestation/snp v0.1.1
 	github.com/ToppyMicroServices/agents-secure-binding/modules/attestation/tdx v0.1.2
 	github.com/ToppyMicroServices/agents-secure-binding/v2 v2.0.0-rc.2
-	github.com/caarlos0/env/v11 v11.4.0
-	github.com/fatih/color v1.18.0
-	github.com/fxamacker/cbor/v2 v2.9.0
+	github.com/caarlos0/env/v11 v11.4.1
+	github.com/fatih/color v1.19.0
+	github.com/fxamacker/cbor/v2 v2.9.2
 	github.com/go-kit/kit v0.13.0
 	github.com/google/gce-tcb-verifier v0.3.1
-	github.com/google/go-sev-guest v0.14.1
+	github.com/google/go-sev-guest v0.15.0
 	github.com/google/go-tdx-guest v0.3.2-0.20241009005452-097ee70d0843
 	github.com/google/go-tpm-tools v0.4.7
-	github.com/prometheus/client_golang v1.23.2
+	github.com/prometheus/client_golang v1.24.1
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.0.10
 	github.com/veraison/corim v1.1.2
@@ -33,7 +33,7 @@ require (
 	cloud.google.com/go/compute/metadata v0.9.0 // indirect
 	cloud.google.com/go/iam v1.5.3 // indirect
 	cloud.google.com/go/monitoring v1.24.3 // indirect
-	cloud.google.com/go/storage v1.57.2 // indirect
+	cloud.google.com/go/storage v1.68.0 // indirect
 	github.com/GoogleCloudPlatform/opentelemetry-operations-go/detectors/gcp v1.33.0 // indirect
 	github.com/GoogleCloudPlatform/opentelemetry-operations-go/exporter/metric v0.53.0 // indirect
 	github.com/GoogleCloudPlatform/opentelemetry-operations-go/internal/resourcemapping v0.53.0 // indirect

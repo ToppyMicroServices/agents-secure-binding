@@ -1,0 +1,49 @@
+name: Dependency refresh preparation
+
+on:
+  push:
+    branches: [chore/dependency-pr-reconciliation-20261024]
+    paths: [.github/workflows/dependency-refresh-prep.yaml]
+
+permissions:
+  contents: read
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GOMAXPROCS: '2'
+      GOFLAGS: -p=1
+      GOTOOLCHAIN: go1.26.10+auto
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version: 1.26.10
+          cache: false
+      - name: Resolve module metadata serially
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/dependency-refresh
+          for module in modules/attestation/snp modules/attestation/tdx . integrations/cocos; do
+            (cd "$module" && GOWORK=off go mod tidy && GOWORK=off go mod verify)
+          done
+          go work sync
+          for module in . integrations/cocos modules/attestation/snp modules/attestation/tdx; do
+            (cd "$module" && GOWORK=off go mod tidy)
+            printf '\nMODULE %s\n' "$module" >> /tmp/dependency-refresh/versions.txt
+            (cd "$module" && GOWORK=off go list -m all) >> /tmp/dependency-refresh/versions.txt
+          done
+          printf '\nWORKSPACE\n' >> /tmp/dependency-refresh/versions.txt
+          go list -m all >> /tmp/dependency-refresh/versions.txt
+          git diff --binary -- go.mod go.sum go.work go.work.sum integrations/cocos/go.mod integrations/cocos/go.sum modules/attestation/snp/go.mod modules/attestation/snp/go.sum modules/attestation/tdx/go.mod modules/attestation/tdx/go.sum > /tmp/dependency-refresh/dependency.patch
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dependency-refresh-${{ github.sha }}
+          path: /tmp/dependency-refresh/
+          if-no-files-found: error
+          retention-days: 7
