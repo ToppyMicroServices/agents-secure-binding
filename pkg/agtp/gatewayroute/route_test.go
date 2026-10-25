@@ -139,6 +139,54 @@ func TestValidateRejectsRouteAssertionReplay(t *testing.T) {
 	}
 }
 
+func TestValidateContextIsolationPolicy(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0)
+	tests := []struct {
+		name     string
+		required bool
+		expected string
+		observed string
+		proof    string
+		wantErr  error
+	}{
+		{"missing expected", true, "", "context-a", "context-a", ErrMissingExpected},
+		{"blank expected", true, " \t\n", "context-a", "context-a", ErrMissingExpected},
+		{"missing observed", true, "context-a", "", "", ErrMissingObserved},
+		{"blank observed", true, "context-a", " \t", " \t", ErrMissingObserved},
+		{"different context", true, "context-a", "context-b", "context-b", ErrMismatch},
+		{"missing proof context", true, "context-a", "context-a", "", ErrMissingObserved},
+		{"different proof context", true, "context-a", "context-a", "context-b", ErrMismatch},
+		{"matching context", true, "context-a", "context-a", "context-a", nil},
+		{"unscoped route", false, "", "", "", nil},
+		{"optional expected still compared", false, "context-a", "context-b", "context-b", ErrMismatch},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assertion := testAssertion(now)
+			assertion.ContextID = tt.observed
+			proof := testHolderProof(now)
+			proof.ContextID = tt.proof
+			expected := testExpectedRoute()
+			expected.RequireContextID = tt.required
+			expected.ContextID = tt.expected
+			opts := Options{Now: now, ReplayCache: newReplayCache()}
+			err := Validate(assertion, &proof, expected, opts)
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("Validate() error = %v, want %v", err, tt.wantErr)
+			}
+			if tt.wantErr != nil {
+				// A failed context check must not consume the otherwise valid route.
+				assertion = testAssertion(now)
+				proof = testHolderProof(now)
+				expected.ContextID = assertion.ContextID
+				if err := Validate(assertion, &proof, expected, opts); err != nil {
+					t.Fatalf("valid route after rejected context: %v", err)
+				}
+			}
+		})
+	}
+}
+
 func testAssertion(now time.Time) Assertion {
 	return Assertion{
 		Type:                        AssertionType,

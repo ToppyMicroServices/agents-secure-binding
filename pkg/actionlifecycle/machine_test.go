@@ -144,6 +144,92 @@ func TestAvailabilityWaitRequiresEvidenceToResume(t *testing.T) {
 	}
 }
 
+func TestWaitResumeConditionDoesNotShareTimestamps(t *testing.T) {
+	for _, kind := range []ResumeKind{ResumeAtTime, ResumeTargetAvailable, ResumeServerAvailable} {
+		t.Run(string(kind), func(t *testing.T) {
+			deadline := testStart.Add(time.Hour)
+			originalDeadline := deadline
+			condition := &ResumeCondition{Type: kind}
+			reason := ReasonScheduled
+			timestamp := func(c *ResumeCondition) *time.Time { return c.NotBefore }
+			if kind == ResumeAtTime {
+				condition.NotBefore = &deadline
+			} else {
+				condition.Target = "service:target-a"
+				condition.ProbeAfter = &deadline
+				timestamp = func(c *ResumeCondition) *time.Time { return c.ProbeAfter }
+				reason = ReasonTargetBusy
+				if kind == ResumeServerAvailable {
+					reason = ReasonServerUnavailable
+				}
+			}
+			waiting := func(actionID string) Snapshot {
+				t.Helper()
+				definition := Definition{
+					EventID: "event-accept-" + actionID, ActionID: actionID, ActionDigest: testDigest,
+					OwnerID: "owner-a", AcceptedAt: testStart,
+					RecoveryPolicy:          RecoveryPolicy{Mode: RecoveryManual, MaxAttempts: 1},
+					AcceptanceContextDigest: testAcceptanceContextDigest,
+					Auth: &AuthenticatedOperation{
+						ActorID: "owner-a", AuthorizationID: "authorization-accept", ProofID: "proof-accept",
+						Operation: EventAccept, ActionID: actionID, ActionDigest: testDigest,
+						VerifierNonce: "nonce-accept", IssuedAt: testStart.Add(-time.Second), ExpiresAt: testStart.Add(time.Minute),
+					},
+				}
+				digest, err := AcceptanceRequestDigest(definition)
+				if err != nil {
+					t.Fatal(err)
+				}
+				definition.Auth.MutationDigest = digest
+				accepted, err := NewSnapshot(definition)
+				if err != nil {
+					t.Fatal(err)
+				}
+				running := applyTestEvent(t, accepted.Snapshot, startEvent(accepted.Snapshot, testStart.Add(time.Minute), "executor-a"))
+				wait := executorEvent(running, EventWait, testStart.Add(2*time.Minute))
+				wait.Reason = Reason{Code: reason}
+				wait.ResumeCondition = condition
+				return applyTestEvent(t, running, wait)
+			}
+			first := waiting("action-001")
+			second := waiting("action-002")
+
+			deadline = testStart.Add(3 * time.Minute)
+			if !timestamp(first.ResumeCondition).Equal(originalDeadline) ||
+				!timestamp(second.ResumeCondition).Equal(originalDeadline) {
+				t.Error("mutating the caller's timestamp changed a WAITING Action")
+			}
+			*timestamp(first.ResumeCondition) = testStart.Add(4 * time.Minute)
+			if !timestamp(second.ResumeCondition).Equal(originalDeadline) {
+				t.Error("mutating one Action changed another Action's wait condition")
+			}
+			if !deadline.Equal(testStart.Add(3 * time.Minute)) {
+				t.Error("mutating an Action changed the caller's timestamp")
+			}
+
+			cloned := cloneSnapshot(second)
+			*timestamp(cloned.ResumeCondition) = testStart.Add(5 * time.Minute)
+			if !timestamp(second.ResumeCondition).Equal(originalDeadline) {
+				t.Error("mutating a cloned snapshot changed the original wait condition")
+			}
+
+			early := resumeEvent(second, testStart.Add(6*time.Minute), "executor-b", "")
+			bindTestEvent(t, &early)
+			if _, err := Apply(second, early); !errors.Is(err, ErrInvalidTransition) {
+				t.Errorf("resume after unrelated timestamp mutations = %v, want %v", err, ErrInvalidTransition)
+			}
+			evidence := ""
+			if kind != ResumeAtTime {
+				evidence = "status:available:42"
+			}
+			resumed := applyTestEvent(t, second, resumeEvent(second, originalDeadline, "executor-b", evidence))
+			if resumed.State != StateRunning || resumed.ExecutorLease.Generation != 2 {
+				t.Fatalf("legitimate resume = %+v", resumed)
+			}
+		})
+	}
+}
+
 func TestTimeoutCannotBecomeFailedWithoutKnownFailure(t *testing.T) {
 	snapshot := newTestSnapshot(t, RecoveryPolicy{Mode: RecoveryReconcileBeforeResume, MaxAttempts: 2})
 	snapshot = applyTestEvent(t, snapshot, startEvent(snapshot, testStart.Add(time.Minute), "executor-a"))

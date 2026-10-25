@@ -133,6 +133,14 @@ caches, and key caches by tenant or equivalent authority boundary. A route
 assertion accepted for one tenant, principal, authority scope, route, Agent, or
 task must not be reused for another.
 
+Context-scoped deployments using the Go verifier must set
+`ExpectedRoute.RequireContextID` and supply `ExpectedRoute.ContextID` from
+trusted request or session state. JWT and CWT acceptance then rejects an empty
+or whitespace-only expected context, a missing context claim, or a context
+mismatch before consuming replay state. The expected value must not be copied
+from the received assertion. Unscoped deployments may leave the flag false;
+a nonempty expected `ContextID` is still compared exactly in that mode.
+
 ## Failure Semantics
 
 Failure semantics are fail-closed. The verifier rejects missing route
