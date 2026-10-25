@@ -8,9 +8,9 @@ on:
 permissions:
   contents: read
 jobs:
-  containment-diagnostics:
+  runtime-qualification:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 10
     env:
       GOMAXPROCS: "2"
     steps:
@@ -18,21 +18,11 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: 1.26.10
-      - name: Build focused test binary
-        run: go test -c -o /tmp/containment.test ./agent/algorithm
-      - name: Classify nested namespace failure
+      - name: Build containment test binary
+        run: go test -race -p 1 -c -o /tmp/asb-process-containment.test ./agent/algorithm
+      - name: Require nested descendant teardown
         run: |
-          if ! command -v strace > /dev/null; then sudo apt-get install -y --no-install-recommends strace > /dev/null; fi
-          export ASB_DIAG_HOST_PROFILE="$(cat /proc/self/attr/current 2>/dev/null)"
-          mkdir -p /tmp/asb-containment-diagnostic
-          set +e
-          timeout 15s /tmp/containment.test -test.run '^TestContainedCommandDescendantLifetime/nested/success$' > /tmp/asb-containment-diagnostic/normal.log 2>&1
-          normal_status=$?
-          timeout 15s strace -f -e trace=clone,clone3,unshare,execve,prctl,capget,capset,setuid,setgid,setresuid,setresgid,openat,write -o /tmp/asb-containment-diagnostic/nested.strace /tmp/containment.test -test.run '^TestContainedCommandDescendantLifetime/nested/success$' > /tmp/asb-containment-diagnostic/traced.log 2>&1
-          trace_status=$?
-          sudo --preserve-env=ASB_DIAG_HOST_PROFILE timeout 15s /tmp/containment.test -test.run '^TestContainedCommandDescendantLifetime/nested/success$' > /tmp/asb-containment-diagnostic/root.log 2>&1
-          root_status=$?
-          printf 'normal_exit=%s traced_exit=%s root_exit=%s\n' "$normal_status" "$trace_status" "$root_status"
-          python3 -c 'from pathlib import Path; import re; root=Path("/tmp/asb-containment-diagnostic"); trace=(root/"nested.strace").read_text(); print("namespace_clone_denied="+str(bool(re.search(r"clone.*CLONE_NEWUSER.*EPERM",trace)))); print("execve_denied="+str(bool(re.search(r"execve.*EPERM",trace)))); print("mapping_write_denied="+str(bool(re.search(r"(?:uid_map|gid_map).*EPERM",trace)))); [(print(name+": "+line)) for name in ["normal.log","traced.log","root.log"] for line in (root/name).read_text().splitlines() if line.startswith("diagnostic.profile_changed=")]'
-          rm -rf /tmp/asb-containment-diagnostic
-          exit "$normal_status"
+          sudo ASB_REQUIRE_NESTED_PID_NAMESPACE=1 /tmp/asb-process-containment.test \
+            -test.v -test.timeout=60s -test.run '^TestContainedCommandDescendantLifetime$/^nested$/^(success|error|stop)$'
+      - name: Run unprivileged execution and resource regressions
+        run: go test -race -p 1 ./agent/... ./pkg/oci -count=1

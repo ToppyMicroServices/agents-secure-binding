@@ -46,6 +46,12 @@ this behavior on the target image with the algorithm and runner tests. Do not
 enable cgroup delegation to compensate: a workload running as the same user
 could otherwise move out of a delegated per-run cgroup.
 
+Linux CI tests ordinary execution without root. If host policy denies a nested
+namespace before execution, the test verifies that rejection explicitly. A
+separate test-only root gate requires successful nesting and verifies descendant
+teardown on normal exit, error, and Stop. It does not change the service account
+or the host namespace policy.
+
 Native computation execution on macOS and other non-Linux Unix platforms now
 fails before executing code because the previous process-group mechanism did
 not contain detached children. Windows continues to use its existing Job
