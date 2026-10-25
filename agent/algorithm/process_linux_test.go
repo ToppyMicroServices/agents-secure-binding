@@ -171,6 +171,9 @@ func TestContainedProcessHelper(t *testing.T) {
 		os.Exit(0)
 	}
 	if args[0] == "nested" {
+		if os.Getpid() != 1 {
+			os.Exit(98)
+		}
 		leaf := processHelperCommand("leaf", args[1])
 		leaf.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 		if err := leaf.Start(); err != nil {
@@ -190,7 +193,11 @@ func TestContainedProcessHelper(t *testing.T) {
 	}
 	if descendant == "nested" {
 		child = processHelperCommand("nested", dir)
-		ConfigureCommand(child)
+		// Create both namespaces atomically without new ID mappings. Go's
+		// mapping writer uses the clone-returned PID, which is relative to
+		// this namespace and cannot address the inherited host /proc mount.
+		// The child retains its kernel credentials for ordinary file access.
+		child.SysProcAttr = &syscall.SysProcAttr{Cloneflags: syscall.CLONE_NEWUSER | syscall.CLONE_NEWPID}
 	}
 	child.Stderr = os.Stderr
 	if err := child.Start(); err != nil {
