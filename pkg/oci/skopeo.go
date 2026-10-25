@@ -4,13 +4,16 @@
 package oci
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 const (
@@ -22,7 +25,12 @@ const (
 
 	// DecryptionKeyProvider is the decryption key provider for CoCo.
 	DecryptionKeyProvider = "provider:attestation-agent:cc_kbc::null"
+
+	maxSkopeoOutputBytes = 4 << 20
+	skopeoWaitDelay      = time.Second
 )
+
+var errSkopeoOutputLimit = errors.New("skopeo command output limit exceeded")
 
 // SkopeoClient wraps skopeo command-line operations.
 type SkopeoClient struct {
@@ -120,15 +128,44 @@ func (s *SkopeoClient) run(ctx context.Context, prefix string, args []string) er
 }
 
 func (s *SkopeoClient) output(ctx context.Context, prefix string, args []string) ([]byte, error) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	cmd := exec.CommandContext(ctx, s.skopeoPath, args...)
 	cmd.Env = skopeoEnv()
 	cmd.Dir = s.workDir
+	// Bound pipe draining if a descendant retains the command's descriptors.
+	// This bounds waiting; it does not terminate those descendants.
+	cmd.WaitDelay = skopeoWaitDelay
+	output := &skopeoOutput{cancel: cancel}
+	cmd.Stdout = output
+	cmd.Stderr = output
 
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return nil, fmt.Errorf("%s: %w\nOutput: %s", prefix, err, string(output))
+	err := cmd.Run()
+	if output.exceeded {
+		err = errSkopeoOutputLimit
 	}
-	return output, nil
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w\nOutput: %s", prefix, err, output.buffer.String())
+	}
+	return output.buffer.Bytes(), nil
+}
+
+// os/exec serializes writes when stdout and stderr share this writer.
+type skopeoOutput struct {
+	buffer   bytes.Buffer
+	cancel   context.CancelFunc
+	exceeded bool
+}
+
+func (o *skopeoOutput) Write(p []byte) (int, error) {
+	remaining := maxSkopeoOutputBytes - o.buffer.Len()
+	if len(p) > remaining {
+		n, _ := o.buffer.Write(p[:remaining])
+		o.exceeded = true
+		o.cancel()
+		return n, errSkopeoOutputLimit
+	}
+	return o.buffer.Write(p)
 }
 
 func skopeoEnv() []string {
