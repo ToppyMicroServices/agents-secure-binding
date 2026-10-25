@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"os"
@@ -26,7 +27,7 @@ import (
 )
 
 const (
-	persistenceDir          = "/tmp/agents-secure-binding"
+	persistenceDir          = "/var/lib/agents-secure-binding-manager"
 	agentLogLevelKey        = "AGENT_LOG_LEVEL"
 	agentCvmGrpcUrlKey      = "AGENT_CVM_GRPC_URL"
 	agentCvmClientCertKey   = "AGENT_CVM_GRPC_CLIENT_CERT"
@@ -117,10 +118,22 @@ func New(cfg qemu.Config, attestationPolicyBinaryPath string, pcrValuesFilePath 
 		return nil, err
 	}
 
-	persistence, err := qemu.NewFilePersistence(persistenceDir)
+	stateDir := os.Getenv("MANAGER_STATE_DIR")
+	if stateDir == "" {
+		stateDir = persistenceDir
+	}
+	persistence, err := qemu.NewFilePersistence(stateDir)
 	if err != nil {
 		return nil, err
 	}
+	initialized := false
+	defer func() {
+		if !initialized {
+			if closer, ok := persistence.(io.Closer); ok {
+				_ = closer.Close()
+			}
+		}
+	}()
 
 	var signingKey crypto.Signer
 	if signingKeyPath != "" {
@@ -151,6 +164,7 @@ func New(cfg qemu.Config, attestationPolicyBinaryPath string, pcrValuesFilePath 
 		return nil, err
 	}
 
+	initialized = true
 	return ms, nil
 }
 
@@ -304,6 +318,9 @@ func (ms *managerService) Shutdown() error {
 	defer ms.mu.Unlock()
 
 	ms.vms = make(map[string]vm.VM)
+	if closer, ok := ms.persistence.(io.Closer); ok {
+		return closer.Close()
+	}
 
 	return nil
 }
@@ -383,6 +400,9 @@ func (ms *managerService) restoreVMs() error {
 	}
 
 	for _, state := range states {
+		if state.PID <= 0 {
+			return fmt.Errorf("invalid persisted VM PID %d", state.PID)
+		}
 		if !ms.processExists(state.PID) {
 			if err := ms.persistence.DeleteVM(state.ID); err != nil {
 				ms.logger.Error("Failed to delete persisted VM state", "computation", state.ID, "error", err)
@@ -410,6 +430,9 @@ func (ms *managerService) restoreVMs() error {
 }
 
 func (ms *managerService) processExists(pid int) bool {
+	if pid <= 0 {
+		return false
+	}
 	process, err := os.FindProcess(pid)
 	if err != nil {
 		ms.logger.Warn("Failed to find process", "pid", pid, "error", err)

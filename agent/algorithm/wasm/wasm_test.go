@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"runtime"
 	"testing"
 	"time"
 
@@ -145,6 +146,9 @@ func TestStopAlreadyExited(t *testing.T) {
 }
 
 func TestRunSuccess(t *testing.T) {
+	if runtime.GOOS != "linux" && runtime.GOOS != "windows" {
+		t.Skip("native command success requires a supported containment platform")
+	}
 	oldExecCommand := execCommand
 	execCommand = mockExecCommand
 	defer func() { execCommand = oldExecCommand }()

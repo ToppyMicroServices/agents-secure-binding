@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/ToppyMicroServices/agents-secure-binding/v2/agent/algorithm"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/agent/algorithm/docker"
 	"github.com/ToppyMicroServices/agents-secure-binding/v2/agent/events"
 	runnerpb "github.com/ToppyMicroServices/agents-secure-binding/v2/agent/runner"
 	"github.com/ToppyMicroServices/agents-secure-binding/v2/agent/statemachine"
@@ -29,6 +30,8 @@ import (
 	"golang.org/x/crypto/sha3"
 	"google.golang.org/grpc/metadata"
 )
+
+const resourceTypeAlgorithm = "algorithm"
 
 var _ Service = (*agentService)(nil)
 
@@ -75,6 +78,7 @@ const (
 const (
 	algoFilePermission    = 0o700
 	datasetFilePermission = 0o600
+	remoteDownloadTimeout = 5 * time.Minute
 )
 
 var (
@@ -140,6 +144,9 @@ type OCIClient interface {
 
 type agentService struct {
 	mu                sync.Mutex
+	lifecycleMu       sync.Mutex // Serializes Stop; cancellation never waits for mu.
+	ctx               context.Context
+	parentCtx         context.Context
 	computation       Computation // Holds the current computation request details.
 	runnerClient      runner_client.Client
 	algoType          string
@@ -163,8 +170,11 @@ var _ Service = (*agentService)(nil)
 // New instantiates the agent service implementation.
 func New(ctx context.Context, logger *slog.Logger, eventSvc events.Service, attestationClient attestation_client.Client, runnerClient runner_client.Client, vmlp int) Service {
 	sm := statemachine.NewStateMachine(Idle)
+	parentCtx := ctx
 	ctx, cancel := context.WithCancel(ctx)
 	svc := &agentService{
+		ctx:               ctx,
+		parentCtx:         parentCtx,
 		sm:                sm,
 		eventSvc:          eventSvc,
 		attestationClient: attestationClient,
@@ -198,12 +208,7 @@ func New(ctx context.Context, logger *slog.Logger, eventSvc events.Service, atte
 		sm.AddTransition(t)
 	}
 
-	sm.SetAction(ReceivingAlgorithm, svc.downloadAlgorithmIfRemote)
-	sm.SetAction(ReceivingData, svc.downloadDatasetsIfRemote)
-	sm.SetAction(Running, svc.runComputation)
-	sm.SetAction(ConsumingResults, svc.publishEvent(Ready.String()))
-	sm.SetAction(Complete, svc.publishEvent(Completed.String()))
-	sm.SetAction(Failed, svc.publishEvent(Failed.String()))
+	svc.setLifecycleActions(ctx)
 
 	go func() {
 		if err := sm.Start(ctx); err != nil {
@@ -219,6 +224,31 @@ func New(ctx context.Context, logger *slog.Logger, eventSvc events.Service, atte
 	return svc
 }
 
+// Bind each scheduled action to its computation lifetime. A goroutine queued
+// before Reset may first run after a new manifest has already been accepted.
+func (as *agentService) setLifecycleActions(ctx context.Context) {
+	as.sm.SetAction(ReceivingAlgorithm, func(state statemachine.State) {
+		as.downloadAlgorithmForContext(ctx, state)
+	})
+	as.sm.SetAction(ReceivingData, func(state statemachine.State) {
+		as.downloadDatasetsForContext(ctx, state)
+	})
+	as.sm.SetAction(Running, func(state statemachine.State) {
+		as.runComputationForContext(ctx, state)
+	})
+	for state, status := range map[AgentState]string{
+		ConsumingResults: Ready.String(), Complete: Completed.String(), Failed: Failed.String(),
+	} {
+		as.sm.SetAction(state, func(state statemachine.State) {
+			as.mu.Lock()
+			defer as.mu.Unlock()
+			if as.ctx == ctx && ctx.Err() == nil {
+				as.publishEvent(status)(state)
+			}
+		})
+	}
+}
+
 func (as *agentService) State() string {
 	return as.sm.GetState().String()
 }
@@ -227,10 +257,12 @@ func (as *agentService) InitComputation(ctx context.Context, cmp Computation) er
 	if as.sm.GetState() != ReceivingManifest {
 		return ErrStateNotReady
 	}
-	defer as.sm.SendEvent(ManifestReceived)
-
 	as.mu.Lock()
 	defer as.mu.Unlock()
+	if as.ctx != nil && as.ctx.Err() != nil {
+		return ErrStateNotReady
+	}
+	defer as.sm.SendEvent(ManifestReceived)
 
 	as.computation = cmp
 
@@ -282,18 +314,22 @@ func (as *agentService) InitComputation(ctx context.Context, cmp Computation) er
 	return nil
 }
 
+//nolint:contextcheck // The next computation inherits the service lifetime, not the stop request.
 func (as *agentService) StopComputation(ctx context.Context) error {
+	as.lifecycleMu.Lock()
+	defer as.lifecycleMu.Unlock()
+	// Downloads hold mu while publishing their result. Cancel first so a
+	// stalled pull can release that lock before cleanup and reset.
+	if as.cancel != nil {
+		as.cancel()
+	}
 	as.mu.Lock()
 	defer as.mu.Unlock()
 
-	as.eventSvc.SendEvent(as.computation.ID, "Stopped", "Stopped", json.RawMessage{})
-
-	as.cancel()
-
 	if _, err := as.runnerClient.Stop(ctx, &runnerpb.StopRequest{ComputationId: as.computation.ID}); err != nil {
-		as.logger.Warn("failed to stop runner", "error", err)
-		// proceed to cleanup
+		return fmt.Errorf("failed to stop runner: %w", err)
 	}
+	as.eventSvc.SendEvent(as.computation.ID, "Stopped", "Stopped", json.RawMessage{})
 
 	if err := os.RemoveAll(algorithm.DatasetsDir); err != nil {
 		return fmt.Errorf("error removing datasets directory: %v", err)
@@ -318,11 +354,17 @@ func (as *agentService) StopComputation(ctx context.Context) error {
 	as.runError = nil
 	as.resultsConsumed = false
 
-	ctx, cancel := context.WithCancel(ctx)
+	parentCtx := as.parentCtx
+	if parentCtx == nil {
+		parentCtx = context.Background()
+	}
+	lifecycleCtx, cancel := context.WithCancel(parentCtx)
+	as.ctx = lifecycleCtx
 	as.cancel = cancel
+	as.setLifecycleActions(lifecycleCtx)
 
 	go func() {
-		if err := as.sm.Start(ctx); err != nil {
+		if err := as.sm.Start(lifecycleCtx); err != nil {
 			as.logger.Error(err.Error())
 		}
 	}()
@@ -414,10 +456,17 @@ func algorithmCommitmentMatches(expected [32]byte, algoType string, args []strin
 // downloadAlgorithmIfRemote automatically downloads the algorithm if it has a remote source.
 // This is called as an action when entering the ReceivingAlgorithm state.
 func (as *agentService) downloadAlgorithmIfRemote(state statemachine.State) {
-	as.publishEvent(InProgress.String())(state)
+	as.downloadAlgorithmForContext(nil, state)
+}
 
+//nolint:contextcheck // Scheduled actions use the current computation context stored on the service.
+func (as *agentService) downloadAlgorithmForContext(expectedCtx context.Context, state statemachine.State) {
 	as.mu.Lock()
 	defer as.mu.Unlock()
+	if expectedCtx != nil && (as.ctx != expectedCtx || expectedCtx.Err() != nil) {
+		return
+	}
+	as.publishEvent(InProgress.String())(state)
 
 	// Debug: Log decision point
 	as.logger.Info("checking if algorithm should be downloaded automatically",
@@ -430,11 +479,14 @@ func (as *agentService) downloadAlgorithmIfRemote(state statemachine.State) {
 			"url", as.computation.Algorithm.Source.URL,
 			"kbs_resource_path", as.computation.Algorithm.Source.KBSResourcePath)
 
-		// Use background context for download operation
-		ctx := context.Background()
+		ctx, cancel := as.remoteContext()
+		defer cancel()
 
-		res, err := as.downloadAndDecryptResource(ctx, as.computation.Algorithm.Source, "algorithm")
+		res, err := as.downloadAndDecryptResource(ctx, as.computation.Algorithm.Source, resourceTypeAlgorithm)
 		if err != nil {
+			if as.ctx != nil && as.ctx.Err() != nil {
+				return
+			}
 			as.runError = fmt.Errorf("failed to download and decrypt algorithm: %w", err)
 			as.logger.Error(as.runError.Error())
 			as.sm.SendEvent(RunFailed)
@@ -446,6 +498,9 @@ func (as *agentService) downloadAlgorithmIfRemote(state statemachine.State) {
 			}
 		}()
 
+		if err := ctx.Err(); err != nil {
+			return
+		}
 		algoType := normalizedAlgorithmType(as.computation.Algorithm.AlgoType)
 		if !algorithmCommitmentMatches(as.computation.Algorithm.Hash, algoType, as.computation.Algorithm.AlgoArgs, res.Data, res.Requirements) {
 			hash := algorithmCommitment(algoType, as.computation.Algorithm.AlgoArgs, res.Data, res.Requirements)
@@ -495,10 +550,17 @@ func (as *agentService) downloadAlgorithmIfRemote(state statemachine.State) {
 // downloadDatasetsIfRemote automatically downloads datasets that have remote sources.
 // This is called as an action when entering the ReceivingData state.
 func (as *agentService) downloadDatasetsIfRemote(state statemachine.State) {
-	as.publishEvent(InProgress.String())(state)
+	as.downloadDatasetsForContext(nil, state)
+}
 
+//nolint:contextcheck // Scheduled actions use the current computation context stored on the service.
+func (as *agentService) downloadDatasetsForContext(expectedCtx context.Context, state statemachine.State) {
 	as.mu.Lock()
 	defer as.mu.Unlock()
+	if expectedCtx != nil && (as.ctx != expectedCtx || expectedCtx.Err() != nil) {
+		return
+	}
+	as.publishEvent(InProgress.String())(state)
 
 	// Check if any datasets should be downloaded from remote sources
 	hasRemoteDatasets := false
@@ -520,8 +582,9 @@ func (as *agentService) downloadDatasetsIfRemote(state statemachine.State) {
 		return
 	}
 
-	// Download all remote datasets
-	ctx := context.Background()
+	// Download all remote datasets within the current computation lifetime.
+	ctx, cancel := as.remoteContext()
+	defer cancel()
 	for i := len(as.computation.Datasets) - 1; i >= 0; i-- {
 		d := as.computation.Datasets[i]
 		if d.Source != nil && as.computation.KBS.Enabled {
@@ -529,6 +592,9 @@ func (as *agentService) downloadDatasetsIfRemote(state statemachine.State) {
 
 			res, err := as.downloadAndDecryptResource(ctx, d.Source, "dataset")
 			if err != nil {
+				if as.ctx != nil && as.ctx.Err() != nil {
+					return
+				}
 				as.runError = fmt.Errorf("failed to download and decrypt dataset %s: %w", d.Filename, err)
 				as.logger.Error(as.runError.Error())
 				as.sm.SendEvent(RunFailed)
@@ -540,6 +606,9 @@ func (as *agentService) downloadDatasetsIfRemote(state statemachine.State) {
 				}
 			}(res)
 
+			if err := ctx.Err(); err != nil {
+				return
+			}
 			// Verify hash
 			hash := sha3.Sum256(res.Data)
 			if hash != d.Hash {
@@ -605,9 +674,28 @@ func (r *DecryptedResource) Close() error {
 	return os.RemoveAll(workspace)
 }
 
-// downloadAndDecryptResource downloads and decrypts a resource using OCI images and CoCo Keyprovider.
-// For OCI images, Skopeo handles download and CoCo Keyprovider handles decryption automatically.
+func (as *agentService) remoteContext() (context.Context, context.CancelFunc) {
+	ctx := as.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithTimeout(ctx, remoteDownloadTimeout)
+}
+
+// downloadAndDecryptResource binds download and extraction to both the caller
+// and the current computation, with a finite download deadline.
+//
+//nolint:contextcheck // The computation context additionally cancels the caller-derived download context.
 func (as *agentService) downloadAndDecryptResource(ctx context.Context, source *ResourceSource, resourceType string) (*DecryptedResource, error) {
+	ctx, cancel := context.WithTimeout(ctx, remoteDownloadTimeout)
+	defer cancel()
+	if as.ctx != nil {
+		stop := context.AfterFunc(as.ctx, cancel)
+		defer stop()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	// Determine source type
 	sourceType := source.Type
 	if sourceType == "" {
@@ -629,6 +717,11 @@ func (as *agentService) downloadAndDecryptResource(ctx context.Context, source *
 
 // downloadAndDecryptOCIImage downloads and decrypts an OCI image using Skopeo and CoCo Keyprovider.
 func (as *agentService) downloadAndDecryptOCIImage(ctx context.Context, source *ResourceSource, resourceType string) (*DecryptedResource, error) {
+	// Docker execution is disabled. Reject its resource before pulling or
+	// converting an image into an unbounded archive on disk.
+	if resourceType == resourceTypeAlgorithm && as.computation.Algorithm.AlgoType == string(algorithm.AlgoTypeDocker) {
+		return nil, docker.ErrDockerAlgorithmDisabled
+	}
 	as.logger.Info(fmt.Sprintf("downloading OCI image (url=%s encrypted=%t kbs_path=%s)",
 		source.URL, source.Encrypted, source.KBSResourcePath))
 
@@ -662,6 +755,9 @@ func (as *agentService) downloadAndDecryptOCIImage(ctx context.Context, source *
 		return nil, fmt.Errorf("failed to pull and decrypt OCI image: %w", err)
 	}
 
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	as.logger.Info("OCI image downloaded and decrypted", "dest", destDir)
 
 	// Extract algorithm file from OCI layers
@@ -670,32 +766,19 @@ func (as *agentService) downloadAndDecryptOCIImage(ctx context.Context, source *
 	var requirementsPath string
 
 	var files []string
-	if resourceType == "algorithm" {
-		if as.computation.Algorithm.AlgoType == string(algorithm.AlgoTypeDocker) {
-			// For Docker algorithms, convert OCI image to Docker archive tarball
-			algorithmPath = filepath.Join(extractDir, "image.tar")
-			if err := os.MkdirAll(extractDir, 0o700); err != nil {
-				return nil, fmt.Errorf("failed to create extract directory: %w", err)
-			}
-			if err := as.ociClient.ToDockerArchive(ctx, destDir, algorithmPath); err != nil {
-				return nil, fmt.Errorf("failed to convert OCI image to Docker archive: %w", err)
-			}
-			as.logger.Info("OCI image converted to Docker archive", "path", algorithmPath)
-			files = []string{algorithmPath}
-		} else {
-			algorithmPath, requirementsPath, err = oci.ExtractAlgorithm(ctx, as.logger, destDir, extractDir, as.computation.Algorithm.AlgoType)
-			if err != nil {
-				return nil, fmt.Errorf("failed to extract algorithm from OCI image: %w", err)
-			}
-			if err := validateSingleFileAlgorithmPackage(extractDir, algorithmPath, requirementsPath); err != nil {
-				return nil, err
-			}
-			as.logger.Info("algorithm extracted from OCI image", "path", algorithmPath)
-			files = []string{algorithmPath}
+	if resourceType == resourceTypeAlgorithm {
+		algorithmPath, requirementsPath, err = oci.ExtractAlgorithm(ctx, as.logger, destDir, extractDir, as.computation.Algorithm.AlgoType)
+		if err != nil {
+			return nil, fmt.Errorf("failed to extract algorithm from OCI image: %w", err)
 		}
+		if err := validateSingleFileAlgorithmPackage(extractDir, algorithmPath, requirementsPath); err != nil {
+			return nil, err
+		}
+		as.logger.Info("algorithm extracted from OCI image", "path", algorithmPath)
+		files = []string{algorithmPath}
 	} else {
 		// Assume dataset
-		files, err = oci.ExtractDataset(destDir, extractDir)
+		files, err = oci.ExtractDatasetContext(ctx, destDir, extractDir)
 		if err != nil || len(files) == 0 {
 			return nil, fmt.Errorf("failed to extract dataset from OCI image: %w", err)
 		}
@@ -716,31 +799,41 @@ func (as *agentService) downloadAndDecryptOCIImage(ctx context.Context, source *
 	}
 
 	// Calculate digest (matches internal.Checksum logic)
-	resourceData, _, err := internal.Digest(hashPath)
+	var resourceData []byte
+	if resourceType == resourceTypeAlgorithm {
+		resourceData, err = internal.ReadFileBounded(ctx, hashPath, 512<<20)
+	} else {
+		resourceData, _, err = internal.DigestContext(ctx, hashPath)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to calculate resource digest: %w", err)
 	}
 
 	// Read requirements file if found (only for algorithms)
 	var reqData []byte
-	if resourceType == "algorithm" {
+	if resourceType == resourceTypeAlgorithm {
 		if requirementsPath != "" {
-			reqData, err = os.ReadFile(requirementsPath)
+			reqData, err = internal.ReadFileBounded(ctx, requirementsPath, 64<<20)
 			if err != nil {
-				as.logger.Warn("failed to read requirements file", "path", requirementsPath, "error", err)
+				return nil, fmt.Errorf("failed to read requirements file: %w", err)
 			} else {
 				as.logger.Info("requirements.txt loaded", "size", len(reqData))
 			}
 		} else {
 			// Fallback: check if requirements.txt exists in the same directory as the algorithm
 			reqPath := filepath.Join(filepath.Dir(algorithmPath), "requirements.txt")
-			if data, err := os.ReadFile(reqPath); err == nil {
+			if data, err := internal.ReadFileBounded(ctx, reqPath, 64<<20); err == nil {
 				reqData = data
 				as.logger.Info("found requirements.txt via fallback", "size", len(data))
+			} else if !os.IsNotExist(err) {
+				return nil, fmt.Errorf("failed to read fallback requirements file: %w", err)
 			}
 		}
 	}
 
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	as.logger.Info("resource loaded from OCI", "type", resourceType, "size", len(resourceData), "hash_path", hashPath)
 
 	cleanup = false
@@ -788,7 +881,7 @@ func (as *agentService) Algo(ctx context.Context, algo Algorithm) error {
 	if as.computation.Algorithm.Source != nil && as.computation.KBS.Enabled {
 		as.logger.Info("downloading algorithm from remote source")
 
-		res, err := as.downloadAndDecryptResource(ctx, as.computation.Algorithm.Source, "algorithm")
+		res, err := as.downloadAndDecryptResource(ctx, as.computation.Algorithm.Source, resourceTypeAlgorithm)
 		if err != nil {
 			return fmt.Errorf("failed to download and decrypt algorithm: %w", err)
 		}
@@ -973,95 +1066,109 @@ func (as *agentService) AzureAttestationToken(ctx context.Context, nonce [vtpm.N
 }
 
 func (as *agentService) runComputation(state statemachine.State) {
+	as.runComputationForContext(nil, state)
+}
+
+//nolint:contextcheck // Execution uses the current computation context, after checking its scheduled lifetime.
+func (as *agentService) runComputationForContext(expectedCtx context.Context, state statemachine.State) {
+	as.mu.Lock()
+	if expectedCtx != nil && (as.ctx != expectedCtx || expectedCtx.Err() != nil) {
+		as.mu.Unlock()
+		return
+	}
+	lifecycleCtx := as.ctx
+	ctx := lifecycleCtx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if ctx.Err() != nil {
+		as.mu.Unlock()
+		return
+	}
 	as.publishEvent(Starting.String())(state)
-	as.logger.Debug("computation run started")
-	defer func() {
-		as.mu.Lock()
-		defer as.mu.Unlock()
-		if as.runError != nil {
-			as.sm.SendEvent(RunFailed)
-		} else {
-			as.sm.SendEvent(RunComplete)
-		}
-	}()
 
-	// Read algo file
-	currentDir, _ := os.Getwd()
+	currentDir, err := os.Getwd()
 	algoFile := filepath.Join(currentDir, "algo")
-
-	defer func() {
-		if err := os.RemoveAll(algorithm.ResultsDir); err != nil {
-			as.logger.Warn(fmt.Sprintf("error removing results directory and its contents: %s", err.Error()))
+	// finish is called with mu held. A response from an earlier lifecycle
+	// must never delete or publish files belonging to a later computation.
+	finish := func(runErr error, results []byte) {
+		if as.ctx != lifecycleCtx || ctx.Err() != nil {
+			return
 		}
-		if err := os.RemoveAll(algorithm.DatasetsDir); err != nil {
-			as.logger.Warn(fmt.Sprintf("error removing datasets directory and its contents: %s", err.Error()))
+		for _, dir := range []string{algorithm.ResultsDir, algorithm.DatasetsDir} {
+			if err := os.RemoveAll(dir); err != nil {
+				as.logger.Warn("error removing computation directory", "error", err)
+			}
 		}
 		if err := os.Remove(algoFile); err != nil && !os.IsNotExist(err) {
-			as.logger.Warn(fmt.Sprintf("error removing algorithm file: %s", err.Error()))
+			as.logger.Warn("error removing algorithm file", "error", err)
 		}
-	}()
-
-	if err := os.Mkdir(algorithm.ResultsDir, 0o755); err != nil {
-		as.mu.Lock()
-		as.runError = fmt.Errorf("error creating results directory: %s", err.Error())
-		as.mu.Unlock()
-		as.logger.Warn(as.runError.Error())
-		as.publishEvent(Failed.String())(state)
-		return
+		as.runError = runErr
+		if runErr != nil {
+			as.logger.Warn("failed to run computation", "error", runErr)
+			as.publishEvent(Failed.String())(state)
+			as.sm.SendEvent(RunFailed)
+			return
+		}
+		as.result = results
+		as.publishEvent(Completed.String())(state)
+		as.sm.SendEvent(RunComplete)
 	}
-
-	algoBytes, err := os.ReadFile(algoFile)
 	if err != nil {
-		as.mu.Lock()
-		as.runError = fmt.Errorf("failed to read algo file: %w", err)
+		finish(fmt.Errorf("error getting current directory: %w", err), nil)
 		as.mu.Unlock()
-		as.logger.Warn(as.runError.Error())
-		as.publishEvent(Failed.String())(state)
 		return
 	}
-
-	as.publishEvent(InProgress.String())(state)
-
-	// Call Runner
-	resp, err := as.runnerClient.Run(context.Background(), &runnerpb.RunRequest{
+	if err := os.Mkdir(algorithm.ResultsDir, 0o755); err != nil {
+		finish(fmt.Errorf("error creating results directory: %w", err), nil)
+		as.mu.Unlock()
+		return
+	}
+	algoBytes, err := internal.ReadFileBounded(ctx, algoFile, 512<<20)
+	if err != nil {
+		finish(fmt.Errorf("failed to read algo file: %w", err), nil)
+		as.mu.Unlock()
+		return
+	}
+	request := &runnerpb.RunRequest{
 		ComputationId: as.computation.ID,
 		AlgoType:      as.algoType,
 		Algorithm:     algoBytes,
-		Requirements:  as.algoRequirements,
-		Args:          as.algoArgs,
-		// Datasets implicit on shared FS
-	})
-	if err != nil {
-		as.mu.Lock()
-		as.runError = err
-		as.mu.Unlock()
-		as.logger.Warn(fmt.Sprintf("failed to run computation: %s", err.Error()))
-		as.publishEvent(Failed.String())(state)
+		Requirements:  append([]byte(nil), as.algoRequirements...),
+		Args:          append([]string(nil), as.algoArgs...),
+		// Datasets implicit on shared FS.
+	}
+	as.publishEvent(InProgress.String())(state)
+	as.mu.Unlock()
+
+	resp, err := as.runnerClient.Run(ctx, request)
+	as.mu.Lock()
+	defer as.mu.Unlock()
+	if as.ctx != lifecycleCtx {
 		return
 	}
-
+	if ctx.Err() != nil {
+		finish(ctx.Err(), nil)
+		return
+	}
+	if err != nil {
+		finish(err, nil)
+		return
+	}
+	if resp == nil {
+		finish(fmt.Errorf("runner returned no response"), nil)
+		return
+	}
 	if resp.Error != "" {
-		as.mu.Lock()
-		as.runError = errors.New(resp.Error)
-		as.mu.Unlock()
-		as.logger.Warn(fmt.Sprintf("failed to run computation: %s", resp.Error))
-		as.publishEvent(Failed.String())(state)
+		finish(errors.New(resp.Error), nil)
 		return
 	}
-
-	results, err := internal.ZipDirectoryToMemory(algorithm.ResultsDir)
+	results, _, err := internal.DigestContext(ctx, algorithm.ResultsDir)
 	if err != nil {
-		as.mu.Lock()
-		as.runError = err
-		as.mu.Unlock()
-		as.logger.Warn(fmt.Sprintf("failed to zip results: %s", err.Error()))
-		as.publishEvent(Failed.String())(state)
+		finish(fmt.Errorf("failed to zip results: %w", err), nil)
 		return
 	}
-
-	as.publishEvent(Completed.String())(state)
-
-	as.result = results
+	finish(nil, results)
 }
 
 func (as *agentService) publishEvent(status string) statemachine.Action {

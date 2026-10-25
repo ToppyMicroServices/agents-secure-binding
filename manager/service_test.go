@@ -26,6 +26,10 @@ import (
 )
 
 func TestNew(t *testing.T) {
+	stateDir, err := filepath.EvalSymlinks(t.TempDir())
+	require.NoError(t, err)
+	require.NoError(t, os.Chmod(stateDir, 0o700))
+	t.Setenv("MANAGER_STATE_DIR", stateDir)
 	cfg := qemu.Config{
 		HostFwdRange: "6000-6100",
 	}
@@ -37,6 +41,7 @@ func TestNew(t *testing.T) {
 
 	assert.NotNil(t, service)
 	assert.IsType(t, &managerService{}, service)
+	require.NoError(t, service.Shutdown())
 }
 
 func TestRun(t *testing.T) {
@@ -306,6 +311,8 @@ func TestRestoreVMs(t *testing.T) {
 func TestProcessExists(t *testing.T) {
 	ms := &managerService{}
 
+	assert.False(t, ms.processExists(0))
+	assert.False(t, ms.processExists(-1))
 	assert.True(t, ms.processExists(os.Getpid()))
 
 	assert.False(t, ms.processExists(99999))
@@ -601,6 +608,18 @@ func TestCreateVMWithAaKbsParams(t *testing.T) {
 
 			vmf.AssertExpectations(t)
 			vmMock.AssertExpectations(t)
+		})
+	}
+}
+
+func TestRestoreVMsRejectsNonpositivePID(t *testing.T) {
+	for _, pid := range []int{0, -1} {
+		t.Run(fmt.Sprintf("pid_%d", pid), func(t *testing.T) {
+			persist := persistenceMocks.NewPersistence(t)
+			persist.On("LoadVMs").Return([]qemu.VMState{{ID: "vm1", PID: pid}}, nil)
+			ms := &managerService{persistence: persist, vms: make(map[string]vm.VM)}
+			require.Error(t, ms.restoreVMs())
+			assert.Empty(t, ms.vms)
 		})
 	}
 }

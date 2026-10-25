@@ -326,6 +326,13 @@ func (s *Ingress) handleExecute(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	var response []byte
 	if durable, ok := s.Store.(HumanTransactionStore); ok {
+		// Reject invalid signatures, bindings and expired proofs before acquiring
+		// the shared writer. The transaction still rechecks current authority and
+		// commits replay atomically with the operation.
+		if _, verifyErr := verifyEvidence(ctx, operation.digest, evidence, s.currentTime()); verifyErr != nil {
+			s.writeIngressError(w, IngressCodeOperationRejected)
+			return
+		}
 		err = durable.RunHumanTransaction(ctx, func(tx HumanTransaction) error {
 			var executeErr error
 			response, executeErr = s.executeDurable(ctx, tx, operation, evidence)

@@ -451,6 +451,24 @@ func (a acceptance) operation(kind taskcoord.OperationKind, taskID, assignmentID
 }
 
 func (p Profile) accept(ctx context.Context, participantID string, digest Digest, evidence Evidence, now time.Time) (acceptance, error) {
+	if isNilDependency(evidence.Options.ReplayCache) {
+		return acceptance{}, clients.ErrMissingReplayCache
+	}
+	accepted, err := verifyEvidence(ctx, digest, evidence, now)
+	if err != nil {
+		return acceptance{}, err
+	}
+	human, err := p.resolveHuman(ctx, participantID)
+	if err != nil {
+		return acceptance{}, err
+	}
+	accepted.human = human
+	return accepted, nil
+}
+
+// verifyEvidence rejects invalid proofs without accessing state or consuming
+// replay protection. Durable ingress repeats acceptance inside its transaction.
+func verifyEvidence(ctx context.Context, digest Digest, evidence Evidence, now time.Time) (acceptance, error) {
 	if ctx == nil {
 		return acceptance{}, errors.New("asbbinding: missing context")
 	}
@@ -459,9 +477,6 @@ func (p Profile) accept(ctx context.Context, participantID string, digest Digest
 	}
 	if strings.TrimSpace(evidence.GrantJWT) == "" || strings.TrimSpace(evidence.SessionBindingJWT) == "" {
 		return acceptance{}, ErrMissingASBProof
-	}
-	if isNilDependency(evidence.Options.ReplayCache) {
-		return acceptance{}, clients.ErrMissingReplayCache
 	}
 	expectedContextHash := RequestContextSHA256(digest)
 	if evidence.Options.ExpectedBinding.RequestContextSHA256 != expectedContextHash ||
@@ -524,13 +539,8 @@ func (p Profile) accept(ctx context.Context, participantID string, digest Digest
 	if issuedAt.IsZero() || expiresAt.IsZero() || now.Before(issuedAt) || !now.Before(expiresAt) {
 		return acceptance{}, ErrInvalidProjection
 	}
-	human, err := p.resolveHuman(ctx, participantID)
-	if err != nil {
-		return acceptance{}, err
-	}
 	return acceptance{
 		requestDigest:   digest,
-		human:           human,
 		actorID:         actorID,
 		authorizationID: grant.JWTID,
 		proofID:         statement.JWTID,

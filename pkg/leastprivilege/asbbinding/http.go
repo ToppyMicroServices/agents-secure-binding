@@ -29,6 +29,7 @@ const (
 	// HTTPExporterLabel separates this profile from other ASB TLS consumers.
 	HTTPExporterLabel = "EXPORTER-ASB-LeastPrivilege-HTTP-v1"
 	maxHTTPBodyBytes  = 1 << 20
+	maxPeerChallenges = 8
 )
 
 // HTTPConfig configures the direct mTLS endpoint. Registry state is process
@@ -91,6 +92,7 @@ type httpHandler struct {
 	ttl        time.Duration
 	mu         sync.Mutex
 	challenges map[string]httpChallengeEntry
+	identities map[string]int
 }
 
 // NewHTTPHandler serves POST /challenge, /authorize, /execute and /reconcile.
@@ -113,7 +115,7 @@ func NewHTTPHandler(c HTTPConfig) (http.Handler, error) {
 	if c.MaxChallenges < 1 || c.MaxChallenges > 10_000 || c.ChallengeTTL < time.Second || c.ChallengeTTL > time.Minute {
 		return nil, ErrPolicy
 	}
-	return &httpHandler{service: c.Service, capacity: c.MaxChallenges, ttl: c.ChallengeTTL, challenges: make(map[string]httpChallengeEntry)}, nil
+	return &httpHandler{service: c.Service, capacity: c.MaxChallenges, ttl: c.ChallengeTTL, challenges: make(map[string]httpChallengeEntry), identities: make(map[string]int)}, nil
 }
 
 func (h *httpHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -185,10 +187,14 @@ func (h *httpHandler) challenge(w http.ResponseWriter, r *http.Request) {
 	h.mu.Lock()
 	for key, existing := range h.challenges {
 		if !now.Before(existing.transport.ChallengeExpiresAt) {
-			delete(h.challenges, key)
+			h.removeChallengeLocked(key, existing)
 		}
 	}
-	if len(h.challenges) >= h.capacity {
+	// Keep one certificate key from occupying the shared table, including when
+	// it opens new connections or renews its certificate with the same key.
+	identity := binding.AcceptedEndpointSPKISHA256
+	peerLimit := min(maxPeerChallenges, max(1, h.capacity/2))
+	if len(h.challenges) >= h.capacity || h.identities[identity] >= peerLimit {
 		h.mu.Unlock()
 		writeHTTP(w, http.StatusServiceUnavailable, HTTPResponse{Error: "unavailable"})
 		return
@@ -199,6 +205,7 @@ func (h *httpHandler) challenge(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.challenges[id] = entry
+	h.identities[identity]++
 	h.mu.Unlock()
 	writeHTTP(w, http.StatusOK, HTTPChallenge{ChallengeID: id, Mode: input.Mode, Binding: binding, EndpointCredentialExpiresAt: endpointExpiry, ExpiresAt: expiry})
 }
@@ -223,7 +230,7 @@ func (h *httpHandler) take(r *http.Request, id, mode string, op Operation) (Tran
 		return Transport{}, lp.ErrReplay
 	}
 	if !now.Before(entry.transport.ChallengeExpiresAt) {
-		delete(h.challenges, id)
+		h.removeChallengeLocked(id, entry)
 		return Transport{}, lp.ErrExpired
 	}
 	want := entry.transport.Binding
@@ -234,8 +241,17 @@ func (h *httpHandler) take(r *http.Request, id, mode string, op Operation) (Tran
 	}
 	// Consume before signature verification. A malformed signed submission on
 	// the correct connection cannot reuse this challenge for another attempt.
-	delete(h.challenges, id)
+	h.removeChallengeLocked(id, entry)
 	return entry.transport, nil
+}
+
+func (h *httpHandler) removeChallengeLocked(id string, entry httpChallengeEntry) {
+	delete(h.challenges, id)
+	identity := entry.transport.Binding.AcceptedEndpointSPKISHA256
+	h.identities[identity]--
+	if h.identities[identity] <= 0 {
+		delete(h.identities, identity)
+	}
 }
 
 func (h *httpHandler) authorize(w http.ResponseWriter, r *http.Request) {

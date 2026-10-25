@@ -73,17 +73,18 @@ type Config struct {
 
 // Node is one persistent Presence, DHT, ANS, and gossip peer.
 type Node struct {
-	config   Config
-	infoMu   sync.RWMutex
-	info     discovery.NodeInfo
-	presence *discovery.PresenceStore
-	names    *discovery.NameService
-	routing  *discovery.RoutingTable
-	state    *StateStore
-	audit    *AuditLog
-	metrics  Metrics
-	nonces   *nonceStore
-	limiter  *peerRateLimiter
+	config        Config
+	infoMu        sync.RWMutex
+	info          discovery.NodeInfo
+	presence      *discovery.PresenceStore
+	names         *discovery.NameService
+	routing       *discovery.RoutingTable
+	state         *StateStore
+	audit         *AuditLog
+	metrics       Metrics
+	nonces        *nonceStore
+	limiter       *peerRateLimiter
+	rejectLimiter *peerRateLimiter
 
 	stateMu      sync.Mutex
 	dirty        bool // a failed snapshot must be retried before acknowledging replication
@@ -137,21 +138,22 @@ func NewNode(config Config) (*Node, error) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	node := &Node{
-		config:       config,
-		info:         config.Info,
-		presence:     presence,
-		names:        names,
-		routing:      routing,
-		state:        state,
-		audit:        audit,
-		nonces:       newNonceStore(config.Now),
-		limiter:      newPeerRateLimiter(config.RequestsPerSecond, config.RequestBurst, config.Now),
-		remoteDigest: make(map[string]discovery.Digest),
-		remoteNames:  make(map[string]map[string]uint64),
-		blocked:      make(map[string]bool),
-		ctx:          ctx,
-		cancel:       cancel,
-		serveErrors:  make(chan error, 1),
+		config:        config,
+		info:          config.Info,
+		presence:      presence,
+		names:         names,
+		routing:       routing,
+		state:         state,
+		audit:         audit,
+		nonces:        newNonceStore(config.Now),
+		limiter:       newPeerRateLimiter(config.RequestsPerSecond, config.RequestBurst, config.Now),
+		rejectLimiter: newPeerRateLimiter(config.RequestsPerSecond, config.RequestBurst, config.Now),
+		remoteDigest:  make(map[string]discovery.Digest),
+		remoteNames:   make(map[string]map[string]uint64),
+		blocked:       make(map[string]bool),
+		ctx:           ctx,
+		cancel:        cancel,
+		serveErrors:   make(chan error, 1),
 	}
 	if err := node.load(); err != nil {
 		_ = audit.Close()
@@ -561,15 +563,6 @@ func (n *Node) authenticated(action Action, next actionHandler) http.HandlerFunc
 	return func(writer http.ResponseWriter, request *http.Request) {
 		writer.Header().Set("Cache-Control", "no-store")
 		n.metrics.PeerRequests.Add(1)
-		if request.Method != http.MethodPost || request.TLS == nil {
-			n.reject(writer, "invalid-request")
-			return
-		}
-		mediaType, _, err := mime.ParseMediaType(request.Header.Get("Content-Type"))
-		if err != nil || mediaType != "application/json" {
-			n.reject(writer, "invalid-content-type")
-			return
-		}
 		identity, leaf, err := requireTLSIdentity(request.TLS, n.config.Directory)
 		if err != nil {
 			n.reject(writer, "unknown-peer")
@@ -582,6 +575,15 @@ func (n *Node) authenticated(action Action, next actionHandler) http.HandlerFunc
 		if !n.limiter.allow(identity.Node.ID) {
 			n.metrics.RateLimited.Add(1)
 			http.Error(writer, "rate limited", http.StatusTooManyRequests)
+			return
+		}
+		if request.Method != http.MethodPost {
+			n.reject(writer, "invalid-request")
+			return
+		}
+		mediaType, _, err := mime.ParseMediaType(request.Header.Get("Content-Type"))
+		if err != nil || mediaType != "application/json" {
+			n.reject(writer, "invalid-content-type")
 			return
 		}
 		body, err := io.ReadAll(io.LimitReader(request.Body, n.config.MaxRequestBytes+1))
@@ -689,7 +691,13 @@ func (n *Node) handleMetrics(writer http.ResponseWriter, request *http.Request) 
 
 func (n *Node) reject(writer http.ResponseWriter, reason string) {
 	n.metrics.AuthRejected.Add(1)
-	_ = n.recordAudit(AuditEvent{NodeID: n.Info().ID, Action: "peer-request", Result: "rejected", Reason: reason})
+	// Bound synchronous disk work even for unknown peers and requests rejected
+	// by the outer network policy. Metrics retain the count of every rejection.
+	if n.rejectLimiter.allow("rejections") {
+		_ = n.recordAudit(AuditEvent{NodeID: n.Info().ID, Action: "peer-request", Result: "rejected", Reason: reason})
+	} else {
+		n.metrics.RateLimited.Add(1)
+	}
 	http.Error(writer, "authentication failed", http.StatusUnauthorized)
 }
 
