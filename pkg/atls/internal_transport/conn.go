@@ -173,7 +173,7 @@ func ClientContext(ctx context.Context, tlsConn *tls.Conn, cfg *ClientConfig) (*
 		if err := writeFrame(tlsConn, frameTypeRequest, reqBytes); err != nil {
 			return err
 		}
-		frameType, authBytes, err := readFrame(tlsConn)
+		frameType, authBytes, err := readFrame(tlsConn, frameTypeAuthenticator)
 		if err != nil {
 			return err
 		}
@@ -306,7 +306,7 @@ func ServerContext(ctx context.Context, tlsConn *tls.Conn, cfg *ServerConfig) (*
 		return nil, err
 	}
 
-	frameType, reqBytes, err := readFrame(tlsConn)
+	frameType, reqBytes, err := readFrame(tlsConn, frameTypeRequest)
 	if err != nil {
 		return nil, err
 	}
@@ -412,23 +412,28 @@ func withConnContext(ctx context.Context, conn interface{ SetDeadline(time.Time)
 		if err := conn.SetDeadline(deadline); err != nil {
 			return err
 		}
-		defer func() {
-			_ = conn.SetDeadline(time.Time{})
-		}()
-	} else {
-		done := make(chan struct{})
+	}
+
+	var stop, stopped chan struct{}
+	if done := ctx.Done(); done != nil {
+		stop = make(chan struct{})
+		stopped = make(chan struct{})
 		go func() {
+			defer close(stopped)
 			select {
-			case <-ctx.Done():
-				_ = conn.SetDeadline(time.Now())
 			case <-done:
+				_ = conn.SetDeadline(time.Now())
+			case <-stop:
 			}
 		}()
-		defer func() {
-			close(done)
-			_ = conn.SetDeadline(time.Time{})
-		}()
 	}
+	defer func() {
+		if stop != nil {
+			close(stop)
+			<-stopped
+		}
+		_ = conn.SetDeadline(time.Time{})
+	}()
 
 	err := fn()
 	if ctxErr := ctx.Err(); ctxErr != nil {

@@ -5,6 +5,10 @@ package internal
 import (
 	"archive/zip"
 	"bytes"
+	"context"
+	"encoding/binary"
+	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -13,6 +17,135 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestUnzipFromMemoryBoundsExpansionAndEntries(t *testing.T) {
+	var archive bytes.Buffer
+	writer := zip.NewWriter(&archive)
+	for _, name := range []string{"first.txt", "second.txt"} {
+		entry, err := writer.Create(name)
+		require.NoError(t, err)
+		_, err = entry.Write([]byte("12345678"))
+		require.NoError(t, err)
+	}
+	require.NoError(t, writer.Close())
+
+	tooLarge := t.TempDir()
+	require.ErrorIs(t, unzipFromMemory(context.Background(), archive.Bytes(), tooLarge, 15, 2), errZipExpansionLimit)
+	_, err := os.Stat(filepath.Join(tooLarge, "first.txt"))
+	require.ErrorIs(t, err, os.ErrNotExist)
+
+	tooMany := t.TempDir()
+	require.ErrorIs(t, unzipFromMemory(context.Background(), archive.Bytes(), tooMany, 16, 1), errZipExpansionLimit)
+	_, err = os.Stat(filepath.Join(tooMany, "first.txt"))
+	require.ErrorIs(t, err, os.ErrNotExist)
+
+	accepted := t.TempDir()
+	require.NoError(t, unzipFromMemory(context.Background(), archive.Bytes(), accepted, 16, 2))
+	got, err := os.ReadFile(filepath.Join(accepted, "second.txt"))
+	require.NoError(t, err)
+	require.Equal(t, "12345678", string(got))
+}
+
+func TestZipPreflightBoundsActualEntriesBeforeParsing(t *testing.T) {
+	var archive bytes.Buffer
+	writer := zip.NewWriter(&archive)
+	for i := range maxZipEntries + 1 {
+		_, err := writer.Create(fmt.Sprintf("entry-%05d", i))
+		require.NoError(t, err)
+	}
+	require.NoError(t, writer.Close())
+
+	zipData := archive.Bytes()
+	require.NoError(t, preflightZipDirectory(context.Background(), zipData, maxZipEntries+1))
+	require.ErrorIs(t, preflightZipDirectory(context.Background(), zipData, maxZipEntries), errZipExpansionLimit)
+
+	// A false end-record count must not persuade the preflight to let the
+	// standard reader parse all of the central directory entries.
+	misreported := bytes.Clone(zipData)
+	end := len(misreported) - 22
+	binary.LittleEndian.PutUint16(misreported[end+8:], 1)
+	binary.LittleEndian.PutUint16(misreported[end+10:], 1)
+	require.ErrorIs(t, preflightZipDirectory(context.Background(), misreported, maxZipEntries), errZipExpansionLimit)
+	understatedSize := bytes.Clone(misreported)
+	binary.LittleEndian.PutUint32(understatedSize[end+12:], 0)
+	require.ErrorIs(t, preflightZipDirectory(context.Background(), understatedSize, maxZipEntries), errZipExpansionLimit)
+
+	target := filepath.Join(t.TempDir(), "unpacked")
+	require.ErrorIs(t, UnzipFromMemoryContext(context.Background(), zipData, target), errZipExpansionLimit)
+	_, err := os.Stat(target)
+	require.ErrorIs(t, err, os.ErrNotExist)
+}
+
+func TestZipPreflightChecksCancellationBeforeParsing(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	target := filepath.Join(t.TempDir(), "unpacked")
+	require.ErrorIs(t, UnzipFromMemoryContext(ctx, []byte("invalid"), target), context.Canceled)
+	_, err := os.Stat(target)
+	require.ErrorIs(t, err, os.ErrNotExist)
+}
+
+func TestZipPreflightAcceptsZip64EndRecord(t *testing.T) {
+	var archive bytes.Buffer
+	writer := zip.NewWriter(&archive)
+	_, err := writer.Create("item.txt")
+	require.NoError(t, err)
+	require.NoError(t, writer.Close())
+	classic := archive.Bytes()
+	end := len(classic) - 22
+	size := binary.LittleEndian.Uint32(classic[end+12:])
+	offset := binary.LittleEndian.Uint32(classic[end+16:])
+
+	zip64 := append([]byte(nil), classic[:end]...)
+	var record [56]byte
+	binary.LittleEndian.PutUint32(record[:], 0x06064b50)
+	binary.LittleEndian.PutUint64(record[4:], 44)
+	binary.LittleEndian.PutUint64(record[24:], 1)
+	binary.LittleEndian.PutUint64(record[32:], 1)
+	binary.LittleEndian.PutUint64(record[40:], uint64(size))
+	binary.LittleEndian.PutUint64(record[48:], uint64(offset))
+	zip64 = append(zip64, record[:]...)
+	var locator [20]byte
+	binary.LittleEndian.PutUint32(locator[:], 0x07064b50)
+	binary.LittleEndian.PutUint64(locator[8:], uint64(end))
+	binary.LittleEndian.PutUint32(locator[16:], 1)
+	zip64 = append(zip64, locator[:]...)
+	eocd := bytes.Clone(classic[end:])
+	binary.LittleEndian.PutUint16(eocd[8:], 0xffff)
+	binary.LittleEndian.PutUint16(eocd[10:], 0xffff)
+	binary.LittleEndian.PutUint32(eocd[12:], 0xffffffff)
+	binary.LittleEndian.PutUint32(eocd[16:], 0xffffffff)
+	zip64 = append(zip64, eocd...)
+
+	require.NoError(t, preflightZipDirectory(context.Background(), zip64, maxZipEntries))
+	require.NoError(t, UnzipFromMemoryContext(context.Background(), zip64, t.TempDir()))
+
+	// archive/zip also treats a classic directory size of 0xffff as a
+	// ZIP64 hint, even when the entry count fits in the classic field.
+	zip64SizeHint := bytes.Clone(zip64)
+	eocdOffset := len(zip64SizeHint) - 22
+	binary.LittleEndian.PutUint16(zip64SizeHint[eocdOffset+8:], 1)
+	binary.LittleEndian.PutUint16(zip64SizeHint[eocdOffset+10:], 1)
+	binary.LittleEndian.PutUint32(zip64SizeHint[eocdOffset+12:], 0xffff)
+	binary.LittleEndian.PutUint32(zip64SizeHint[eocdOffset+16:], offset)
+	require.NoError(t, preflightZipDirectory(context.Background(), zip64SizeHint, maxZipEntries))
+	require.NoError(t, UnzipFromMemoryContext(context.Background(), zip64SizeHint, t.TempDir()))
+}
+
+func TestZipExpansionReaderRejectsIncorrectSizeAndCancellation(t *testing.T) {
+	remaining := int64(4)
+	reader := &zipExpansionReader{source: bytes.NewReader([]byte("12345")), ctx: context.Background(), remaining: &remaining}
+	_, err := io.ReadAll(reader)
+	require.ErrorIs(t, err, errZipExpansionLimit)
+	require.Zero(t, remaining)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	remaining = 4
+	reader = &zipExpansionReader{source: bytes.NewReader([]byte("1234")), ctx: ctx, remaining: &remaining}
+	_, err = io.ReadAll(reader)
+	require.True(t, errors.Is(err, context.Canceled))
+}
 
 func TestZipDirectoryToMemory(t *testing.T) {
 	tempDir, err := os.MkdirTemp("", "zip_test")

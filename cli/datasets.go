@@ -79,7 +79,7 @@ func (cli *CLI) NewDatasetsCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().BoolVarP(&decompressDataset, "decompress", "d", false, "Decompress the dataset on agent")
+	cmd.Flags().BoolVarP(&decompressDataset, "decompress", "d", false, "Decompress the dataset on agent (must match the manifest)")
 	return cmd
 }
 

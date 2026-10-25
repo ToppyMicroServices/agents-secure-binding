@@ -334,6 +334,8 @@ func validateAuthenticator(session *Session, st *tls.ConnectionState, role Role,
 		opts := *verifyOpts
 		if opts.Intermediates == nil {
 			opts.Intermediates = x509.NewCertPool()
+		} else {
+			opts.Intermediates = opts.Intermediates.Clone()
 		}
 		for _, ic := range chain[1:] {
 			opts.Intermediates.AddCert(ic)

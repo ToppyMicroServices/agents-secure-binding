@@ -14,6 +14,7 @@ import (
 	"encoding/asn1"
 	"math/big"
 	"net"
+	"sync"
 	"testing"
 	"time"
 
@@ -517,6 +518,69 @@ func TestValidateAuthenticatorWithoutSessionAllowsContextReplay(t *testing.T) {
 	}
 	if _, err := ValidateAuthenticator(&cliState, RoleServer, req, auth, &x509.VerifyOptions{Roots: roots}); err != nil {
 		t.Fatalf("expected replay to remain acceptable without session tracking, got %v", err)
+	}
+}
+
+func TestValidateAuthenticatorDoesNotMutateCallerIntermediates(t *testing.T) {
+	cert := selfSignedCert(t)
+	extra := selfSignedCert(t)
+	cert.Certificate = append(cert.Certificate, extra.Certificate[0])
+	srv, cli := tlsPair(t, cert)
+	defer srv.Close()
+	defer cli.Close()
+
+	ctx, err := NewRandomContext(12)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := &AuthenticatorRequest{
+		Type:    HandshakeTypeClientCertificateRequest,
+		Context: ctx,
+		Extensions: []Extension{
+			{Type: SignatureAlgorithmsExtensionType, Data: []byte{0x00, 0x02, 0x04, 0x03}},
+		},
+	}
+	srvState := srv.ConnectionState()
+	auth, err := CreateAuthenticator(&srvState, RoleServer, req, cert, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	leaf, err := x509.ParseCertificate(cert.Certificate[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	roots := x509.NewCertPool()
+	roots.AddCert(leaf)
+	intermediates := x509.NewCertPool()
+	opts := &x509.VerifyOptions{Roots: roots, Intermediates: intermediates}
+	cliState := cli.ConnectionState()
+
+	var wg sync.WaitGroup
+	errCh := make(chan error, 16)
+	for range 16 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := ValidateAuthenticator(&cliState, RoleServer, req, auth, opts)
+			errCh <- err
+		}()
+	}
+	wg.Wait()
+	close(errCh)
+	for err := range errCh {
+		if err != nil {
+			t.Fatalf("valid authenticator rejected: %v", err)
+		}
+	}
+	if got := len(intermediates.Subjects()); got != 0 {
+		t.Fatalf("caller-owned intermediates modified: %d subjects", got)
+	}
+	badOpts := &x509.VerifyOptions{Roots: x509.NewCertPool(), Intermediates: intermediates}
+	if _, err := ValidateAuthenticator(&cliState, RoleServer, req, auth, badOpts); err == nil {
+		t.Fatal("untrusted chain accepted")
+	}
+	if got := len(intermediates.Subjects()); got != 0 {
+		t.Fatalf("rejected chain modified caller-owned intermediates: %d subjects", got)
 	}
 }
 

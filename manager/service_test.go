@@ -401,6 +401,72 @@ func TestTempCertMountRestrictsClientKeyPermissions(t *testing.T) {
 	assert.Equal(t, os.FileMode(0o644), caInfo.Mode().Perm())
 }
 
+func TestCreateVMRemovesStagedCredentialsOnFailure(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		request *CreateReq
+		port    int
+		start   bool
+	}{
+		{name: "invalid environment", request: &CreateReq{AgentCvmClientKey: []byte("synthetic-key"), AgentCertsToken: "invalid\nvalue"}, port: 0},
+		{name: "unavailable port", request: &CreateReq{AgentCvmClientKey: []byte("synthetic-key")}, port: -1},
+		{name: "VM start failure", request: &CreateReq{AgentCvmClientKey: []byte("synthetic-key")}, port: 0, start: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			service := &managerService{
+				logger:       slog.Default(),
+				vms:          make(map[string]vm.VM),
+				portRangeMin: tc.port,
+				portRangeMax: tc.port,
+			}
+			if tc.start {
+				machine := new(mocks.VM)
+				machine.On("Start").Return(fmt.Errorf("synthetic start failure")).Once()
+				service.vmFactory = func(any, string, *slog.Logger) vm.VM { return machine }
+			}
+			_, id, createErr := service.CreateVM(context.Background(), tc.request)
+			mounts, err := filepath.Glob(filepath.Join("/tmp", id+"*"))
+			require.NoError(t, err)
+			t.Cleanup(func() {
+				for _, mount := range mounts {
+					_ = os.RemoveAll(mount)
+				}
+			})
+			require.Error(t, createErr)
+			require.Empty(t, mounts, "failed CreateVM left staged credential directories")
+			require.Empty(t, service.vms)
+		})
+	}
+}
+
+func TestCreateVMPreservesMountsWhenStartedVMStopFails(t *testing.T) {
+	service := &managerService{
+		logger: slog.Default(),
+		vms:    make(map[string]vm.VM),
+		maxVMs: 1,
+	}
+	machine := new(mocks.VM)
+	machine.On("Start").Run(func(mock.Arguments) {
+		service.mu.Lock()
+		service.vms["concurrent-vm"] = machine
+		service.mu.Unlock()
+	}).Return(nil).Once()
+	machine.On("Stop").Return(fmt.Errorf("synthetic stop failure")).Once()
+	service.vmFactory = func(any, string, *slog.Logger) vm.VM { return machine }
+
+	_, id, createErr := service.CreateVM(context.Background(), &CreateReq{AgentCvmClientKey: []byte("synthetic-key")})
+	mounts, err := filepath.Glob(filepath.Join("/tmp", id+"*"))
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		for _, mount := range mounts {
+			_ = os.RemoveAll(mount)
+		}
+	})
+	require.ErrorIs(t, createErr, ErrMaxVMsExceeded)
+	require.Len(t, mounts, 2, "a VM that may still be running lost its credential mounts")
+	machine.AssertExpectations(t)
+}
+
 func TestTmpEnvironmentRestrictsFilePermissions(t *testing.T) {
 	dir, err := tmpEnvironment("test-id", &CreateReq{
 		AgentLogLevel:      "debug",

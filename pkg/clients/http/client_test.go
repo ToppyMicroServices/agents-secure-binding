@@ -13,6 +13,7 @@ import (
 	"io"
 	"log/slog"
 	"math/big"
+	"net"
 	"net/http"
 	"os"
 	"testing"
@@ -23,6 +24,7 @@ import (
 	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/clients"
 	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/tls"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestConfig_Configuration(t *testing.T) {
@@ -281,6 +283,69 @@ func TestCreateTransport_ATLSCustomRequestContext(t *testing.T) {
 	assert.NotNil(t, transport)
 	assert.Equal(t, tls.WithMATLS, security)
 	assert.NotNil(t, transport.DialTLSContext)
+	assert.Equal(t, 100, transport.MaxConnsPerHost)
+}
+
+func TestCreateTransport_ATLSStalledDialClosesAfterTimeout(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	defer func() { _ = listener.Close() }()
+
+	accepted := make(chan net.Conn, 1)
+	closed := make(chan error, 1)
+	go func() {
+		conn, err := listener.Accept()
+		if err != nil {
+			closed <- err
+			return
+		}
+		accepted <- conn
+		_, err = io.Copy(io.Discard, conn)
+		closed <- err
+	}()
+
+	config := &clients.AttestedClientConfig{
+		StandardClientConfig: clients.StandardClientConfig{
+			ServerCAFile: createHTTPTestCAFile(t),
+		},
+		AttestedTLS:                   true,
+		AttestationVerificationPolicy: httpAttestationVerificationPolicy(),
+	}
+	transport, _, err := createTransport(config)
+	require.NoError(t, err)
+	transport.TLSHandshakeTimeout = 800 * time.Millisecond
+	transport.MaxConnsPerHost = 1
+	defer transport.CloseIdleConnections()
+
+	client := &http.Client{Transport: transport, Timeout: 50 * time.Millisecond}
+	response, err := client.Get("https://" + listener.Addr().String())
+	require.Error(t, err)
+	assert.Nil(t, response)
+
+	select {
+	case conn := <-accepted:
+		defer func() { _ = conn.Close() }()
+	case <-time.After(time.Second):
+		t.Fatal("aTLS dial did not reach the test listener")
+	}
+	response, err = client.Get("https://" + listener.Addr().String())
+	require.Error(t, err)
+	assert.Nil(t, response)
+	require.NoError(t, listener.(*net.TCPListener).SetDeadline(time.Now().Add(100*time.Millisecond)))
+	extra, err := listener.Accept()
+	if err == nil {
+		_ = extra.Close()
+		t.Fatal("canceled aTLS requests started more than one concurrent dial")
+	}
+	var timeoutErr net.Error
+	require.ErrorAs(t, err, &timeoutErr)
+	require.True(t, timeoutErr.Timeout())
+	select {
+	case err := <-closed:
+		require.NoError(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("aTLS dial retained the connection after its handshake deadline")
+	}
 }
 
 func TestBuildATLSClientConfigCopiesIdentityBindingInputs(t *testing.T) {

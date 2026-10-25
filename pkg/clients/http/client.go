@@ -85,9 +85,20 @@ func createTransport(cfg clients.ClientConfiguration) (*http.Transport, tls.Secu
 			return nil, security, err
 		}
 
+		// Canceled requests may leave an in-progress dial for reuse. Bound
+		// concurrent attested dials per target host as well as time.
+		transport.MaxConnsPerHost = transport.MaxIdleConns
 		transport.DialTLSContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
 			dialNetwork, target := httpDialTarget(network, addr)
-			return atls.DialContext(ctx, dialNetwork, target, atlsConfig)
+			// A custom DialTLSContext bypasses Transport.TLSHandshakeTimeout.
+			// The transport may also continue a dial after its request is canceled.
+			timeout := transport.TLSHandshakeTimeout
+			if timeout <= 0 {
+				timeout = 10 * time.Second
+			}
+			dialCtx, cancel := context.WithTimeout(ctx, timeout)
+			defer cancel()
+			return atls.DialContext(dialCtx, dialNetwork, target, atlsConfig)
 		}
 		transport.DialContext = func(context.Context, string, string) (net.Conn, error) {
 			return nil, clients.ErrAttestedTLSRequiresHTTPS

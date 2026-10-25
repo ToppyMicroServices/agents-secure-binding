@@ -96,6 +96,27 @@ func liveResponse(t *testing.T, client *Client, command Command) ([]byte, Respon
 	return raw, result
 }
 
+func TestLiveAppAfterCredentialRotation(t *testing.T) {
+	dir := privateFixtureDir(t)
+	if err := Initialize(dir); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := RotateCredentials(dir); err != nil {
+		t.Fatal(err)
+	}
+	app := startLiveApp(t, dir, nil)
+	proposal := liveProposal("rotated", 0, true)
+	_, proposed := liveResponse(t, app.agent, proposal)
+	if proposed.Operation.State != StatePending {
+		t.Fatal("rotated agent credentials did not create a pending proposal")
+	}
+	decision := Command{CommandID: "approve-rotated", Kind: KindApprove, OperationID: proposal.OperationID, ProposalDigest: proposed.Operation.ProposalDigest, ExpectedRevision: proposed.Operation.Before.Revision}
+	_, approved := liveResponse(t, app.gateway, decision)
+	if approved.Operation.State != StateApplied {
+		t.Fatal("rotated gateway credentials did not approve the proposal")
+	}
+}
+
 func TestLiveASBApprovalAndOriginalResultAfterRestart(t *testing.T) {
 	dir := privateFixtureDir(t)
 	app := startLiveApp(t, dir, nil)

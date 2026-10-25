@@ -156,6 +156,14 @@ func New(cfg qemu.Config, attestationPolicyBinaryPath string, pcrValuesFilePath 
 
 func (ms *managerService) CreateVM(ctx context.Context, req *CreateReq) (string, string, error) {
 	id := uuid.New().String()
+	var ttl time.Duration
+	if req.Ttl != "" {
+		var err error
+		ttl, err = time.ParseDuration(req.Ttl)
+		if err != nil {
+			return "", id, err
+		}
+	}
 
 	ms.mu.Lock()
 	if ms.maxVMs > 0 && len(ms.vms) >= ms.maxVMs {
@@ -180,8 +188,22 @@ func (ms *managerService) CreateVM(ctx context.Context, req *CreateReq) (string,
 	if err != nil {
 		return "", id, err
 	}
+	var tmpEnvDir string
+	staged := true
+	defer func() {
+		if staged {
+			if err := os.RemoveAll(tmpCertsDir); err != nil {
+				ms.logger.Warn("Failed to remove staged certs mount", "vmID", id, "error", err)
+			}
+			if tmpEnvDir != "" {
+				if err := os.RemoveAll(tmpEnvDir); err != nil {
+					ms.logger.Warn("Failed to remove staged environment mount", "vmID", id, "error", err)
+				}
+			}
+		}
+	}()
 
-	tmpEnvDir, err := tmpEnvironment(id, req)
+	tmpEnvDir, err = tmpEnvironment(id, req)
 	if err != nil {
 		return "", id, err
 	}
@@ -202,6 +224,8 @@ func (ms *managerService) CreateVM(ctx context.Context, req *CreateReq) (string,
 	if err = cvm.Start(); err != nil {
 		return "", id, err
 	}
+	// A started VM owns its mounts; Stop is responsible for removing them.
+	staged = false
 
 	ms.mu.Lock()
 	if ms.maxVMs > 0 && len(ms.vms) >= ms.maxVMs {
@@ -215,11 +239,6 @@ func (ms *managerService) CreateVM(ctx context.Context, req *CreateReq) (string,
 	ms.mu.Unlock()
 
 	if req.Ttl != "" {
-		ttl, err := time.ParseDuration(req.Ttl)
-		if err != nil {
-			return "", id, err
-		}
-
 		ms.ttlManager.SetTTL(id, ttl, func() { //nolint:contextcheck
 			if err := ms.RemoveVM(context.Background(), id); err != nil {
 				ms.logger.Error("Failed to remove VM after TTL expiry", "vmID", id, "error", err)
@@ -413,14 +432,17 @@ func tempCertMount(id string, req *CreateReq) (string, error) {
 	}
 
 	if err = os.WriteFile(fmt.Sprintf("%s/%s", dir, "cert.pem"), req.AgentCvmClientCert, 0o644); err != nil {
+		_ = os.RemoveAll(dir)
 		return "", err
 	}
 
 	if err = os.WriteFile(fmt.Sprintf("%s/%s", dir, "key.pem"), req.AgentCvmClientKey, 0o600); err != nil {
+		_ = os.RemoveAll(dir)
 		return "", err
 	}
 
 	if err = os.WriteFile(fmt.Sprintf("%s/%s", dir, "ca.pem"), req.AgentCvmServerCaCert, 0o644); err != nil {
+		_ = os.RemoveAll(dir)
 		return "", err
 	}
 

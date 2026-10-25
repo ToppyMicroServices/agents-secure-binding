@@ -135,8 +135,10 @@ func NewEATClaims(report []byte, nonce []byte, platformType attestation.Platform
 // extractPlatformClaims extracts platform-specific claims from binary report.
 func extractPlatformClaims(claims *EATClaims, report []byte, platformType attestation.PlatformType) error {
 	switch platformType {
-	case attestation.SNP, attestation.SNPvTPM:
+	case attestation.SNP:
 		return extractSNPClaims(claims, report)
+	case attestation.SNPvTPM:
+		return extractSNPvTPMClaims(claims, report)
 	case attestation.TDX:
 		return extractTDXClaims(claims, report)
 	case attestation.VTPM:

@@ -76,7 +76,7 @@ func sendEmptyAuthenticator(ctx context.Context, server *tls.Conn) error {
 	if err := server.HandshakeContext(ctx); err != nil {
 		return err
 	}
-	frameType, requestBytes, err := readFrame(server)
+	frameType, requestBytes, err := readFrame(server, frameTypeRequest)
 	if err != nil {
 		return err
 	}
