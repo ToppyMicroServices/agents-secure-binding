@@ -192,6 +192,8 @@ func TestContainedProcessHelper(t *testing.T) {
 		child.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	}
 	if descendant == "nested" {
+		profile, _ := os.ReadFile("/proc/self/attr/current")
+		fmt.Fprintf(os.Stderr, "diagnostic.profile_changed=%t\n", strings.TrimSpace(string(profile)) != strings.TrimSpace(os.Getenv("ASB_DIAG_HOST_PROFILE")))
 		child = processHelperCommand("nested", dir)
 		// Create both namespaces atomically without new ID mappings. Go's
 		// mapping writer uses the clone-returned PID, which is relative to

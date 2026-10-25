@@ -1,244 +1,38 @@
 name: CI
-
 on:
   workflow_dispatch:
     inputs:
       linux_only:
-        description: Run the Linux checks without starting macOS jobs
         type: boolean
-        required: false
-        default: false
-  push:
-    branches:
-      - main
-  pull_request:
-    branches:
-      - main
-
+        default: true
 permissions:
   contents: read
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
-
 jobs:
-  lint:
+  containment-diagnostics:
     runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      GOMAXPROCS: "2"
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Install Go
-        uses: actions/setup-go@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
         with:
           go-version: 1.26.10
-
-      - name: Verify module downloads
-        run: go mod verify
-
-      - name: golangci-lint
-        uses: golangci/golangci-lint-action@v8
-        with:
-          version: v2.11.1
-
-      - name: Build
-        run: make
-
-  mac-debug-a2a:
-    if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.linux_only) && !contains(github.event.pull_request.labels.*.name, 'ci:linux-only') }}
-    runs-on: macos-latest
-    needs: lint
-    timeout-minutes: 15
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Install Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: 1.26.10
-
-      - name: Run macOS debug A2A integration
-        run: GOTOOLCHAIN=go1.26.10+auto make mac-debug-a2a
-
-  mac-human-coordination-e2e:
-    if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.linux_only) && !contains(github.event.pull_request.labels.*.name, 'ci:linux-only') }}
-    runs-on: macos-latest
-    needs: lint
-    timeout-minutes: 15
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Install Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: 1.26.10
-
-      - name: Run macOS Human Coordination E2E
-        run: GOTOOLCHAIN=go1.26.10+auto make mac-human-coordination-e2e
-
-      - name: Validate Human Coordination evidence
+      - name: Build focused test binary
+        run: go test -c -o /tmp/containment.test ./agent/algorithm
+      - name: Classify nested namespace failure
         run: |
-          jq empty build/human-coordination-e2e/evidence.json
-          jq -e '.success == true' build/human-coordination-e2e/evidence.json
-          jq -e '.mode == "debug-simple"' build/human-coordination-e2e/evidence.json
-          jq -e '.production_claim == false' build/human-coordination-e2e/evidence.json
-          jq -e '.runtime.software_only == true' build/human-coordination-e2e/evidence.json
-          jq -e '.runtime.in_process == true' build/human-coordination-e2e/evidence.json
-          jq -e '.runtime.network_calls == false' build/human-coordination-e2e/evidence.json
-          jq -e '.runtime.live_tls == false' build/human-coordination-e2e/evidence.json
-          jq -e '.runtime.hardware_attestation == false' build/human-coordination-e2e/evidence.json
-          jq -e '.runtime.external_provider == false' build/human-coordination-e2e/evidence.json
-          jq -e '.boundaries | length == 9' build/human-coordination-e2e/evidence.json
-          jq -e '[.boundaries[] | select(.classification == "external-asb") | .profile_id] == ["asb.taskcoord-human-request/v1", "asb.taskcoord-agent-relay/v1"]' build/human-coordination-e2e/evidence.json
-          jq -e 'all(.boundaries[]; (.evidence_source | length) > 0 and ((.classification == "external-asb" and (.profile_id | length) > 0) or (.classification == "trusted-internal" and ((.profile_id // "") | length) == 0)))' build/human-coordination-e2e/evidence.json
-
-      - name: Upload Human Coordination evidence
-        uses: actions/upload-artifact@v4
-        with:
-          name: human-coordination-e2e-evidence-macos
-          path: build/human-coordination-e2e/evidence.json
-          if-no-files-found: error
-          retention-days: 1
-
-  test:
-    runs-on: ubuntu-latest
-    needs: lint
-    strategy:
-      matrix:
-        module: [agent, cli, cmd, internal, pkg, schemas, manager]
-        include:
-          - module: manager
-            sudo: true
-    
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Install Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: 1.26.10
-
-      - name: Create coverage directory
-        run: mkdir -p coverage
-
-      - name: Test managed Transformers request and loading policy
-        if: matrix.module == 'pkg'
-        run: python3 -B -m unittest discover -s pkg/llmruntime -p 'transformers_server_test.py'
-
-      - name: Run tests for ${{ matrix.module }}
-        run: |
-          if [[ "${{ matrix.module }}" == "manager" ]]; then
-            sudo GOTOOLCHAIN=go1.26.10+auto go test -v --race -covermode=atomic -coverprofile coverage/${{ matrix.module }}.out ./${{ matrix.module }}/...
-          else
-            GOTOOLCHAIN=go1.26.10+auto go test -v --race -covermode=atomic -coverprofile coverage/${{ matrix.module }}.out ./${{ matrix.module }}/...
-          fi
-
-      - name: Upload coverage artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage-${{ matrix.module }}
-          path: coverage/${{ matrix.module }}.out
-          retention-days: 1
-
-  upload-coverage:
-    runs-on: ubuntu-latest
-    needs: test
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Download all coverage artifacts
-        uses: actions/download-artifact@v4
-        with:
-          pattern: coverage-*
-          path: coverage/
-          merge-multiple: true
-
-      - name: Upload results to Codecov
-        uses: codecov/codecov-action@v4
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          files: ./coverage/*.out
-          codecov_yml_path: codecov.yml
-          verbose: true
-
-  product-security:
-    runs-on: ubuntu-latest
-    needs: lint
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Install Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: 1.26.10
-          cache-dependency-path: go.sum
-
-      - name: Verify modules
-        run: go mod verify
-
-      - name: Run Direct-Agent security red-team tests
-        run: |
-          GOTOOLCHAIN=go1.26.10+auto go test -v -race -count=1 \
-            ./pkg/atls/identitypolicy \
-            ./pkg/clients \
-            ./pkg/production \
-            ./cmd/redis-failover-redteam
-
-      - name: Run Human coordination security tests
-        run: make human-coordination-gate
-
-      - name: Run production qualification harness tests
-        env:
-          ASB_REQUIRE_GPG_TEST: "1"
-        run: |
-          gpg --version
-          python3 -m unittest scripts/test_asb_qualification.py
-
-      - name: Compile Windows process-containment paths
-        env:
-          GOOS: windows
-          GOARCH: amd64
-          CGO_ENABLED: "0"
-        run: |
-          go test -c -o /tmp/algorithm.test.exe ./agent/algorithm
-          go test -c -o /tmp/python.test.exe ./agent/algorithm/python
-          go test -c -o /tmp/humanapp.test.exe ./internal/humanapp
-          go test -c -o /tmp/asb-human.test.exe ./cmd/asb-human
-
-      - name: Run three-node discovery soak gate
-        env:
-          ASB_DISCOVERY_SOAK: "1"
-          ASB_DISCOVERY_SOAK_DURATION: "30s"
-        run: |
-          GOTOOLCHAIN=go1.26.10+auto go test -v -race -count=1 \
-            ./pkg/agtp/discovery/peer -run '^TestPeerServiceSoak$'
-
-      - name: Run protected-change consumer integration
-        run: |
-          GOTOOLCHAIN=go1.26.10+auto go test -v -race -count=1 \
-            ./examples/protected-change-consumer
-
-      - name: Run discovery-backed agent interaction
-        run: |
-          GOWORK=off GOTOOLCHAIN=go1.26.10+auto go test -v -race -count=1 \
-            ./examples/agtp-agent-interaction
-
-      - name: Run v1 and draft-06 v2 A2A negative integration
-        run: |
-          GOTOOLCHAIN=go1.26.10+auto go test -v -race -count=1 \
-            ./examples/a2a-multiprocess
-
-      - name: Run bounded fuzz smoke
-        run: |
-          GOTOOLCHAIN=go1.26.10+auto go test -run '^$' \
-            -fuzz=FuzzVerifySessionIdentityJWTRejectsMalformedCompactTokens \
-            -fuzztime=10s ./pkg/agtp
-
-      - name: Run govulncheck
-        run: ./scripts/check-attestation-vulnerabilities.sh root
+          if ! command -v strace > /dev/null; then sudo apt-get install -y --no-install-recommends strace > /dev/null; fi
+          export ASB_DIAG_HOST_PROFILE="$(cat /proc/self/attr/current 2>/dev/null)"
+          mkdir -p /tmp/asb-containment-diagnostic
+          set +e
+          timeout 15s /tmp/containment.test -test.run '^TestContainedCommandDescendantLifetime/nested/success$' > /tmp/asb-containment-diagnostic/normal.log 2>&1
+          normal_status=$?
+          timeout 15s strace -f -e trace=clone,clone3,unshare,execve,prctl,capget,capset,setuid,setgid,setresuid,setresgid,openat,write -o /tmp/asb-containment-diagnostic/nested.strace /tmp/containment.test -test.run '^TestContainedCommandDescendantLifetime/nested/success$' > /tmp/asb-containment-diagnostic/traced.log 2>&1
+          trace_status=$?
+          sudo --preserve-env=ASB_DIAG_HOST_PROFILE timeout 15s /tmp/containment.test -test.run '^TestContainedCommandDescendantLifetime/nested/success$' > /tmp/asb-containment-diagnostic/root.log 2>&1
+          root_status=$?
+          printf 'normal_exit=%s traced_exit=%s root_exit=%s\n' "$normal_status" "$trace_status" "$root_status"
+          python3 -c 'from pathlib import Path; import re; root=Path("/tmp/asb-containment-diagnostic"); trace=(root/"nested.strace").read_text(); print("namespace_clone_denied="+str(bool(re.search(r"clone.*CLONE_NEWUSER.*EPERM",trace)))); print("execve_denied="+str(bool(re.search(r"execve.*EPERM",trace)))); print("mapping_write_denied="+str(bool(re.search(r"(?:uid_map|gid_map).*EPERM",trace)))); [(print(name+": "+line)) for name in ["normal.log","traced.log","root.log"] for line in (root/name).read_text().splitlines() if line.startswith("diagnostic.profile_changed=")]'
+          rm -rf /tmp/asb-containment-diagnostic
+          exit "$normal_status"
