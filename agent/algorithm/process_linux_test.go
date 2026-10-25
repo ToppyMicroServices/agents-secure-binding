@@ -19,6 +19,11 @@ import (
 	"time"
 )
 
+const (
+	nestedDescendantMode          = "nested"
+	nestedNamespaceDeniedExitCode = 99
+)
+
 func TestConfigureCommandRequiresAtomicNamespaces(t *testing.T) {
 	cmd := exec.Command(os.Args[0])
 	ConfigureCommand(cmd)
@@ -64,7 +69,11 @@ func TestContainedCommandSuccessAndLaunchFailure(t *testing.T) {
 }
 
 func TestContainedCommandDescendantLifetime(t *testing.T) {
-	for _, descendant := range []string{"ordinary", "detached", "nested"} {
+	requireNested := os.Getenv("ASB_REQUIRE_NESTED_PID_NAMESPACE") == "1"
+	if requireNested && os.Geteuid() != 0 {
+		t.Fatal("required nested PID-namespace qualification must run as root")
+	}
+	for _, descendant := range []string{"ordinary", "detached", nestedDescendantMode} {
 		for _, outcome := range []string{"success", "error", "stop"} {
 			t.Run(descendant+"/"+outcome, func(t *testing.T) {
 				dir := t.TempDir()
@@ -84,6 +93,31 @@ func TestContainedCommandDescendantLifetime(t *testing.T) {
 					}
 				})
 				waitForProcessFile(t, filepath.Join(dir, "ready"))
+				if denial, err := os.ReadFile(filepath.Join(dir, "nested-denied")); err == nil {
+					if descendant != nestedDescendantMode || string(denial) != "EPERM" {
+						t.Fatalf("unexpected namespace denial marker: %q", denial)
+					}
+					select {
+					case err := <-done:
+						done <- err
+						var exitErr *exec.ExitError
+						if !errors.As(err, &exitErr) || exitErr.ExitCode() != nestedNamespaceDeniedExitCode {
+							t.Fatalf("denied nested launch = %v, want exit status %d", err, nestedNamespaceDeniedExitCode)
+						}
+					case <-time.After(5 * time.Second):
+						t.Fatal("denied nested launch did not exit")
+					}
+					if _, err := os.Stat(filepath.Join(dir, "descendant")); !errors.Is(err, os.ErrNotExist) {
+						t.Fatalf("descendant executed after denied nested launch: %v", err)
+					}
+					if requireNested {
+						t.Fatal("required nested PID-namespace creation was denied")
+					}
+					t.Log("nested namespace creation denied with EPERM before descendant execution; cleanup coverage requires the privileged qualification gate")
+					return
+				} else if !errors.Is(err, os.ErrNotExist) {
+					t.Fatal(err)
+				}
 				record, err := os.ReadFile(filepath.Join(dir, "descendant"))
 				if err != nil {
 					t.Fatal(err)
@@ -170,7 +204,7 @@ func TestContainedProcessHelper(t *testing.T) {
 		time.Sleep(30 * time.Second)
 		os.Exit(0)
 	}
-	if args[0] == "nested" {
+	if args[0] == nestedDescendantMode {
 		if os.Getpid() != 1 {
 			os.Exit(98)
 		}
@@ -191,8 +225,8 @@ func TestContainedProcessHelper(t *testing.T) {
 	if descendant == "detached" {
 		child.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	}
-	if descendant == "nested" {
-		child = processHelperCommand("nested", dir)
+	if descendant == nestedDescendantMode {
+		child = processHelperCommand(nestedDescendantMode, dir)
 		// Create both namespaces atomically without new ID mappings. Go's
 		// mapping writer uses the clone-returned PID, which is relative to
 		// this namespace and cannot address the inherited host /proc mount.
@@ -201,6 +235,17 @@ func TestContainedProcessHelper(t *testing.T) {
 	}
 	child.Stderr = os.Stderr
 	if err := child.Start(); err != nil {
+		if descendant == nestedDescendantMode && errors.Is(err, syscall.EPERM) {
+			if err := os.WriteFile(filepath.Join(dir, "nested-denied"), []byte("EPERM"), 0o600); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(94)
+			}
+			if err := os.WriteFile(filepath.Join(dir, "ready"), nil, 0o600); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(94)
+			}
+			os.Exit(nestedNamespaceDeniedExitCode)
+		}
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(94)
 	}
