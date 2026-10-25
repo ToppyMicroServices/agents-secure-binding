@@ -264,6 +264,73 @@ func TestVerifyGatewayRouteCWTRedTeamRejectsAttacks(t *testing.T) {
 	})
 }
 
+func TestVerifyGatewayRouteContextIsolationPolicy(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0)
+	keys := newTestCWTKeySet(t)
+	tests := []struct {
+		name     string
+		required bool
+		expected string
+		observed string
+		wantErr  error
+	}{
+		{"missing expected", true, "", "context-b", gatewayroute.ErrMissingExpected},
+		{"blank expected", true, " \t\n", "context-b", gatewayroute.ErrMissingExpected},
+		{"missing claim", true, "context-a", "", gatewayroute.ErrMissingObserved},
+		{"blank claim", true, "context-a", " \t", gatewayroute.ErrMissingObserved},
+		{"different context", true, "context-a", "context-b", gatewayroute.ErrMismatch},
+		{"matching context", true, "context-a", "context-a", nil},
+		{"unscoped route", false, "", "", nil},
+	}
+	for _, encoding := range []string{"JWT", "CWT"} {
+		for _, tt := range tests {
+			t.Run(encoding+"/"+tt.name, func(t *testing.T) {
+				replay := newAGTPReplayCache()
+				verify := func(expected gatewayroute.ExpectedRoute, observed string) error {
+					if encoding == "JWT" {
+						claims := testGatewayRouteJWTClaims(now)
+						claims[gatewayroute.FieldContextID] = observed
+						if observed == "" {
+							delete(claims, gatewayroute.FieldContextID)
+						}
+						token := signTestJWT(t, "gateway-key", []byte("gateway-secret"), claims)
+						opts := testGatewayRouteJWTOptions(now)
+						opts.Expected = expected
+						opts.Proof.ContextID = observed
+						opts.Route.ReplayCache = replay
+						_, err := VerifyGatewayRouteJWT(token, opts)
+						return err
+					}
+					claims := testGatewayRouteCWTClaims(now)
+					claims[gatewayroute.FieldContextID] = observed
+					if observed == "" {
+						delete(claims, gatewayroute.FieldContextID)
+					}
+					token := signTestCWT(t, "gateway-key", keys.manager, claims)
+					opts := testGatewayRouteCWTOptions(now, keys)
+					opts.Expected = expected
+					opts.Proof.ContextID = observed
+					opts.Route.ReplayCache = replay
+					_, err := VerifyGatewayRouteCWT(token, opts)
+					return err
+				}
+				expected := testGatewayExpectedRoute()
+				expected.RequireContextID = tt.required
+				expected.ContextID = tt.expected
+				if err := verify(expected, tt.observed); !errors.Is(err, tt.wantErr) {
+					t.Fatalf("verify error = %v, want %v", err, tt.wantErr)
+				}
+				if tt.wantErr != nil {
+					expected.ContextID = "context-a"
+					if err := verify(expected, "context-a"); err != nil {
+						t.Fatalf("valid signed route after rejected context: %v", err)
+					}
+				}
+			})
+		}
+	}
+}
+
 func testGatewayRouteJWTClaims(now time.Time) jwt.MapClaims {
 	return jwt.MapClaims{
 		gatewayroute.FieldType:      gatewayroute.AssertionType,

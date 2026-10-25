@@ -128,6 +128,9 @@ type ExpectedRoute struct {
 	ContextID                    string
 	AuditHash                    string
 	RequireAgentHolderOfKeyProof bool
+
+	// RequireContextID requires a verifier-local ContextID for context-scoped routes.
+	RequireContextID bool
 }
 
 // Options contains acceptance integrations outside the signed route assertion.
@@ -205,6 +208,9 @@ func validateCore(a Assertion, now time.Time) []error {
 
 func compareExpected(a Assertion, expected ExpectedRoute) []error {
 	var errs []error
+	if expected.RequireContextID && isEmpty(expected.ContextID) {
+		errs = append(errs, fieldError(FieldContextID, ErrMissingExpected))
+	}
 	for _, f := range []expectedField{
 		{FieldIssuer, expected.Issuer, a.Issuer},
 		{FieldAudience, expected.Audience, a.Audience},

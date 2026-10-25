@@ -141,7 +141,7 @@ func Apply(current Snapshot, event Event) (Transition, error) {
 		if event.ResumeCondition == nil {
 			return Transition{}, fmt.Errorf("%w: WAIT requires resume_condition", ErrInvalidEvent)
 		}
-		condition := *event.ResumeCondition
+		condition := cloneResumeCondition(event.ResumeCondition)
 		if err := condition.Validate(); err != nil {
 			return Transition{}, fmt.Errorf("%w: %v", ErrInvalidEvent, err)
 		}
@@ -150,7 +150,7 @@ func Apply(current Snapshot, event Event) (Transition, error) {
 		}
 		next.State = StateWaiting
 		next.ExecutorLease = nil
-		next.ResumeCondition = &condition
+		next.ResumeCondition = condition
 
 	case EventPause:
 		if current.State != StateRunning && current.State != StateWaiting {
@@ -536,10 +536,7 @@ func cloneSnapshot(in Snapshot) Snapshot {
 		value := *in.ExecutorLease
 		out.ExecutorLease = &value
 	}
-	if in.ResumeCondition != nil {
-		value := *in.ResumeCondition
-		out.ResumeCondition = &value
-	}
+	out.ResumeCondition = cloneResumeCondition(in.ResumeCondition)
 	if in.Checkpoint != nil {
 		value := *in.Checkpoint
 		out.Checkpoint = &value
@@ -553,6 +550,22 @@ func cloneSnapshot(in Snapshot) Snapshot {
 		out.Outcome = &value
 	}
 	return out
+}
+
+func cloneResumeCondition(in *ResumeCondition) *ResumeCondition {
+	if in == nil {
+		return nil
+	}
+	out := *in
+	if in.NotBefore != nil {
+		value := *in.NotBefore
+		out.NotBefore = &value
+	}
+	if in.ProbeAfter != nil {
+		value := *in.ProbeAfter
+		out.ProbeAfter = &value
+	}
+	return &out
 }
 
 func transitionError(state State, kind EventKind) error {
