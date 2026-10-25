@@ -181,6 +181,7 @@ func (p *proxyServer) Start(cfg ProxyConfig, ctx ProxyContext) error {
 		}
 		tlsConfig = tlsSetup.Config
 		tlsConfig.NextProtos = []string{"h2", "http/1.1"}
+		p.httpServer.ReadHeaderTimeout = regularTLSHandshakeTimeout
 
 		if tlsSetup.MTLS {
 			p.logger.Info(fmt.Sprintf("ingress-proxy listening at %s with mTLS for %s", addr, contextDesc))
@@ -201,7 +202,7 @@ func (p *proxyServer) Start(cfg ProxyConfig, ctx ProxyContext) error {
 		if listenErr != nil {
 			return fmt.Errorf("failed to listen: %w", listenErr)
 		}
-		listener = tls.NewListener(tcpListener, tlsConfig)
+		listener = newRegularTLSListener(tcpListener, tlsConfig, regularTLSHandshakeTimeout, regularTLSMaxPending)
 	} else {
 		listener, err = net.Listen("tcp", addr)
 		if err != nil {

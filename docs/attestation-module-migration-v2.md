@@ -42,6 +42,14 @@ revocation behavior, or measurement policy. Cocos deployments construct
 `platformmodule.NewEvidenceVerifier` in the external integration module and
 inject it through `eaattestation.VerificationPolicy`.
 
+For a Cocos verifier that pins the EAT public key, configure the attestation
+service with `ATTESTATION_EAT_SIGNING_KEY` pointing to a persistent P-256 PEM
+private key readable only by its owner. Configure the verifier with the matching
+public key via `AGENT_GRPC_ATTESTATION_EAT_PUBLIC_KEY` and the issuer via
+`AGENT_GRPC_ATTESTATION_EAT_ISSUER`. Without a configured signing key, the
+service continues to generate a new key at each start, so a pinned verifier
+cannot validate tokens after a restart.
+
 There is no v1-shaped v2 overload. Applications that need the old constructor
 can remain on the v1.1.x line while updating their composition root.
 

@@ -17,11 +17,16 @@ import (
 	attestationpb "github.com/ToppyMicroServices/agents-secure-binding/v2/internal/proto/attestation/v1"
 	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/attestation"
 	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/attestation/eat"
+	"github.com/google/go-sev-guest/abi"
+	sevtesting "github.com/google/go-sev-guest/testing"
+	"github.com/google/go-tpm-tools/proto/attest"
+	"github.com/google/go-tpm-tools/proto/tpm"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
 	"google.golang.org/grpc/test/bufconn"
+	"google.golang.org/protobuf/proto"
 )
 
 type collectionProvider struct {
@@ -181,5 +186,68 @@ func TestCollectionPreservesNoCCSample(t *testing.T) {
 	want := append(append([]byte{}, req.ReportData...), req.Nonce...)
 	if claims.PlatformType != "NoCC" || !bytes.Equal(claims.RawReport, want) {
 		t.Fatalf("sample was lost or mislabeled as hardware evidence: %+v", claims)
+	}
+}
+
+func TestCollectionAcceptsDirectSNPProviderProtobuf(t *testing.T) {
+	var reportData [abi.ReportDataSize]byte
+	raw := sevtesting.TestRawReport(reportData)
+	snpAttestation, err := abi.ReportCertsToProto(raw[:abi.ReportSize])
+	if err != nil {
+		t.Fatal(err)
+	}
+	evidence, err := proto.Marshal(snpAttestation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := collectionService(t, &collectionProvider{evidence: evidence})
+	req := &attestationpb.AttestationRequest{PlatformType: attestationpb.PlatformType_PLATFORM_TYPE_SNP, ReportData: reportData[:]}
+	response, err := svc.FetchAttestation(t.Context(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	claims, err := eat.DecodeVerifiedCBOR(response.EatToken, &svc.signingKey.PublicKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if claims.PlatformType != "SNP" || !bytes.Equal(claims.RawReport, evidence) ||
+		!bytes.Equal(claims.Measurements, snpAttestation.GetReport().GetMeasurement()) {
+		t.Fatalf("direct SNP provider report was not preserved in EAT: %+v", claims)
+	}
+}
+
+func TestCollectionAcceptsSNPvTPMProviderWrapper(t *testing.T) {
+	var reportData [abi.ReportDataSize]byte
+	raw := sevtesting.TestRawReport(reportData)
+	snp, err := abi.ReportCertsToProto(raw[:abi.ReportSize])
+	if err != nil {
+		t.Fatal(err)
+	}
+	evidence, err := proto.Marshal(&attest.Attestation{
+		AkPub:  []byte("attestation-key"),
+		Quotes: []*tpm.Quote{{Quote: []byte("quote")}},
+		TeeAttestation: &attest.Attestation_SevSnpAttestation{
+			SevSnpAttestation: snp,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := collectionService(t, &collectionProvider{evidence: evidence})
+	req := &attestationpb.AttestationRequest{
+		PlatformType: attestationpb.PlatformType_PLATFORM_TYPE_SNP_VTPM,
+		ReportData:   reportData[:], Nonce: make([]byte, 32),
+	}
+	response, err := svc.FetchAttestation(t.Context(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	claims, err := eat.DecodeVerifiedCBOR(response.EatToken, &svc.signingKey.PublicKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if claims.PlatformType != "SNP-vTPM" || !bytes.Equal(claims.RawReport, evidence) ||
+		!bytes.Equal(claims.Measurements, snp.GetReport().GetMeasurement()) {
+		t.Fatalf("SNP-vTPM provider wrapper was not preserved in EAT: %+v", claims)
 	}
 }

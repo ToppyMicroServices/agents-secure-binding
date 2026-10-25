@@ -377,6 +377,7 @@ func TestProxyRegularTLS(t *testing.T) {
 	err = ps.Start(cfg, ctx)
 	require.NoError(t, err)
 	defer func() { _ = ps.Stop() }()
+	assert.Equal(t, regularTLSHandshakeTimeout, ps.(*proxyServer).httpServer.ReadHeaderTimeout)
 
 	time.Sleep(100 * time.Millisecond)
 

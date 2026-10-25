@@ -27,6 +27,7 @@ import (
 	runner_client "github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/clients/grpc/runner"
 	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/oci"
 	"golang.org/x/crypto/sha3"
+	"google.golang.org/grpc/metadata"
 )
 
 var _ Service = (*agentService)(nil)
@@ -104,6 +105,8 @@ var (
 	ErrFileNameMismatch = errors.New("malformed data, filename does not match manifest")
 	// ErrUnsafeDatasetFilename indicates a dataset filename would escape the dataset directory.
 	ErrUnsafeDatasetFilename = errors.New("malformed data, unsafe dataset filename")
+	// ErrDatasetDecompressionMismatch indicates the upload option conflicts with the manifest.
+	ErrDatasetDecompressionMismatch = errors.New("dataset decompression option does not match manifest")
 	// ErrAllResultsConsumed indicates all results have been consumed.
 	ErrAllResultsConsumed = errors.New("all results have been consumed by declared consumers")
 	// ErrAttestationFailed attestation failed.
@@ -547,7 +550,7 @@ func (as *agentService) downloadDatasetsIfRemote(state statemachine.State) {
 			}
 
 			if d.Decompress {
-				if err := internal.UnzipFromMemory(res.Data, algorithm.DatasetsDir); err != nil {
+				if err := internal.UnzipFromMemoryContext(ctx, res.Data, algorithm.DatasetsDir); err != nil {
 					as.runError = fmt.Errorf("failed to unzip dataset %s: %w", d.Filename, err)
 					as.logger.Error(as.runError.Error())
 					as.sm.SendEvent(RunFailed)
@@ -887,12 +890,18 @@ func (as *agentService) Data(ctx context.Context, dataset Dataset) error {
 			if d.Filename != "" && d.Filename != datasetFilename {
 				return ErrFileNameMismatch
 			}
+			if matchedIndex == -1 {
+				if values := metadata.ValueFromIncomingContext(ctx, DecompressKey); len(values) > 0 &&
+					(len(values) != 1 || values[0] != fmt.Sprintf("%t", d.Decompress)) {
+					return ErrDatasetDecompressionMismatch
+				}
+			}
 
 			if err := ensurePrivateDirectory(algorithm.DatasetsDir); err != nil {
 				return fmt.Errorf("error creating datasets directory: %v", err)
 			}
-			if DecompressFromContext(ctx) {
-				if err := internal.UnzipFromMemory(datasetData, algorithm.DatasetsDir); err != nil {
+			if d.Decompress {
+				if err := internal.UnzipFromMemoryContext(ctx, datasetData, algorithm.DatasetsDir); err != nil {
 					return fmt.Errorf("error decompressing dataset: %v", err)
 				}
 			} else {

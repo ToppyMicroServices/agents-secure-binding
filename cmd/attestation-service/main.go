@@ -45,6 +45,7 @@ type config struct {
 	AgentOSType           string `env:"AGENT_OS_TYPE"            envDefault:"UVC"`
 	EATFormat             string `env:"ATTESTATION_EAT_FORMAT"   envDefault:"CBOR"` // JWT or CBOR
 	EATIssuer             string `env:"ATTESTATION_EAT_ISSUER"   envDefault:"agents-secure-binding-attestation-service"`
+	EATSigningKeyPath     string `env:"ATTESTATION_EAT_SIGNING_KEY" envDefault:""`
 	UseCCAttestationAgent bool   `env:"USE_CC_ATTESTATION_AGENT" envDefault:"false"`
 	CCAgentAddress        string `env:"CC_AGENT_ADDRESS"         envDefault:"127.0.0.1:50002"`
 
@@ -223,10 +224,10 @@ func main() {
 		return
 	}
 
-	// Generate EAT signing key
-	signingKey, err := eat.GenerateSigningKey()
+	// A configured key lets a verifier pin the same public key across restarts.
+	signingKey, err := configuredEATSigningKey(cfg.EATSigningKeyPath)
 	if err != nil {
-		logger.Error(fmt.Sprintf("failed to generate EAT signing key: %s", err))
+		logger.Error(fmt.Sprintf("failed to configure EAT signing key: %s", err))
 		exitCode = 1
 		return
 	}

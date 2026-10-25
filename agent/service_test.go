@@ -298,6 +298,66 @@ func TestDataRejectsUnsafeFilenameBeforeMutatingState(t *testing.T) {
 	assert.Len(t, svc.computation.Datasets, 1)
 }
 
+func TestDataUsesManifestDecompressionDecision(t *testing.T) {
+	var archive bytes.Buffer
+	writer := zip.NewWriter(&archive)
+	entry, err := writer.Create("item.txt")
+	require.NoError(t, err)
+	_, err = entry.Write([]byte("approved"))
+	require.NoError(t, err)
+	require.NoError(t, writer.Close())
+
+	for _, tc := range []struct {
+		name               string
+		manifestDecompress bool
+		metadataDecompress string
+		wantExtracted      bool
+		wantMismatch       bool
+	}{
+		{name: "metadata cannot enable extraction", metadataDecompress: "true", wantMismatch: true},
+		{name: "metadata cannot disable extraction", manifestDecompress: true, metadataDecompress: "false", wantMismatch: true},
+		{name: "matching plain upload", metadataDecompress: "false"},
+		{name: "matching archive upload", manifestDecompress: true, metadataDecompress: "true", wantExtracted: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			previous, err := os.Getwd()
+			require.NoError(t, err)
+			require.NoError(t, os.Chdir(t.TempDir()))
+			t.Cleanup(func() { require.NoError(t, os.Chdir(previous)) })
+
+			sm := new(smmocks.StateMachine)
+			sm.On("GetState").Return(ReceivingData)
+			sm.On("SendEvent", DataReceived).Return()
+			svc := &agentService{
+				logger: slog.Default(),
+				sm:     sm,
+				computation: Computation{Datasets: []Dataset{{
+					Hash: sha3.Sum256(archive.Bytes()), Filename: "bundle.zip", Decompress: tc.manifestDecompress,
+				}}},
+			}
+			ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs(DecompressKey, tc.metadataDecompress))
+			uploadErr := svc.Data(ctx, Dataset{Dataset: archive.Bytes(), Filename: "bundle.zip"})
+			if tc.wantMismatch {
+				require.ErrorIs(t, uploadErr, ErrDatasetDecompressionMismatch)
+				_, statErr := os.Stat(algorithm.DatasetsDir)
+				require.ErrorIs(t, statErr, os.ErrNotExist)
+				return
+			}
+			require.NoError(t, uploadErr)
+
+			_, extractedErr := os.Stat(filepath.Join(algorithm.DatasetsDir, "item.txt"))
+			_, archiveErr := os.Stat(filepath.Join(algorithm.DatasetsDir, "bundle.zip"))
+			if tc.wantExtracted {
+				require.NoError(t, extractedErr)
+				require.ErrorIs(t, archiveErr, os.ErrNotExist)
+			} else {
+				require.ErrorIs(t, extractedErr, os.ErrNotExist)
+				require.NoError(t, archiveErr)
+			}
+		})
+	}
+}
+
 func TestPrivateComputationFilesUseRestrictiveModes(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "datasets")
 	require.NoError(t, ensurePrivateDirectory(root))

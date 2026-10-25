@@ -297,11 +297,15 @@ func NewClient(dir, actor, address string) (*Client, error) {
 	default:
 		return nil, ErrUnauthorized
 	}
-	roots, err := loadRoots(dir)
+	credentialDir, _, err := activeCredentialDirectory(dir)
 	if err != nil {
 		return nil, err
 	}
-	pair, err := loadPair(dir, name)
+	roots, err := loadRoots(credentialDir)
+	if err != nil {
+		return nil, err
+	}
+	pair, err := loadPair(credentialDir, name)
 	if err != nil {
 		return nil, err
 	}

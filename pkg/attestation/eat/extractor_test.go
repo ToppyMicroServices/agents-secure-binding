@@ -10,12 +10,17 @@ import (
 
 	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/attestation"
 	"github.com/google/go-sev-guest/abi"
+	"github.com/google/go-sev-guest/proto/sevsnp"
+	sevtesting "github.com/google/go-sev-guest/testing"
+	"github.com/google/go-tpm-tools/proto/attest"
+	"github.com/google/go-tpm-tools/proto/tpm"
 	"github.com/stretchr/testify/assert"
+	"google.golang.org/protobuf/proto"
 )
 
 func TestExtractSNPClaims(t *testing.T) {
 	validReport := make([]byte, abi.ReportSize)
-	validReport[0] = 1
+	validReport[0] = 2
 	validReport[10] = 0x2 // Policy bit 17 set (byte 2 of Policy, bit 1)
 
 	tests := []struct {
@@ -33,7 +38,7 @@ func TestExtractSNPClaims(t *testing.T) {
 			name:        "report too small",
 			report:      make([]byte, abi.ReportSize-1),
 			wantErr:     true,
-			expectedErr: "SNP report too small",
+			expectedErr: "failed to parse SNP report",
 		},
 	}
 
@@ -50,9 +55,118 @@ func TestExtractSNPClaims(t *testing.T) {
 				assert.NoError(t, err)
 				assert.NotNil(t, claims.SNPExtensions)
 				assert.Equal(t, OEMID_AMD, claims.OEMID)
-				assert.Equal(t, []byte(fmt.Sprintf("SEV-SNP-%d", 1)), claims.HWModel)
+				assert.Equal(t, []byte(fmt.Sprintf("SEV-SNP-%d", 2)), claims.HWModel)
 			}
 		})
+	}
+}
+
+func TestExtractSNPClaimsAcceptsDirectProviderProtobuf(t *testing.T) {
+	var reportData [abi.ReportDataSize]byte
+	raw := sevtesting.TestRawReport(reportData)
+	snpAttestation, err := abi.ReportCertsToProto(raw[:abi.ReportSize])
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name     string
+		withCert bool
+	}{
+		{name: "report only"},
+		{name: "report with certificate chain", withCert: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			evidence := proto.Clone(snpAttestation).(*sevsnp.Attestation)
+			if tc.withCert {
+				evidence.CertificateChain.VcekCert = make([]byte, abi.ReportSize)
+			}
+			encoded, err := proto.Marshal(evidence)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.withCert && len(encoded) < abi.ReportSize {
+				t.Fatal("test did not cover a protobuf longer than an ABI report")
+			}
+			claims, err := NewEATClaims(encoded, []byte("12345678"), attestation.SNP)
+			if err != nil {
+				t.Fatal(err)
+			}
+			assert.Equal(t, encoded, claims.RawReport)
+			assert.Equal(t, evidence.GetReport().GetMeasurement(), claims.Measurements)
+			assert.NotNil(t, claims.SNPExtensions)
+		})
+	}
+}
+
+func TestExtractSNPClaimsRejectsIncompleteProtobuf(t *testing.T) {
+	encoded, err := proto.Marshal(&sevsnp.Attestation{Report: &sevsnp.Report{Version: 2}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := NewEATClaims(encoded, []byte("12345678"), attestation.SNP); err == nil {
+		t.Fatal("accepted structurally incomplete SNP protobuf")
+	}
+}
+
+func TestExtractSNPvTPMClaimsRequiresCombinedEvidence(t *testing.T) {
+	var reportData [abi.ReportDataSize]byte
+	raw := sevtesting.TestRawReport(reportData)
+	snp, err := abi.ReportCertsToProto(raw[:abi.ReportSize])
+	if err != nil {
+		t.Fatal(err)
+	}
+	combined := &attest.Attestation{
+		AkPub:  []byte("attestation-key"),
+		Quotes: []*tpm.Quote{{Quote: []byte("quote")}},
+		TeeAttestation: &attest.Attestation_SevSnpAttestation{
+			SevSnpAttestation: snp,
+		},
+	}
+	for _, tc := range []struct {
+		name    string
+		change  func(*attest.Attestation)
+		wantErr string
+	}{
+		{name: "valid combined evidence"},
+		{name: "missing attestation key", change: func(a *attest.Attestation) { a.AkPub = nil }, wantErr: "attestation key"},
+		{name: "missing quote", change: func(a *attest.Attestation) { a.Quotes = nil }, wantErr: "vTPM quote"},
+		{name: "missing SNP", change: func(a *attest.Attestation) { a.TeeAttestation = nil }, wantErr: "SEV-SNP attestation"},
+		{name: "invalid SNP", change: func(a *attest.Attestation) {
+			a.TeeAttestation = &attest.Attestation_SevSnpAttestation{
+				SevSnpAttestation: &sevsnp.Attestation{Report: &sevsnp.Report{Version: 2}},
+			}
+		}, wantErr: "invalid embedded SNP report"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			evidence := proto.Clone(combined).(*attest.Attestation)
+			if tc.change != nil {
+				tc.change(evidence)
+			}
+			encoded, err := proto.Marshal(evidence)
+			if err != nil {
+				t.Fatal(err)
+			}
+			claims, err := NewEATClaims(encoded, []byte("12345678"), attestation.SNPvTPM)
+			if tc.wantErr != "" {
+				assert.ErrorContains(t, err, tc.wantErr)
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			assert.Equal(t, encoded, claims.RawReport)
+			assert.Equal(t, "SNP-vTPM", claims.PlatformType)
+			assert.Equal(t, snp.GetReport().GetMeasurement(), claims.Measurements)
+			assert.NotNil(t, claims.SNPExtensions)
+		})
+	}
+
+	direct, err := proto.Marshal(snp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := NewEATClaims(direct, []byte("12345678"), attestation.SNPvTPM); err == nil {
+		t.Fatal("accepted direct SNP evidence as SNP-vTPM")
 	}
 }
 
@@ -109,6 +223,31 @@ func TestExtractVTPMClaims(t *testing.T) {
 	assert.Equal(t, report, claims.VTPMExtensions.Quote)
 	assert.Equal(t, report[:32], claims.Measurements)
 	assert.Equal(t, report[:16], claims.UEID)
+}
+
+func TestNewEATClaimsRejectsShortVTPMAndAzureReports(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		platform attestation.PlatformType
+	}{
+		{name: "vTPM", platform: attestation.VTPM},
+		{name: "Azure", platform: attestation.Azure},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for size := 1; size <= 32; size++ {
+				claims, err := NewEATClaims(make([]byte, size), []byte("12345678"), tc.platform)
+				if size < 32 {
+					if err == nil || claims != nil {
+						t.Fatalf("accepted %d-byte report: claims=%+v, err=%v", size, claims, err)
+					}
+					continue
+				}
+				if err != nil || claims == nil || len(claims.Measurements) != 32 {
+					t.Fatalf("rejected 32-byte report: claims=%+v, err=%v", claims, err)
+				}
+			}
+		})
+	}
 }
 
 func TestExtractAzureClaims(t *testing.T) {

@@ -110,6 +110,99 @@ func TestDialContextDerivesServerNameAndValidatesCA(t *testing.T) {
 	}
 }
 
+func TestWithConnContextCancelsBeforeDeadline(t *testing.T) {
+	conn, peer := net.Pipe()
+	defer conn.Close()
+	defer peer.Close()
+
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(time.Second))
+	defer cancel()
+	started := make(chan struct{})
+	result := make(chan error, 1)
+	go func() {
+		result <- withConnContext(ctx, conn, func() error {
+			close(started)
+			_, err := conn.Read(make([]byte, 1))
+			return err
+		})
+	}()
+	<-started
+	cancel()
+	select {
+	case err := <-result:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("withConnContext() error = %v, want canceled", err)
+		}
+	case <-time.After(300 * time.Millisecond):
+		t.Fatal("canceled read remained blocked until the original deadline")
+	}
+
+	writeResult := make(chan error, 1)
+	go func() {
+		_, err := peer.Write([]byte{1})
+		writeResult <- err
+	}()
+	if _, err := conn.Read(make([]byte, 1)); err != nil {
+		t.Fatalf("connection deadline was not cleared: %v", err)
+	}
+	if err := <-writeResult; err != nil {
+		t.Fatal(err)
+	}
+}
+
+type blockingDeadlineSetter struct {
+	entered chan struct{}
+	release chan struct{}
+	calls   chan time.Time
+}
+
+func (s *blockingDeadlineSetter) SetDeadline(deadline time.Time) error {
+	if !deadline.IsZero() {
+		close(s.entered)
+		<-s.release
+	}
+	s.calls <- deadline
+	return nil
+}
+
+func TestWithConnContextWaitsForCancellationWatcher(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	setter := &blockingDeadlineSetter{
+		entered: make(chan struct{}),
+		release: make(chan struct{}),
+		calls:   make(chan time.Time, 2),
+	}
+	released := false
+	defer func() {
+		if !released {
+			close(setter.release)
+		}
+	}()
+	result := make(chan error, 1)
+	go func() {
+		result <- withConnContext(ctx, setter, func() error {
+			cancel()
+			<-setter.entered
+			return nil
+		})
+	}()
+	<-setter.entered
+	select {
+	case <-result:
+		t.Fatal("withConnContext returned before the cancellation deadline update finished")
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(setter.release)
+	released = true
+	if err := <-result; !errors.Is(err, context.Canceled) {
+		t.Fatalf("withConnContext() error = %v, want canceled", err)
+	}
+	if first, last := <-setter.calls, <-setter.calls; first.IsZero() || !last.IsZero() {
+		t.Fatalf("deadline updates did not end with a reset: first=%v, last=%v", first, last)
+	}
+}
+
 func TestClientTLSConfigForTargetRequiresNameForUnix(t *testing.T) {
 	_, err := clientTLSConfigForTarget("unix", "/tmp/asb.sock", &tls.Config{MinVersion: tls.VersionTLS13})
 	if !errors.Is(err, ErrMissingTLSServerName) {
