@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"runtime"
 	"testing"
 
 	"github.com/ToppyMicroServices/agents-secure-binding/v2/agent/algorithm/logging"
@@ -75,6 +76,9 @@ func TestBinaryRun(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			if !tt.expectedError && !nativeExecutionSupported() {
+				t.Skip("native command success requires a supported containment platform")
+			}
 			logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 			eventsSvc := new(mocks.Service)
 			eventsSvc.On("SendEvent", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return().Maybe()
@@ -112,6 +116,9 @@ func TestStop(t *testing.T) {
 	})
 
 	t.Run("stop with running process", func(t *testing.T) {
+		if !nativeExecutionSupported() {
+			t.Skip("native command success requires a supported containment platform")
+		}
 		b := &binary{
 			algoFile: "sleep",
 			args:     []string{"10"},
@@ -128,6 +135,9 @@ func TestStop(t *testing.T) {
 	})
 
 	t.Run("stop already exited", func(t *testing.T) {
+		if !nativeExecutionSupported() {
+			t.Skip("native command success requires a supported containment platform")
+		}
 		b := &binary{
 			algoFile: "echo",
 			args:     []string{"test"},
@@ -167,4 +177,8 @@ func TestHelperProcess(t *testing.T) {
 		return
 	}
 	os.Exit(0)
+}
+
+func nativeExecutionSupported() bool {
+	return runtime.GOOS == "linux" || runtime.GOOS == "windows"
 }

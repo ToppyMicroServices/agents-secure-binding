@@ -1,4 +1,4 @@
-//go:build !windows
+//go:build !windows && !linux
 
 // Copyright (c) 2026 ToppyMicroServices OÜ
 // SPDX-License-Identifier: Apache-2.0
@@ -7,35 +7,40 @@ package algorithm
 
 import (
 	"errors"
+	"fmt"
+	"os"
 	"os/exec"
-	"syscall"
+	"runtime"
 	"time"
 )
 
-// ConfigureCommand places a computation command and its ordinary descendants
-// in a private process group. WaitDelay bounds waits on descriptors retained by
-// a descendant that deliberately leaves that group.
+// ConfigureCommand bounds descriptor cleanup. Native execution is unavailable
+// on these platforms because process groups cannot contain detached children.
 func ConfigureCommand(cmd *exec.Cmd) {
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.WaitDelay = time.Second
+	if cmd != nil {
+		cmd.WaitDelay = time.Second
+	}
 }
 
-// StartCommand starts a configured computation process.
+// StartCommand fails before executing code without a complete lifetime boundary.
 func StartCommand(cmd *exec.Cmd) error {
-	return cmd.Start()
+	return fmt.Errorf("native computation process containment is unavailable on %s", runtime.GOOS)
 }
 
 // WaitCommand waits for the configured computation process.
 func WaitCommand(cmd *exec.Cmd) error {
+	if cmd == nil {
+		return errors.New("nil command")
+	}
 	return cmd.Wait()
 }
 
-// StopCommand terminates the computation process group.
+// StopCommand handles commands already started outside StartCommand.
 func StopCommand(cmd *exec.Cmd) error {
 	if cmd == nil || cmd.Process == nil {
 		return nil
 	}
-	if err := syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL); err != nil && !errors.Is(err, syscall.ESRCH) {
+	if err := cmd.Process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
 		return err
 	}
 	return nil

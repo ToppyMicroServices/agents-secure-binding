@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	goruntime "runtime"
 	"strings"
 	"testing"
 	"time"
@@ -29,6 +30,9 @@ import (
 const runtime = "python3"
 
 func TestStopDuringPreparationPreventsAlgorithmStart(t *testing.T) {
+	if !nativeExecutionSupported() {
+		t.Skip("native command success requires a supported containment platform")
+	}
 	dir := t.TempDir()
 	entered := filepath.Join(dir, "entered")
 	started := filepath.Join(dir, "started")
@@ -128,6 +132,9 @@ func TestNewAlgorithm(t *testing.T) {
 }
 
 func TestRun(t *testing.T) {
+	if !nativeExecutionSupported() {
+		t.Skip("native command success requires a supported containment platform")
+	}
 	tmpDir, err := os.MkdirTemp("", "python-test")
 	if err != nil {
 		t.Fatal(err)
@@ -164,6 +171,9 @@ func TestRun(t *testing.T) {
 }
 
 func TestRunWithRequirements(t *testing.T) {
+	if !nativeExecutionSupported() {
+		t.Skip("native command success requires a supported containment platform")
+	}
 	tmpDir, err := os.MkdirTemp("", "python-test")
 	if err != nil {
 		t.Fatal(err)
@@ -304,7 +314,11 @@ func TestRun_Errors(t *testing.T) {
 		}
 		err = algo.Run()
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "error installing requirements")
+		if !nativeExecutionSupported() {
+			assert.Contains(t, err.Error(), "containment is unavailable")
+		} else {
+			assert.Contains(t, err.Error(), "error installing requirements")
+		}
 	})
 }
 
@@ -315,4 +329,8 @@ func TestNewAlgorithmEmptyRuntime(t *testing.T) {
 	if p.runtime != PyRuntime {
 		t.Errorf("Expected default runtime %s, got %s", PyRuntime, p.runtime)
 	}
+}
+
+func nativeExecutionSupported() bool {
+	return goruntime.GOOS == "linux" || goruntime.GOOS == "windows"
 }

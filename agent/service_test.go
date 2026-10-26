@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/ToppyMicroServices/agents-secure-binding/v2/agent/algorithm"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/agent/algorithm/docker"
 	"github.com/ToppyMicroServices/agents-secure-binding/v2/agent/algorithm/python"
 	agentevents "github.com/ToppyMicroServices/agents-secure-binding/v2/agent/events"
 	"github.com/ToppyMicroServices/agents-secure-binding/v2/agent/events/mocks"
@@ -639,15 +640,17 @@ func TestStopComputation(t *testing.T) {
 			setupDirs:   true,
 			setupAlgo:   true,
 			algoStopErr: fmt.Errorf("algorithm stop failed"),
-			expectedErr: nil, // Warn only
+			expectedErr: fmt.Errorf("algorithm stop failed"),
 		},
-		// We log warnings but don't return error in StopComputation in new implementation for Stop failure.
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Chdir(t.TempDir())
 			events := new(mocks.Service)
-			events.On("SendEvent", mock.Anything, "Stopped", "Stopped", mock.Anything).Return()
+			if tc.expectedErr == nil {
+				events.On("SendEvent", mock.Anything, "Stopped", "Stopped", mock.Anything).Return()
+			}
 
 			ctx := context.Background()
 			ctx, cancel := context.WithCancel(ctx)
@@ -1296,43 +1299,21 @@ func TestDownloadAlgorithmIfRemote_Success(t *testing.T) {
 	mockOCI.AssertExpectations(t)
 }
 
-func TestDownloadAlgorithmIfRemote_Docker_Success(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping in short mode")
-	}
-
-	origDir, _ := os.Getwd()
-	tmpDir := t.TempDir()
-	require.NoError(t, os.Chdir(tmpDir))
-	defer func() { require.NoError(t, os.Chdir(origDir)) }()
-
+func TestDownloadAlgorithmIfRemote_DockerRejectedBeforePull(t *testing.T) {
+	t.Chdir(t.TempDir())
 	eventsSvc := new(mocks.Service)
 	eventsSvc.On("SendEvent", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return().Maybe()
 	sm := &smmocks.StateMachine{}
-	sm.On("SendEvent", AlgorithmReceived).Return().Once()
-
+	sm.On("SendEvent", RunFailed).Return().Once()
 	mockOCI := new(MockOCIClient)
-	mockOCI.On("PullAndDecrypt", mock.Anything, mock.Anything, mock.Anything).Return(nil)
-
-	dummyContent := []byte("dummy docker tar")
-	dummyHash := ExecutionBundleHash("docker", nil, dummyContent, nil)
-
-	mockOCI.On("ToDockerArchive", mock.Anything, mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
-		destFile := args.String(2)
-		err := os.WriteFile(destFile, dummyContent, 0o644)
-		require.NoError(t, err)
-	}).Return(nil)
-
 	svc := newTestAgentService(sm, eventsSvc)
 	svc.ociClient = mockOCI
-
 	svc.computation = Computation{
 		Algorithm: Algorithm{
 			AlgoType: "docker",
-			Hash:     dummyHash,
 			Source: &ResourceSource{
 				Type: "oci-image",
-				URL:  "docker://test/algo-docker-success",
+				URL:  "docker://test/disabled-algorithm",
 			},
 		},
 		KBS: KBSConfig{Enabled: true},
@@ -1340,10 +1321,13 @@ func TestDownloadAlgorithmIfRemote_Docker_Success(t *testing.T) {
 
 	svc.downloadAlgorithmIfRemote(ReceivingAlgorithm)
 
-	assert.Nil(t, svc.runError)
-	assert.True(t, svc.algoReceived)
+	require.ErrorIs(t, svc.runError, docker.ErrDockerAlgorithmDisabled)
+	require.False(t, svc.algoReceived)
+	_, err := os.Stat("algo")
+	require.True(t, os.IsNotExist(err))
+	mockOCI.AssertNotCalled(t, "PullAndDecrypt", mock.Anything, mock.Anything, mock.Anything)
+	mockOCI.AssertNotCalled(t, "ToDockerArchive", mock.Anything, mock.Anything, mock.Anything)
 	sm.AssertExpectations(t)
-	mockOCI.AssertExpectations(t)
 }
 
 func setupMinimalOCI(t *testing.T, ociDir, filename string, content []byte) {

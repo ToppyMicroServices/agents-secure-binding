@@ -51,6 +51,10 @@ func (s *RunnerService) Run(ctx context.Context, req *pb.RunRequest) (*pb.RunRes
 		return nil, fmt.Errorf("missing run request")
 	}
 	s.mu.Lock()
+	if err := ctx.Err(); err != nil {
+		s.mu.Unlock()
+		return nil, err
+	}
 	if s.running {
 		s.mu.Unlock()
 		return &pb.RunResponse{
@@ -76,6 +80,31 @@ func (s *RunnerService) Run(ctx context.Context, req *pb.RunRequest) (*pb.RunRes
 			s.done = nil
 		}
 		s.mu.Unlock()
+	}()
+	// A canceled RPC can reach this handler after Stop has already returned.
+	// Once admitted, cancellation must also stop the exact algorithm instance
+	// for this run. Join the callback before releasing the admission slot.
+	cancellationDone := make(chan struct{})
+	stopCancellation := context.AfterFunc(ctx, func() {
+		defer close(cancellationDone)
+		s.mu.Lock()
+		if s.done != done {
+			s.mu.Unlock()
+			return
+		}
+		s.cancelled = true
+		algo := s.currentAlgo
+		s.mu.Unlock()
+		if algo != nil {
+			if err := algo.Stop(); err != nil {
+				s.logger.Error("error stopping canceled computation", "error", err)
+			}
+		}
+	})
+	defer func() {
+		if !stopCancellation() {
+			<-cancellationDone
+		}
 	}()
 
 	currentDir, err := os.Getwd()
@@ -145,6 +174,10 @@ func (s *RunnerService) Run(ctx context.Context, req *pb.RunRequest) (*pb.RunRes
 	}
 
 	s.mu.Lock()
+	if err := ctx.Err(); err != nil {
+		s.mu.Unlock()
+		return nil, err
+	}
 	if s.cancelled {
 		s.mu.Unlock()
 		return &pb.RunResponse{ComputationId: req.ComputationId, Error: algorithm.ErrStopped.Error()}, nil
@@ -152,7 +185,11 @@ func (s *RunnerService) Run(ctx context.Context, req *pb.RunRequest) (*pb.RunRes
 	s.currentAlgo = algo
 	s.mu.Unlock()
 
-	if err := algo.Run(); err != nil {
+	runErr := algo.Run()
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if err := runErr; err != nil {
 		s.logger.Error("computation failed", "error", err)
 		return &pb.RunResponse{
 			ComputationId: req.ComputationId,

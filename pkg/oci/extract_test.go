@@ -694,7 +694,7 @@ func TestExtractDatasetNoDataFiles(t *testing.T) {
 		indexData, _ := json.Marshal(index)
 		require.NoError(t, os.WriteFile(filepath.Join(ociDir, "index.json"), indexData, 0o644))
 
-		// ExtractDataset logs a warning and continues if a layer fails, but if ALL fail it errors
+		// Any invalid layer fails the extraction.
 		_, err := ExtractDataset(ociDir, t.TempDir())
 		assert.Error(t, err)
 	})
@@ -915,7 +915,7 @@ func TestExtractAlgorithmErrorPathsAdditional(t *testing.T) {
 
 		_, _, err = ExtractAlgorithm(context.Background(), logger, ociDir, destDir, "")
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "no algorithm file found")
+		assert.Contains(t, err.Error(), "failed to extract layer")
 	})
 
 	t.Run("invalid tar formatting", func(t *testing.T) {
@@ -933,7 +933,7 @@ func TestExtractAlgorithmErrorPathsAdditional(t *testing.T) {
 
 		_, _, err = ExtractAlgorithm(context.Background(), logger, ociDir, destDir, "")
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "no algorithm file found")
+		assert.Contains(t, err.Error(), "failed to extract layer")
 	})
 
 	t.Run("non-existent layer file", func(t *testing.T) {
@@ -967,7 +967,7 @@ func TestExtractAlgorithmErrorPathsAdditional(t *testing.T) {
 
 		_, _, err := ExtractAlgorithm(context.Background(), logger, ociDir, destDir, "")
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "no algorithm file found")
+		assert.Contains(t, err.Error(), "failed to extract layer")
 	})
 }
 
@@ -1013,7 +1013,7 @@ func TestExtractDatasetErrorPathsAdditional(t *testing.T) {
 
 		_, err := ExtractDataset(ociDir, destDir)
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "no dataset files found")
+		assert.Contains(t, err.Error(), "failed to extract layer")
 	})
 }
 
@@ -1195,6 +1195,6 @@ func TestExtractAlgorithm_ErrorPaths(t *testing.T) {
 
 		_, _, err := ExtractAlgorithm(context.Background(), logger, ociDir, t.TempDir(), "bin")
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "no algorithm file found")
+		assert.Contains(t, err.Error(), "failed to extract layer")
 	})
 }

@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -48,6 +49,7 @@ func TestNewRunnerService(t *testing.T) {
 
 // TestRunWithBinaryAlgorithm tests running a binary algorithm.
 func TestRunWithBinaryAlgorithm(t *testing.T) {
+	requireNativeExecution(t)
 	origDir, _ := os.Getwd()
 	tmpDir := t.TempDir()
 	require.NoError(t, os.Chdir(tmpDir))
@@ -73,6 +75,7 @@ func TestRunWithBinaryAlgorithm(t *testing.T) {
 
 // TestRunWithPythonAlgorithm tests running a Python algorithm.
 func TestRunWithPythonAlgorithm(t *testing.T) {
+	requireNativeExecution(t)
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 	eventSvc := &MockEventService{}
 	rs := New(logger, eventSvc)
@@ -121,6 +124,7 @@ func writeRunnerTestWheel(t *testing.T, dir string) string {
 
 // TestRunWithPythonAlgorithmNoRequirements tests running Python without requirements.
 func TestRunWithPythonAlgorithmNoRequirements(t *testing.T) {
+	requireNativeExecution(t)
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 	eventSvc := &MockEventService{}
 	rs := New(logger, eventSvc)
@@ -144,6 +148,7 @@ func TestRunWithPythonAlgorithmNoRequirements(t *testing.T) {
 
 // TestRunWithWasmAlgorithm tests running a WASM algorithm.
 func TestRunWithWasmAlgorithm(t *testing.T) {
+	requireNativeExecution(t)
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 	eventSvc := &MockEventService{}
 	rs := New(logger, eventSvc)
@@ -211,6 +216,7 @@ func TestRunWithUnsupportedAlgorithmType(t *testing.T) {
 
 // TestRunAlreadyRunning tests running computation when one is already running.
 func TestRunAlreadyRunning(t *testing.T) {
+	requireNativeExecution(t)
 	t.Chdir(t.TempDir())
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 	eventSvc := &MockEventService{}
@@ -246,6 +252,7 @@ func TestRunAlreadyRunning(t *testing.T) {
 
 // TestStopWhenRunning tests stopping a running computation.
 func TestStopWhenRunning(t *testing.T) {
+	requireNativeExecution(t)
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 	eventSvc := &MockEventService{}
 	rs := New(logger, eventSvc)
@@ -343,6 +350,7 @@ func TestRunErrors(t *testing.T) {
 
 // TestConcurrentRun tests that concurrent runs are properly serialized.
 func TestConcurrentRun(t *testing.T) {
+	requireNativeExecution(t)
 	origDir, _ := os.Getwd()
 	tmpDir := t.TempDir()
 	require.NoError(t, os.Chdir(tmpDir))
@@ -435,6 +443,7 @@ func TestStopRejectsDifferentComputation(t *testing.T) {
 
 // TestRunWithMultipleArgs tests running with multiple arguments.
 func TestRunWithMultipleArgs(t *testing.T) {
+	requireNativeExecution(t)
 	origDir, _ := os.Getwd()
 	tmpDir := t.TempDir()
 	require.NoError(t, os.Chdir(tmpDir))
@@ -474,3 +483,34 @@ type MockAlgorithmStopFail struct{}
 
 func (m *MockAlgorithmStopFail) Run() error  { return nil }
 func (m *MockAlgorithmStopFail) Stop() error { return fmt.Errorf("stop failed") }
+
+const linuxTestOS = "linux"
+
+func requireNativeExecution(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS != linuxTestOS && runtime.GOOS != "windows" {
+		t.Skip("native command success requires a supported containment platform")
+	}
+}
+
+func TestNativeExecutionFailsClosedOnUnsupportedUnix(t *testing.T) {
+	if runtime.GOOS == linuxTestOS || runtime.GOOS == "windows" {
+		t.Skip("this test checks unsupported Unix containment")
+	}
+	t.Chdir(t.TempDir())
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	rs := New(logger, &MockEventService{})
+	for _, kind := range []string{"bin", "python", "wasm"} {
+		t.Run(kind, func(t *testing.T) {
+			resp, err := rs.Run(context.Background(), &pb.RunRequest{
+				ComputationId: kind, AlgoType: kind,
+				Algorithm: []byte("#!/bin/sh\n: > executed\n"),
+			})
+			require.NoError(t, err)
+			require.Contains(t, resp.Error, "containment is unavailable")
+			require.False(t, rs.running)
+			_, err = os.Stat("executed")
+			require.True(t, os.IsNotExist(err), "computation was executed")
+		})
+	}
+}

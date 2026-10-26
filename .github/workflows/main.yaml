@@ -129,6 +129,13 @@ jobs:
         if: matrix.module == 'pkg'
         run: python3 -B -m unittest discover -s pkg/llmruntime -p 'transformers_server_test.py'
 
+      - name: Qualify nested PID namespace teardown
+        if: matrix.module == 'agent'
+        run: |
+          GOTOOLCHAIN=go1.26.10+auto go test -race -c -o /tmp/asb-process-containment.test ./agent/algorithm
+          sudo ASB_REQUIRE_NESTED_PID_NAMESPACE=1 /tmp/asb-process-containment.test \
+            -test.v -test.timeout=60s -test.run '^TestContainedCommandDescendantLifetime$/^nested$/^(success|error|stop)$'
+
       - name: Run tests for ${{ matrix.module }}
         run: |
           if [[ "${{ matrix.module }}" == "manager" ]]; then

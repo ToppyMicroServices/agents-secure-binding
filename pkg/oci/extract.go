@@ -36,9 +36,14 @@ type OCIIndex struct {
 
 // ExtractAlgorithm extracts the algorithm file and optionally requirements.txt from an OCI image directory.
 func ExtractAlgorithm(ctx context.Context, logger *slog.Logger, ociDir, destPath, algoType string) (string, string, error) {
+	return extractAlgorithm(ctx, logger, ociDir, destPath, algoType, defaultExtractionLimits)
+}
+
+func extractAlgorithm(ctx context.Context, logger *slog.Logger, ociDir, destPath, algoType string, limits extractionLimits) (string, string, error) {
+	budget := newExtractionBudget(ctx, limits)
 	// Read index.json to find manifest
 	indexPath := filepath.Join(ociDir, "index.json")
-	indexData, err := os.ReadFile(indexPath)
+	indexData, err := readMetadata(ctx, indexPath, limits.metadataBytes)
 	if err != nil {
 		return "", "", fmt.Errorf("failed to read index.json: %w", err)
 	}
@@ -57,7 +62,7 @@ func ExtractAlgorithm(ctx context.Context, logger *slog.Logger, ociDir, destPath
 	manifestPath := filepath.Join(ociDir, "blobs", strings.Replace(manifestDigest, ":", "/", 1))
 
 	// Read manifest to find layers
-	manifestData, err := os.ReadFile(manifestPath)
+	manifestData, err := readMetadata(ctx, manifestPath, limits.metadataBytes)
 	if err != nil {
 		return "", "", fmt.Errorf("failed to read manifest: %w", err)
 	}
@@ -69,6 +74,9 @@ func ExtractAlgorithm(ctx context.Context, logger *slog.Logger, ociDir, destPath
 	}
 	if err := json.Unmarshal(manifestData, &manifest); err != nil {
 		return "", "", fmt.Errorf("failed to parse manifest: %w", err)
+	}
+	if len(manifest.Layers) > limits.entries {
+		return "", "", errExtractionLimit
 	}
 
 	// Extract layers to find algorithm files
@@ -88,14 +96,14 @@ func ExtractAlgorithm(ctx context.Context, logger *slog.Logger, ociDir, destPath
 		layerPath := filepath.Join(ociDir, "blobs", strings.Replace(layer.Digest, ":", "/", 1))
 
 		// Try to extract and find algorithm file
-		algoP, reqP, seenFiles, err := extractLayerAndFindAlgorithm(logger, layerPath, extractionRoot, destPath, algoType)
+		scanOnly := algorithmPath != "" && (algoType != "python" || requirementsPath != "")
+		algoP, reqP, seenFiles, err := extractLayerAndFindAlgorithm(logger, layerPath, extractionRoot, destPath, algoType, budget, scanOnly)
 		if len(seenFiles) > 0 {
 			allSeenFiles = append(allSeenFiles, seenFiles...)
 		}
 
 		if err != nil {
-			logger.Warn("failed to extract layer", "digest", layer.Digest, "error", err)
-			continue
+			return "", "", fmt.Errorf("failed to extract layer %s: %w", layer.Digest, err)
 		}
 
 		if algoP != "" && algorithmPath == "" {
@@ -103,11 +111,6 @@ func ExtractAlgorithm(ctx context.Context, logger *slog.Logger, ociDir, destPath
 		}
 		if reqP != "" && requirementsPath == "" {
 			requirementsPath = reqP
-		}
-
-		// If we found both, we can stop
-		if algorithmPath != "" && (algoType != "python" || requirementsPath != "") {
-			break
 		}
 	}
 
@@ -119,7 +122,7 @@ func ExtractAlgorithm(ctx context.Context, logger *slog.Logger, ociDir, destPath
 }
 
 // extractLayerAndFindAlgorithm extracts a layer and searches for algorithm files.
-func extractLayerAndFindAlgorithm(logger *slog.Logger, layerPath string, root *os.Root, destPath, algoType string) (string, string, []string, error) {
+func extractLayerAndFindAlgorithm(logger *slog.Logger, layerPath string, root *os.Root, destPath, algoType string, budget *extractionBudget, scanOnly bool) (string, string, []string, error) {
 	// Open layer file
 	layerFile, err := os.Open(layerPath)
 	if err != nil {
@@ -135,7 +138,8 @@ func extractLayerAndFindAlgorithm(logger *slog.Logger, layerPath string, root *o
 	defer gzReader.Close()
 
 	// Read tar archive
-	tarReader := tar.NewReader(gzReader)
+	bounded := &budgetReader{source: gzReader, budget: budget}
+	tarReader := tar.NewReader(bounded)
 
 	var algorithmPath string
 	var requirementsPath string
@@ -144,10 +148,18 @@ func extractLayerAndFindAlgorithm(logger *slog.Logger, layerPath string, root *o
 	for {
 		header, err := tarReader.Next()
 		if err == io.EOF {
+			// tar stops at its end marker; also bound all remaining gzip output.
+			if _, err := io.Copy(io.Discard, bounded); err != nil {
+				return "", "", seenFiles, err
+			}
 			break
 		}
 		if err != nil {
 			return "", "", seenFiles, fmt.Errorf("failed to read tar header: %w", err)
+		}
+
+		if err := budget.entry(header.Size); err != nil {
+			return "", "", seenFiles, err
 		}
 
 		logger.Debug("inspecting file in layer", "name", header.Name, "type", header.Typeflag)
@@ -164,7 +176,7 @@ func extractLayerAndFindAlgorithm(logger *slog.Logger, layerPath string, root *o
 		isAlgo := isAlgorithmFile(header.Name, header.Mode, algoType)
 		isReq := filepath.Base(header.Name) == "requirements.txt"
 
-		if isAlgo || isReq {
+		if (isAlgo || isReq) && !scanOnly {
 			cleanName, ok := cleanOCIEntryName(header.Name)
 			if !ok {
 				continue
@@ -176,7 +188,8 @@ func extractLayerAndFindAlgorithm(logger *slog.Logger, layerPath string, root *o
 			if isAlgo {
 				mode = 0o700
 			}
-			if err := safearchive.WriteFile(root, cleanName, mode, tarReader); err != nil {
+			contents := &budgetReader{source: tarReader, budget: &extractionBudget{ctx: budget.ctx, remaining: header.Size}}
+			if err := safearchive.WriteFile(root, cleanName, mode, contents); err != nil {
 				return "", "", seenFiles, fmt.Errorf("failed to write file: %w", err)
 			}
 
@@ -233,10 +246,20 @@ func isAlgorithmFile(filename string, mode int64, algoType string) bool {
 
 // ExtractDataset extracts dataset files from an OCI image directory.
 func ExtractDataset(ociDir, destPath string) ([]string, error) {
+	return ExtractDatasetContext(context.Background(), ociDir, destPath)
+}
+
+// ExtractDatasetContext extracts dataset files with cancellation and finite limits.
+func ExtractDatasetContext(ctx context.Context, ociDir, destPath string) ([]string, error) {
+	return extractDataset(ctx, ociDir, destPath, defaultExtractionLimits)
+}
+
+func extractDataset(ctx context.Context, ociDir, destPath string, limits extractionLimits) ([]string, error) {
+	budget := newExtractionBudget(ctx, limits)
 	// Similar to ExtractAlgorithm but extracts all data files
 	// Read index.json to find manifest
 	indexPath := filepath.Join(ociDir, "index.json")
-	indexData, err := os.ReadFile(indexPath)
+	indexData, err := readMetadata(ctx, indexPath, limits.metadataBytes)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read index.json: %w", err)
 	}
@@ -255,7 +278,7 @@ func ExtractDataset(ociDir, destPath string) ([]string, error) {
 	manifestPath := filepath.Join(ociDir, "blobs", strings.Replace(manifestDigest, ":", "/", 1))
 
 	// Read manifest to find layers
-	manifestData, err := os.ReadFile(manifestPath)
+	manifestData, err := readMetadata(ctx, manifestPath, limits.metadataBytes)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read manifest: %w", err)
 	}
@@ -267,6 +290,9 @@ func ExtractDataset(ociDir, destPath string) ([]string, error) {
 	}
 	if err := json.Unmarshal(manifestData, &manifest); err != nil {
 		return nil, fmt.Errorf("failed to parse manifest: %w", err)
+	}
+	if len(manifest.Layers) > limits.entries {
+		return nil, errExtractionLimit
 	}
 
 	var datasetFiles []string
@@ -282,10 +308,9 @@ func ExtractDataset(ociDir, destPath string) ([]string, error) {
 		layer := manifest.Layers[i]
 		layerPath := filepath.Join(ociDir, "blobs", strings.Replace(layer.Digest, ":", "/", 1))
 
-		files, err := extractLayerDataFiles(layerPath, extractionRoot, destPath)
+		files, err := extractLayerDataFiles(layerPath, extractionRoot, destPath, budget)
 		if err != nil {
-			slog.Warn("error extracting layer", "digest", layer.Digest, "error", err)
-			continue
+			return nil, fmt.Errorf("failed to extract layer %s: %w", layer.Digest, err)
 		}
 		datasetFiles = append(datasetFiles, files...)
 	}
@@ -298,7 +323,7 @@ func ExtractDataset(ociDir, destPath string) ([]string, error) {
 }
 
 // extractLayerDataFiles extracts data files from a layer.
-func extractLayerDataFiles(layerPath string, root *os.Root, destPath string) ([]string, error) {
+func extractLayerDataFiles(layerPath string, root *os.Root, destPath string, budget *extractionBudget) ([]string, error) {
 	layerFile, err := os.Open(layerPath)
 	if err != nil {
 		return nil, err
@@ -311,15 +336,23 @@ func extractLayerDataFiles(layerPath string, root *os.Root, destPath string) ([]
 	}
 	defer gzReader.Close()
 
-	tarReader := tar.NewReader(gzReader)
+	bounded := &budgetReader{source: gzReader, budget: budget}
+	tarReader := tar.NewReader(bounded)
 	var extractedFiles []string
 
 	for {
 		header, err := tarReader.Next()
 		if err == io.EOF {
+			if _, err := io.Copy(io.Discard, bounded); err != nil {
+				return nil, err
+			}
 			break
 		}
 		if err != nil {
+			return nil, err
+		}
+
+		if err := budget.entry(header.Size); err != nil {
 			return nil, err
 		}
 
@@ -336,7 +369,8 @@ func extractLayerDataFiles(layerPath string, root *os.Root, destPath string) ([]
 
 			targetPath := filepath.Join(destPath, cleanName)
 
-			if err := safearchive.WriteFile(root, cleanName, 0o600, tarReader); err != nil {
+			contents := &budgetReader{source: tarReader, budget: &extractionBudget{ctx: budget.ctx, remaining: header.Size}}
+			if err := safearchive.WriteFile(root, cleanName, 0o600, contents); err != nil {
 				return nil, err
 			}
 

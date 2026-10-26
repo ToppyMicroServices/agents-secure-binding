@@ -26,11 +26,24 @@ type ServiceRegister func(srv *grpc.Server)
 
 var ErrPlaintextPublicGRPC = fmt.Errorf("runtime grpc: plaintext listener requires localhost, loopback, or TLS")
 
+var ErrMTLSRequired = fmt.Errorf("runtime grpc: server certificate, key, and nonempty client CA are required for mTLS")
+
 type runtimeServer struct {
 	server.Base
 	server          *grpc.Server
 	registerService ServiceRegister
+	requireMTLS     bool
 	health          *health.Server
+}
+
+// NewMTLSServer requires verified client certificates for every registered RPC.
+// It is intended for privileged control APIs such as the Manager.
+func NewMTLSServer(ctx context.Context, cancel context.CancelFunc, name string, config server.Config, registerService ServiceRegister, logger *slog.Logger) server.Server {
+	return &runtimeServer{
+		Base:            server.NewBase(ctx, cancel, name, config, logger),
+		registerService: registerService,
+		requireMTLS:     true,
+	}
 }
 
 // NewServer returns a gRPC runtime server.
@@ -43,6 +56,9 @@ func NewServer(ctx context.Context, cancel context.CancelFunc, name string, conf
 
 func (s *runtimeServer) Start() error {
 	tlsConfigured := s.Config.CertFile != "" || s.Config.KeyFile != ""
+	if s.requireMTLS && (s.Config.CertFile == "" || s.Config.KeyFile == "" || s.Config.ClientCAFile == "") {
+		return ErrMTLSRequired
+	}
 	if !tlsConfigured && !netguard.PlaintextBindAllowed(s.Config.Host) {
 		return fmt.Errorf("%w: %s", ErrPlaintextPublicGRPC, s.Address)
 	}
@@ -126,6 +142,9 @@ func (s *runtimeServer) tlsCredentials() (grpc.ServerOption, error) {
 	clientCA, err := server.LoadRootCACerts(s.Config.ClientCAFile)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load client CA file: %w", err)
+	}
+	if s.requireMTLS && clientCA == nil {
+		return nil, ErrMTLSRequired
 	}
 	if clientCA != nil {
 		tlsConfig.ClientCAs = x509.NewCertPool()

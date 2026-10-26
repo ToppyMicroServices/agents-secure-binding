@@ -4,11 +4,15 @@
 package oci
 
 import (
+	"bytes"
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -242,4 +246,131 @@ func TestSkopeoClientArgsDoNotDisablePolicyOrTLS(t *testing.T) {
 	}, "/tmp/oci")
 	assert.Contains(t, encryptedArgs, "--decryption-key")
 	assert.Contains(t, encryptedArgs, DecryptionKeyProvider)
+}
+
+func skopeoHelperArgs(args ...string) []string {
+	return append([]string{"-test.run=^TestSkopeoOutputHelperProcess$", "--"}, args...)
+}
+
+func TestSkopeoClientBoundedOutput(t *testing.T) {
+	t.Setenv("ASB_SKOPEO_TEST_HELPER", "1")
+	client := &SkopeoClient{skopeoPath: os.Args[0], workDir: t.TempDir()}
+	t.Run("ordinary stdout and stderr", func(t *testing.T) {
+		output, err := client.output(context.Background(), "skopeo copy failed", skopeoHelperArgs("ordinary"))
+		require.NoError(t, err)
+		require.Equal(t, "stdout\nstderr\n", string(output))
+	})
+	t.Run("ordinary failure preserves diagnostics", func(t *testing.T) {
+		output, err := client.output(context.Background(), "skopeo copy failed", skopeoHelperArgs("failure"))
+		require.ErrorContains(t, err, "skopeo copy failed")
+		require.ErrorContains(t, err, "Output: stdout\nstderr\n")
+		require.Nil(t, output)
+	})
+	t.Run("exact combined output limit succeeds", func(t *testing.T) {
+		output, err := client.output(context.Background(), "skopeo copy failed", skopeoHelperArgs("exact"))
+		require.NoError(t, err)
+		require.Len(t, output, maxSkopeoOutputBytes)
+	})
+	t.Run("overflow cancels instead of returning truncated success", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		start := time.Now()
+		output, err := client.output(ctx, "skopeo copy failed", skopeoHelperArgs("overflow"))
+		require.ErrorIs(t, err, errSkopeoOutputLimit)
+		require.ErrorContains(t, err, "skopeo copy failed")
+		require.Nil(t, output)
+		require.Less(t, len(err.Error()), maxSkopeoOutputBytes+256)
+		require.Less(t, time.Since(start), 3*time.Second, "overflow must cancel the blocked helper")
+		require.NoError(t, ctx.Err(), "the caller deadline must not be needed to stop output overflow")
+	})
+}
+
+func TestSkopeoClientCancellationBoundsInheritedPipeDrain(t *testing.T) {
+	t.Setenv("ASB_SKOPEO_TEST_HELPER", "1")
+	dir := t.TempDir()
+	ready := filepath.Join(dir, "child-ready")
+	release := filepath.Join(dir, "release-child")
+	done := filepath.Join(dir, "child-done")
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(func() {
+		cancel()
+		// This fixture owns its descendant and releases it independently of
+		// the wrapper's pipe-drain timeout.
+		require.NoError(t, os.WriteFile(release, nil, 0o600))
+		require.Eventually(t, func() bool {
+			_, err := os.Stat(done)
+			return err == nil
+		}, 3*time.Second, 10*time.Millisecond, "fixture descendant did not acknowledge cleanup")
+	})
+	client := &SkopeoClient{skopeoPath: os.Args[0], workDir: dir}
+	finished := make(chan error, 1)
+	go func() {
+		_, err := client.output(ctx, "skopeo copy failed", skopeoHelperArgs("spawn", ready, release, done))
+		finished <- err
+	}()
+	require.Eventually(t, func() bool {
+		_, err := os.Stat(ready)
+		return err == nil
+	}, 3*time.Second, 10*time.Millisecond)
+	cancel()
+	select {
+	case err := <-finished:
+		require.ErrorContains(t, err, "skopeo copy failed")
+	case <-time.After(3 * time.Second):
+		t.Fatal("cancellation waited for the descendant to close inherited output pipes")
+	}
+	_, err := os.Stat(done)
+	require.True(t, os.IsNotExist(err), "pipe draining must finish while the fixture child still holds its descriptors")
+}
+
+func TestSkopeoOutputHelperProcess(t *testing.T) {
+	if os.Getenv("ASB_SKOPEO_TEST_HELPER") != "1" {
+		return
+	}
+	separator := slices.Index(os.Args, "--")
+	require.GreaterOrEqual(t, separator, 0)
+	args := os.Args[separator+1:]
+	require.NotEmpty(t, args)
+	switch args[0] {
+	case "ordinary", "failure":
+		_, err := os.Stdout.WriteString("stdout\n")
+		require.NoError(t, err)
+		_, err = os.Stderr.WriteString("stderr\n")
+		require.NoError(t, err)
+		if args[0] == "failure" {
+			os.Exit(7)
+		}
+	case "exact", "overflow":
+		data := bytes.Repeat([]byte{'x'}, maxSkopeoOutputBytes/2)
+		_, err := os.Stdout.Write(data)
+		require.NoError(t, err)
+		_, err = os.Stderr.Write(data)
+		require.NoError(t, err)
+		if args[0] == "overflow" {
+			_, err = os.Stderr.WriteString("x")
+			require.NoError(t, err)
+			time.Sleep(30 * time.Second)
+		}
+	case "spawn":
+		require.Len(t, args, 4)
+		child := exec.Command(os.Args[0], skopeoHelperArgs("hold", args[1], args[2], args[3])...)
+		child.Stdout = os.Stdout
+		child.Stderr = os.Stderr
+		require.NoError(t, child.Start())
+		time.Sleep(30 * time.Second)
+	case "hold":
+		require.Len(t, args, 4)
+		require.NoError(t, os.WriteFile(args[1], nil, 0o600))
+		deadline := time.Now().Add(10 * time.Second)
+		for time.Now().Before(deadline) {
+			if _, err := os.Stat(args[2]); err == nil {
+				break
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		require.NoError(t, os.WriteFile(args[3], nil, 0o600))
+	default:
+		t.Fatalf("unknown helper mode %q", args[0])
+	}
+	os.Exit(0)
 }

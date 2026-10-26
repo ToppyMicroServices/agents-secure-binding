@@ -120,7 +120,11 @@ func main() {
 		exitCode = 1
 		return
 	}
-	warnIfPublicWithoutTLS(logger, "Manager gRPC", managerGRPCConfig)
+	if err := validateManagerGRPCConfig(managerGRPCConfig); err != nil {
+		logger.Error(err.Error())
+		exitCode = 1
+		return
+	}
 
 	httpServerConfig := smqserver.Config{Port: defSvcHTTPPort}
 	if err := env.ParseWithOptions(&httpServerConfig, env.Options{Prefix: envPrefixHTTP}); err != nil {
@@ -148,7 +152,7 @@ func main() {
 		manager.RegisterManagerServiceServer(srv, managergrpc.NewServer(svc))
 	}
 
-	gs := grpcserver.NewServer(ctx, cancel, svcName, managerGRPCConfig, registerManagerServiceServer, logger)
+	gs := grpcserver.NewMTLSServer(ctx, cancel, svcName, managerGRPCConfig, registerManagerServiceServer, logger)
 
 	hs := httpserver.NewServer(ctx, cancel, svcName, httpServerConfig, http.MakeHandler(chi.NewMux(), svcName, cfg.InstanceID), logger)
 
@@ -188,6 +192,26 @@ func warnIfPublicWithoutTLS(logger *slog.Logger, name string, cfg smqserver.Conf
 	}
 
 	logger.Warn(fmt.Sprintf("%s is configured to listen on %q without TLS; bind to localhost or configure mTLS before exposing it", name, cfg.Host))
+}
+
+// VM lifecycle RPCs require an authenticated operator, including on loopback.
+// The runtime gRPC server requires and verifies client certificates whenever
+// ClientCAFile contains a valid CA pool.
+func validateManagerGRPCConfig(cfg smqserver.Config) error {
+	if cfg.CertFile == "" || cfg.KeyFile == "" || cfg.ClientCAFile == "" {
+		return fmt.Errorf("Manager gRPC requires SERVER_CERT, SERVER_KEY, and CLIENT_CA_CERTS for mTLS, including on loopback")
+	}
+	if _, err := smqserver.LoadX509KeyPair(cfg.CertFile, cfg.KeyFile); err != nil {
+		return fmt.Errorf("invalid Manager gRPC server certificate: %w", err)
+	}
+	clientCA, err := smqserver.LoadRootCACerts(cfg.ClientCAFile)
+	if err != nil {
+		return fmt.Errorf("invalid Manager gRPC client CA: %w", err)
+	}
+	if clientCA == nil {
+		return fmt.Errorf("Manager gRPC requires a nonempty client CA pool for mTLS")
+	}
+	return nil
 }
 
 func isLocalBindHost(host string) bool {

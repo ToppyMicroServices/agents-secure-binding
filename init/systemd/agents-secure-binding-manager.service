@@ -3,6 +3,8 @@ Description=Agents Secure Binding Manager
 After=network.target
 
 [Service]
+StateDirectory=agents-secure-binding-manager
+StateDirectoryMode=0700
 ExecStart=agents-secure-binding-manager
 Restart=always
 RestartSec=5s

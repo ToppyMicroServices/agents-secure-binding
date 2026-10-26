@@ -32,12 +32,13 @@ import (
 )
 
 type httpFixture struct {
-	f           *fixture
-	handler     http.Handler
-	server      *httptest.Server
-	client      *http.Client
-	clientTLS   *tls.Config
-	certificate tls.Certificate
+	f                *fixture
+	handler          http.Handler
+	server           *httptest.Server
+	client           *http.Client
+	clientTLS        *tls.Config
+	certificate      tls.Certificate
+	issueCertificate func(int64, x509.ExtKeyUsage) tls.Certificate
 }
 
 func newHTTPFixture(t *testing.T, configure func(*fixture, *HTTPConfig)) *httpFixture {
@@ -90,7 +91,7 @@ func newHTTPFixture(t *testing.T, configure func(*fixture, *HTTPConfig)) *httpFi
 	server.StartTLS()
 	t.Cleanup(server.Close)
 	clientTLS := &tls.Config{MinVersion: tls.VersionTLS13, MaxVersion: tls.VersionTLS13, RootCAs: pool, ServerName: "localhost", Certificates: []tls.Certificate{clientCert}}
-	h := &httpFixture{f: f, handler: handler, server: server, clientTLS: clientTLS, certificate: clientCert}
+	h := &httpFixture{f: f, handler: handler, server: server, clientTLS: clientTLS, certificate: clientCert, issueCertificate: makeCertificate}
 	h.client = h.newClient(t)
 	return h
 }
@@ -149,7 +150,8 @@ func (h *httpFixture) challenge(t *testing.T, client *http.Client, mode string) 
 		t.Fatal(err)
 	}
 	exporter := sha256.Sum256(exported)
-	spki := sha256.Sum256(h.certificate.Leaf.RawSubjectPublicKeyInfo)
+	transport := client.Transport.(*http.Transport)
+	spki := sha256.Sum256(transport.TLSClientConfig.Certificates[0].Leaf.RawSubjectPublicKeyInfo)
 	if challenge.Binding.TLSExporterSHA256 != "sha256:"+hex.EncodeToString(exporter[:]) || challenge.Binding.AcceptedEndpointSPKISHA256 != "sha256:"+hex.EncodeToString(spki[:]) {
 		t.Fatal("challenge did not bind the actual TLS exporter and client SPKI")
 	}
@@ -405,5 +407,40 @@ func TestHTTPConfigurationBounds(t *testing.T) {
 		if _, err := NewHTTPHandler(config); err == nil {
 			t.Fatal("unbounded configuration accepted")
 		}
+	}
+}
+
+func TestHTTPChallengeQuotaSeparatesClientKeys(t *testing.T) {
+	h := newHTTPFixture(t, func(_ *fixture, c *HTTPConfig) { c.MaxChallenges = 4 })
+	first := h.challenge(t, h.client, "authorize")
+	h.challenge(t, h.client, "authorize")
+	input := HTTPChallengeRequest{Mode: "authorize", Operation: h.f.op}
+	for _, client := range []*http.Client{h.client, h.newClient(t)} {
+		status, _, _ := h.post(t, client, "/challenge", input)
+		if status != http.StatusServiceUnavailable {
+			t.Fatalf("same key bypassed quota: %d", status)
+		}
+	}
+	otherTLS := h.clientTLS.Clone()
+	otherTLS.Certificates = []tls.Certificate{h.issueCertificate(4, x509.ExtKeyUsageClientAuth)}
+	transport := &http.Transport{TLSClientConfig: otherTLS, MaxConnsPerHost: 1}
+	t.Cleanup(transport.CloseIdleConnections)
+	other := &http.Client{Transport: transport, Timeout: 10 * time.Second}
+	h.challenge(t, other, "authorize")
+	status, _, _ := h.post(t, h.client, "/authorize", HTTPAuthorizeRequest{
+		ChallengeID: first.ChallengeID, Operation: h.f.op, Proof: h.proof(t, first, nil), Candidate: h.f.solution,
+	})
+	if status != http.StatusOK {
+		t.Fatalf("legitimate consumption failed: %d", status)
+	}
+	h.challenge(t, h.client, "authorize")
+	h.f.now = h.f.now.Add(31 * time.Second)
+	h.challenge(t, h.client, "authorize")
+	h.challenge(t, other, "authorize")
+	registry := h.handler.(*httpHandler)
+	registry.mu.Lock()
+	defer registry.mu.Unlock()
+	if len(registry.challenges) != 2 || len(registry.identities) != 2 {
+		t.Fatalf("expired quota was retained: entries=%d identities=%d", len(registry.challenges), len(registry.identities))
 	}
 }

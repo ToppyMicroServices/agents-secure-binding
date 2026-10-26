@@ -14,13 +14,17 @@ import (
 	"net/url"
 	"os"
 	"sync"
+	"time"
 
 	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/atls"
 	"golang.org/x/net/http2"
-	"golang.org/x/net/http2/h2c"
 )
 
-const unix = "unix"
+const (
+	unix        = "unix"
+	httpScheme  = "http"
+	httpsScheme = "https"
+)
 
 var ErrPlaintextIngressDisabled = errors.New("plaintext ingress proxy is disabled")
 
@@ -83,6 +87,10 @@ func (p *proxyServer) Start(cfg ProxyConfig, ctx ProxyContext) error {
 	}
 
 	addr := net.JoinHostPort("0.0.0.0", cfg.Port)
+	transport, err := backendTransport(p.backendURL)
+	if err != nil {
+		return err
+	}
 
 	// Configure Reverse Proxy
 	var rp *httputil.ReverseProxy
@@ -92,7 +100,7 @@ func (p *proxyServer) Start(cfg ProxyConfig, ctx ProxyContext) error {
 		// For Unix socket backend, we need to manually configure the reverse proxy
 		// because NewSingleHostReverseProxy doesn't support unix:// scheme
 		targetURL := &url.URL{
-			Scheme: "http",
+			Scheme: httpScheme,
 			Host:   unix,
 		}
 		rp = httputil.NewSingleHostReverseProxy(targetURL)
@@ -102,43 +110,30 @@ func (p *proxyServer) Start(cfg ProxyConfig, ctx ProxyContext) error {
 		rp.Director = func(req *http.Request) {
 			originalDirector(req)
 			// Set the URL to point to the backend service
-			req.URL.Scheme = "http"
+			req.URL.Scheme = httpScheme
 			req.URL.Host = unix
-		}
-
-		// Configure Transport for Unix socket with HTTP/2
-		rp.Transport = &http2.Transport{
-			AllowHTTP: true,
-			DialTLSContext: func(ctx context.Context, network, addr string, cfg *tls.Config) (net.Conn, error) {
-				var d net.Dialer
-				// Use Unix socket path from URL
-				return d.DialContext(ctx, unix, p.backendURL.Path)
-			},
 		}
 	} else {
 		// TCP backend
 		rp = httputil.NewSingleHostReverseProxy(p.backendURL)
-		rp.Transport = &http2.Transport{
-			AllowHTTP: true,
-			DialTLSContext: func(ctx context.Context, network, addr string, cfg *tls.Config) (net.Conn, error) {
-				var d net.Dialer
-				return d.DialContext(ctx, network, addr)
-			},
-		}
 	}
+	rp.Transport = transport
 
-	// Wrap handler with h2c for HTTP/2 cleartext support (required for gRPC without TLS)
-	h2cHandler := h2c.NewHandler(rp, &http2.Server{})
-
+	protocols := new(http.Protocols)
+	protocols.SetHTTP1(true)
+	protocols.SetHTTP2(true)
+	protocols.SetUnencryptedHTTP2(true)
 	p.httpServer = &http.Server{
-		Addr:    addr,
-		Handler: h2cHandler,
+		Addr:              addr,
+		Handler:           rp,
+		Protocols:         protocols,
+		ReadHeaderTimeout: regularTLSHandshakeTimeout,
+		IdleTimeout:       time.Minute,
 	}
 
 	// Configure TLS
 	var tlsConfig *tls.Config
 	var listener net.Listener
-	var err error
 	contextDesc := fmt.Sprintf("context %s", ctx.ID)
 	if ctx.Name != "" {
 		contextDesc = fmt.Sprintf("%s (%s)", ctx.Name, ctx.ID)
@@ -181,7 +176,6 @@ func (p *proxyServer) Start(cfg ProxyConfig, ctx ProxyContext) error {
 		}
 		tlsConfig = tlsSetup.Config
 		tlsConfig.NextProtos = []string{"h2", "http/1.1"}
-		p.httpServer.ReadHeaderTimeout = regularTLSHandshakeTimeout
 
 		if tlsSetup.MTLS {
 			p.logger.Info(fmt.Sprintf("ingress-proxy listening at %s with mTLS for %s", addr, contextDesc))
@@ -223,6 +217,28 @@ func (p *proxyServer) Start(cfg ProxyConfig, ctx ProxyContext) error {
 	return nil
 }
 
+func backendTransport(backend *url.URL) (*http2.Transport, error) {
+	if backend == nil {
+		return nil, fmt.Errorf("missing ingress backend URL")
+	}
+	transport := &http2.Transport{}
+	switch backend.Scheme {
+	case httpsScheme:
+		// The default dialer performs TLS and verifies the backend certificate.
+	case httpScheme, unix:
+		transport.AllowHTTP = true
+		transport.DialTLSContext = func(ctx context.Context, network, addr string, _ *tls.Config) (net.Conn, error) {
+			if backend.Scheme == unix {
+				network, addr = unix, backend.Path
+			}
+			return (&net.Dialer{}).DialContext(ctx, network, addr)
+		}
+	default:
+		return nil, fmt.Errorf("unsupported ingress backend scheme %q", backend.Scheme)
+	}
+	return transport, nil
+}
+
 func (p *proxyServer) attestedListener(addr string, tlsConfig *tls.Config, identity tls.Certificate) (net.Listener, error) {
 	network := "tcp"
 	address := addr
@@ -240,7 +256,25 @@ func (p *proxyServer) attestedListener(addr string, tlsConfig *tls.Config, ident
 	if provider, ok := p.certProvider.(atls.ContextCertificateProvider); ok {
 		serverConfig.BuildLeafExtensionsContext = provider.BuildLeafExtensionsContext
 	}
-	return atls.Listen(network, address, serverConfig)
+	listener, err := atls.Listen(network, address, serverConfig)
+	if err != nil {
+		return nil, err
+	}
+	return &attestedHTTPListener{Listener: listener}, nil
+}
+
+// Expose the authenticated TLS connection so net/http can apply its native
+// ALPN and HTTP/2 preface deadlines. Accept completes aTLS authentication first.
+type attestedHTTPListener struct {
+	*atls.Listener
+}
+
+func (l *attestedHTTPListener) Accept() (net.Conn, error) {
+	connection, err := l.Listener.Accept()
+	if err != nil {
+		return nil, err
+	}
+	return connection.(*atls.Conn).Conn, nil
 }
 
 // Stop stops the proxy server.
