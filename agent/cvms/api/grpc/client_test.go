@@ -4,6 +4,7 @@ package grpc
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -62,7 +63,7 @@ func TestManagerClient_Process(t *testing.T) {
 		errorMsg    string
 	}{
 		{
-			name: "Stop computation",
+			name: "Reject stop without computation ID",
 			setupMocks: func(mockStream *mockStream, mockSvc *mocks.Service, mockServerSvc *servermocks.AgentServer, grpcClient *clientmocks.Client) {
 				mockStream.On("Recv").Return(&cvms.ServerStreamMessage{
 					Message: &cvms.ServerStreamMessage_StopComputation{
@@ -70,8 +71,6 @@ func TestManagerClient_Process(t *testing.T) {
 					},
 				}, nil)
 				mockStream.On("Send", mock.Anything).Return(nil)
-				mockSvc.On("StopComputation", mock.Anything).Return(nil)
-				mockServerSvc.On("Stop").Return(nil)
 			},
 			expectError: true,
 			errorMsg:    "context deadline exceeded",
@@ -193,14 +192,14 @@ func TestManagerClient_handleRunReqChunks(t *testing.T) {
 
 	chunk1 := &cvms.ServerStreamMessage_RunReqChunks{
 		RunReqChunks: &cvms.RunReqChunks{
-			Id:     "chunk-1",
+			Id:     "test-id",
 			Data:   runReqBytes[:len(runReqBytes)/2],
 			IsLast: false,
 		},
 	}
 	chunk2 := &cvms.ServerStreamMessage_RunReqChunks{
 		RunReqChunks: &cvms.RunReqChunks{
-			Id:     "chunk-1",
+			Id:     "test-id",
 			Data:   runReqBytes[len(runReqBytes)/2:],
 			IsLast: true,
 		},
@@ -226,6 +225,115 @@ func TestManagerClient_handleRunReqChunks(t *testing.T) {
 	runRes, ok := msg.Message.(*cvms.ClientStreamMessage_RunRes)
 	assert.True(t, ok)
 	assert.Equal(t, "test-id", runRes.RunRes.ComputationId)
+}
+
+func TestRunReqChunksRejectsMismatchedID(t *testing.T) {
+	svc := new(mocks.Service)
+	serverSvc := new(servermocks.AgentServer)
+	queue := make(chan *cvms.ClientStreamMessage, 1)
+	client, err := NewClient(new(mockStream), svc, queue, mglog.NewMock(), serverSvc, nil, t.TempDir(),
+		func(context.Context) (pkggrpc.Client, cvms.Service_ProcessClient, error) { return nil, nil, nil }, new(clientmocks.Client))
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := proto.Marshal(&cvms.ComputationRunReq{Id: "run-B"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = client.handleRunReqChunks(context.Background(), &cvms.ServerStreamMessage_RunReqChunks{
+		RunReqChunks: &cvms.RunReqChunks{Id: "run-A", Data: data, IsLast: true},
+	})
+	if err == nil || !errors.Is(err, errCorruptedManifest) {
+		t.Fatalf("chunk error = %v, want corrupted manifest", err)
+	}
+	svc.AssertNotCalled(t, "State")
+	svc.AssertNotCalled(t, "InitComputation", mock.Anything, mock.Anything)
+	serverSvc.AssertNotCalled(t, "Start", mock.Anything, mock.Anything)
+	if len(queue) != 0 {
+		t.Fatal("mismatched run request was accepted")
+	}
+}
+
+func TestRunMessageCompletesBeforeFollowingStop(t *testing.T) {
+	svc := new(mocks.Service)
+	serverSvc := new(servermocks.AgentServer)
+	queue := make(chan *cvms.ClientStreamMessage, 2)
+	client, err := NewClient(new(mockStream), svc, queue, mglog.NewMock(), serverSvc, nil, t.TempDir(),
+		func(context.Context) (pkggrpc.Client, cvms.Service_ProcessClient, error) { return nil, nil, nil }, new(clientmocks.Client))
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := proto.Marshal(&cvms.ComputationRunReq{Id: "run-A"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	startEntered := make(chan struct{})
+	releaseStart := make(chan struct{})
+	defer func() {
+		select {
+		case <-releaseStart:
+		default:
+			close(releaseStart)
+		}
+	}()
+	svc.On("State").Return("ReceivingManifest").Once()
+	svc.On("InitComputation", mock.Anything, mock.Anything).Return(nil).Once()
+	serverSvc.On("Start", mock.Anything, mock.Anything).Run(func(mock.Arguments) {
+		close(startEntered)
+		<-releaseStart
+	}).Return(nil).Once()
+	svc.On("StopComputation", mock.Anything).Return(nil).Once()
+	serverSvc.On("Stop").Return(nil).Once()
+
+	runReturned := make(chan error, 1)
+	go func() {
+		runReturned <- client.processIncomingMessage(context.Background(), &cvms.ServerStreamMessage{
+			Message: &cvms.ServerStreamMessage_RunReqChunks{
+				RunReqChunks: &cvms.RunReqChunks{Id: "run-A", Data: data, IsLast: true},
+			},
+		})
+	}()
+	select {
+	case <-startEntered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Agent server did not start")
+	}
+	select {
+	case err := <-runReturned:
+		t.Fatalf("run message returned before startup completed: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(releaseStart)
+	select {
+	case err := <-runReturned:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("run message did not finish")
+	}
+	if err := client.processIncomingMessage(context.Background(), &cvms.ServerStreamMessage{
+		Message: &cvms.ServerStreamMessage_StopComputation{
+			StopComputation: &cvms.StopComputation{ComputationId: "run-A"},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		select {
+		case <-queue:
+		case <-time.After(2 * time.Second):
+			t.Fatal("missing run or stop response")
+		}
+	}
+	client.runMu.Lock()
+	activeRunID := client.activeRunID
+	client.runMu.Unlock()
+	if activeRunID != "" {
+		t.Fatalf("active run = %q, want stopped", activeRunID)
+	}
+	svc.AssertExpectations(t)
+	serverSvc.AssertExpectations(t)
 }
 
 func TestExecuteRunSkipsIngressWhenAgentStartFails(t *testing.T) {
@@ -258,6 +366,60 @@ func TestExecuteRunSkipsIngressWhenAgentStartFails(t *testing.T) {
 	mockServerSvc.AssertExpectations(t)
 }
 
+func TestExecuteRunReportsInitializationFailure(t *testing.T) {
+	svc := new(mocks.Service)
+	serverSvc := new(servermocks.AgentServer)
+	queue := make(chan *cvms.ClientStreamMessage, 1)
+	client, err := NewClient(new(mockStream), svc, queue, mglog.NewMock(), serverSvc, nil, t.TempDir(),
+		func(context.Context) (pkggrpc.Client, cvms.Service_ProcessClient, error) { return nil, nil, nil }, new(clientmocks.Client))
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc.On("State").Return("ReceivingManifest").Once()
+	svc.On("InitComputation", mock.Anything, mock.Anything).Return(assert.AnError).Once()
+
+	client.executeRun(context.Background(), &cvms.ComputationRunReq{Id: "run-A"})
+	response := (<-queue).GetRunRes()
+	if response == nil || response.Error == "" {
+		t.Fatalf("run response = %+v, want initialization error", response)
+	}
+	if client.activeRunID != "" {
+		t.Fatalf("active run = %q, want none", client.activeRunID)
+	}
+	serverSvc.AssertNotCalled(t, "Start", mock.Anything, mock.Anything)
+}
+
+func TestExecuteRunReportsIngressStartFailure(t *testing.T) {
+	svc := new(mocks.Service)
+	serverSvc := new(servermocks.AgentServer)
+	proxy := new(mockIngressProxy)
+	queue := make(chan *cvms.ClientStreamMessage, 1)
+	client, err := NewClient(new(mockStream), svc, queue, mglog.NewMock(), serverSvc, proxy, t.TempDir(),
+		func(context.Context) (pkggrpc.Client, cvms.Service_ProcessClient, error) { return nil, nil, nil }, new(clientmocks.Client))
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc.On("State").Return("ReceivingManifest").Once()
+	svc.On("InitComputation", mock.Anything, mock.Anything).Return(nil).Once()
+	svc.On("StopComputation", mock.Anything).Return(nil).Once()
+	serverSvc.On("Start", mock.Anything, mock.Anything).Return(nil).Once()
+	serverSvc.On("Stop").Return(nil).Once()
+	proxy.On("Start", mock.Anything, mock.Anything).Return(assert.AnError).Once()
+
+	client.executeRun(context.Background(), &cvms.ComputationRunReq{Id: "run-A"})
+	response := (<-queue).GetRunRes()
+	if response == nil || response.Error == "" {
+		t.Fatalf("run response = %+v, want ingress startup error", response)
+	}
+	if client.activeRunID != "" {
+		t.Fatalf("active run = %q, want reset after failed ingress", client.activeRunID)
+	}
+	svc.AssertExpectations(t)
+	serverSvc.AssertExpectations(t)
+	proxy.AssertExpectations(t)
+	proxy.AssertNotCalled(t, "Stop")
+}
+
 func TestManagerClient_handleStopComputation(t *testing.T) {
 	mockStream := new(mockStream)
 	mockSvc := new(mocks.Service)
@@ -268,6 +430,7 @@ func TestManagerClient_handleStopComputation(t *testing.T) {
 
 	client, err := NewClient(mockStream, mockSvc, messageQueue, logger, mockServerSvc, nil, t.TempDir(), func(ctx context.Context) (pkggrpc.Client, cvms.Service_ProcessClient, error) { return nil, nil, nil }, grpcClient)
 	assert.NoError(t, err)
+	client.activeRunID = "test-comp-id"
 
 	stopReq := &cvms.ServerStreamMessage_StopComputation{
 		StopComputation: &cvms.StopComputation{
@@ -291,6 +454,152 @@ func TestManagerClient_handleStopComputation(t *testing.T) {
 	assert.True(t, ok)
 	assert.Equal(t, "test-comp-id", stopRes.StopComputationRes.ComputationId)
 	assert.Empty(t, stopRes.StopComputationRes.Message)
+}
+
+func TestStopComputationRejectsWrongRun(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		id   string
+	}{
+		{name: "stale run", id: "run-A"},
+		{name: "missing run", id: ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			svc := new(mocks.Service)
+			serverSvc := new(servermocks.AgentServer)
+			proxy := new(mockIngressProxy)
+			queue := make(chan *cvms.ClientStreamMessage, 1)
+			client, err := NewClient(new(mockStream), svc, queue, mglog.NewMock(), serverSvc, proxy, t.TempDir(),
+				func(context.Context) (pkggrpc.Client, cvms.Service_ProcessClient, error) { return nil, nil, nil }, new(clientmocks.Client))
+			if err != nil {
+				t.Fatal(err)
+			}
+			client.activeRunID = "run-B"
+
+			client.handleStopComputation(context.Background(), &cvms.ServerStreamMessage_StopComputation{
+				StopComputation: &cvms.StopComputation{ComputationId: tc.id},
+			})
+
+			response := (<-queue).GetStopComputationRes()
+			if response == nil || response.ComputationId != tc.id || response.Message == "" {
+				t.Fatalf("stop response = %+v, want rejection for %q", response, tc.id)
+			}
+			if client.activeRunID != "run-B" {
+				t.Fatalf("active run = %q, want run-B", client.activeRunID)
+			}
+			svc.AssertNotCalled(t, "StopComputation", mock.Anything)
+			serverSvc.AssertNotCalled(t, "Stop")
+			proxy.AssertNotCalled(t, "Stop")
+		})
+	}
+}
+
+func TestStopFailureBlocksNextRun(t *testing.T) {
+	svc := new(mocks.Service)
+	serverSvc := new(servermocks.AgentServer)
+	queue := make(chan *cvms.ClientStreamMessage, 1)
+	client, err := NewClient(new(mockStream), svc, queue, mglog.NewMock(), serverSvc, nil, t.TempDir(),
+		func(context.Context) (pkggrpc.Client, cvms.Service_ProcessClient, error) { return nil, nil, nil }, new(clientmocks.Client))
+	if err != nil {
+		t.Fatal(err)
+	}
+	client.activeRunID = "run-A"
+	svc.On("StopComputation", mock.Anything).Return(nil).Once()
+	serverSvc.On("Stop").Return(assert.AnError).Once()
+
+	client.handleStopComputation(context.Background(), &cvms.ServerStreamMessage_StopComputation{
+		StopComputation: &cvms.StopComputation{ComputationId: "run-A"},
+	})
+	response := (<-queue).GetStopComputationRes()
+	if response == nil || response.Message == "" {
+		t.Fatalf("stop response = %+v, want cleanup error", response)
+	}
+	client.executeRun(context.Background(), &cvms.ComputationRunReq{Id: "run-B"})
+	runResponse := (<-queue).GetRunRes()
+	if runResponse == nil || runResponse.Error == "" {
+		t.Fatalf("run response = %+v, want active-run rejection", runResponse)
+	}
+	if client.activeRunID != "run-A" {
+		t.Fatalf("active run = %q, want failed run-A retained", client.activeRunID)
+	}
+	svc.AssertNotCalled(t, "InitComputation", mock.Anything, mock.Anything)
+	serverSvc.AssertNotCalled(t, "Start", mock.Anything, mock.Anything)
+}
+
+func TestExecuteRunRequiresIDBeforeInitialization(t *testing.T) {
+	for _, runReq := range []*cvms.ComputationRunReq{nil, {Id: " "}} {
+		svc := new(mocks.Service)
+		serverSvc := new(servermocks.AgentServer)
+		queue := make(chan *cvms.ClientStreamMessage, 1)
+		client, err := NewClient(new(mockStream), svc, queue, mglog.NewMock(), serverSvc, nil, t.TempDir(),
+			func(context.Context) (pkggrpc.Client, cvms.Service_ProcessClient, error) { return nil, nil, nil }, new(clientmocks.Client))
+		if err != nil {
+			t.Fatal(err)
+		}
+		client.executeRun(context.Background(), runReq)
+		response := (<-queue).GetRunRes()
+		if response == nil || response.Error == "" {
+			t.Fatalf("run response = %+v, want missing-ID rejection", response)
+		}
+		svc.AssertNotCalled(t, "State")
+		svc.AssertNotCalled(t, "InitComputation", mock.Anything, mock.Anything)
+		serverSvc.AssertNotCalled(t, "Start", mock.Anything, mock.Anything)
+	}
+}
+
+func TestStopAndRunSerializeBeforeInitialization(t *testing.T) {
+	svc := new(mocks.Service)
+	serverSvc := new(servermocks.AgentServer)
+	queue := make(chan *cvms.ClientStreamMessage, 2)
+	client, err := NewClient(new(mockStream), svc, queue, mglog.NewMock(), serverSvc, nil, t.TempDir(),
+		func(context.Context) (pkggrpc.Client, cvms.Service_ProcessClient, error) { return nil, nil, nil }, new(clientmocks.Client))
+	if err != nil {
+		t.Fatal(err)
+	}
+	client.activeRunID = "run-A"
+
+	stopEntered := make(chan struct{})
+	releaseStop := make(chan struct{})
+	stateCalled := make(chan struct{}, 1)
+	svc.On("StopComputation", mock.Anything).Return(nil).Once()
+	serverSvc.On("Stop").Run(func(mock.Arguments) {
+		close(stopEntered)
+		<-releaseStop
+	}).Return(nil).Once()
+	svc.On("State").Run(func(mock.Arguments) { stateCalled <- struct{}{} }).Return("ReceivingManifest").Once()
+	svc.On("InitComputation", mock.Anything, mock.Anything).Return(nil).Once()
+	serverSvc.On("Start", mock.Anything, mock.Anything).Return(nil).Once()
+
+	go client.handleStopComputation(context.Background(), &cvms.ServerStreamMessage_StopComputation{
+		StopComputation: &cvms.StopComputation{ComputationId: "run-A"},
+	})
+	select {
+	case <-stopEntered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("stop did not reach Agent server")
+	}
+	go client.executeRun(context.Background(), &cvms.ComputationRunReq{Id: "run-B"})
+	select {
+	case <-stateCalled:
+		t.Fatal("new run checked service state before old Agent server stopped")
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(releaseStop)
+	for range 2 {
+		select {
+		case <-queue:
+		case <-time.After(2 * time.Second):
+			t.Fatal("missing stop or run response")
+		}
+	}
+	client.runMu.Lock()
+	activeRunID := client.activeRunID
+	client.runMu.Unlock()
+	if activeRunID != "run-B" {
+		t.Fatalf("active run = %q, want run-B", activeRunID)
+	}
+	svc.AssertExpectations(t)
+	serverSvc.AssertExpectations(t)
 }
 
 func TestManagerClient_timeoutRequest(t *testing.T) {
@@ -438,6 +747,7 @@ func TestManagerClient_handleStopComputationWithIngressProxy(t *testing.T) {
 
 	client, err := NewClient(mockStream, mockSvc, messageQueue, logger, mockServerSvc, mockIngressProxy, t.TempDir(), func(ctx context.Context) (pkggrpc.Client, cvms.Service_ProcessClient, error) { return nil, nil, nil }, grpcClient)
 	assert.NoError(t, err)
+	client.activeRunID = "test-comp-id"
 
 	stopReq := &cvms.ServerStreamMessage_StopComputation{
 		StopComputation: &cvms.StopComputation{
@@ -471,6 +781,7 @@ func TestManagerClient_handleStopComputationWithIngressProxyError(t *testing.T) 
 
 	client, err := NewClient(mockStream, mockSvc, messageQueue, logger, mockServerSvc, mockIngressProxy, t.TempDir(), func(ctx context.Context) (pkggrpc.Client, cvms.Service_ProcessClient, error) { return nil, nil, nil }, grpcClient)
 	assert.NoError(t, err)
+	client.activeRunID = "test-comp-id"
 
 	stopReq := &cvms.ServerStreamMessage_StopComputation{
 		StopComputation: &cvms.StopComputation{
@@ -600,7 +911,7 @@ func TestManagerClient_handleRunReqChunksWithRemoteSource(t *testing.T) {
 
 	chunk := &cvms.ServerStreamMessage_RunReqChunks{
 		RunReqChunks: &cvms.RunReqChunks{
-			Id:     "chunk-remote-1",
+			Id:     "test-id-remote",
 			Data:   runReqBytes,
 			IsLast: true,
 		},
@@ -664,7 +975,7 @@ func TestManagerClient_handleRunReqChunksAlreadyProcessing(t *testing.T) {
 
 	chunk := &cvms.ServerStreamMessage_RunReqChunks{
 		RunReqChunks: &cvms.RunReqChunks{
-			Id:     "chunk-processing-1",
+			Id:     "test-id-processing",
 			Data:   runReqBytes,
 			IsLast: true,
 		},
