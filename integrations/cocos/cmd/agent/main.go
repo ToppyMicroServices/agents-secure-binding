@@ -45,6 +45,7 @@ const (
 
 type config struct {
 	LogLevel                 string `env:"AGENT_LOG_LEVEL"              envDefault:"debug"`
+	CVMID                    string `env:"AGENT_CVM_ID"`
 	Vmpl                     int    `env:"AGENT_VMPL"                   envDefault:"2"`
 	AgentGrpcHost            string `env:"AGENT_GRPC_HOST"              envDefault:"0.0.0.0"`
 	AttestationPlatform      string `env:"ASB_ATTESTATION_PLATFORM"     envDefault:"auto"`
@@ -231,7 +232,7 @@ func main() {
 		return
 	}
 
-	mc, err := cvmsapi.NewClient(pc, svc, cvmsQueue, logger, server.NewServer(logger, svc, cfg.AgentGrpcHost), ingressProxy, storageDir, reconnectFn, cvmGRPCClient)
+	mc, err := cvmsapi.NewClient(pc, svc, cvmsQueue, logger, server.NewServer(logger, svc, cfg.AgentGrpcHost, cfg.CVMID, storageDir), ingressProxy, storageDir, reconnectFn, cvmGRPCClient)
 	if err != nil {
 		logger.Error(err.Error())
 		exitCode = 1

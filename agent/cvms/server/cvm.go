@@ -4,10 +4,15 @@
 package server
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
 	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 
 	"github.com/ToppyMicroServices/agents-secure-binding/v2/agent"
@@ -27,7 +32,11 @@ const (
 	defSvcGRPCSocket = "/run/agents-secure-binding/agent.sock"
 )
 
-var ErrPlaintextPublicAgentGRPC = fmt.Errorf("agent grpc: plaintext listener requires unix socket or loopback")
+var (
+	ErrPlaintextPublicAgentGRPC = fmt.Errorf("agent grpc: plaintext listener requires unix socket or loopback")
+	ErrMissingRunIDStore        = errors.New("agent grpc: missing persistent run ID store")
+	ErrRunIDReused              = errors.New("agent grpc: computation run ID already used by this VM")
+)
 
 type AgentServer interface {
 	Start(cfg agent.AgentConfig, cmp agent.Computation) error
@@ -35,26 +44,33 @@ type AgentServer interface {
 }
 
 type agentServer struct {
-	mu     sync.Mutex
-	gs     *grpc.Server
-	logger *slog.Logger
-	svc    agent.Service
-	host   string
+	mu         sync.Mutex
+	gs         *grpc.Server
+	logger     *slog.Logger
+	svc        agent.Service
+	host       string
+	instanceID string
+	storageDir string
 }
 
-func NewServer(logger *slog.Logger, svc agent.Service, host string) AgentServer {
+func NewServer(logger *slog.Logger, svc agent.Service, host, instanceID, storageDir string) AgentServer {
 	return &agentServer{
-		logger: logger,
-		svc:    svc,
-		host:   host,
+		logger:     logger,
+		svc:        svc,
+		host:       host,
+		instanceID: instanceID,
+		storageDir: storageDir,
 	}
 }
 
 func (as *agentServer) Start(cfg agent.AgentConfig, cmp agent.Computation) error {
-	authSvc, err := auth.New(cmp)
+	authSvc, err := auth.New(cmp, as.instanceID)
 	if err != nil {
 		as.logger.WithGroup(cmp.ID).Error(fmt.Sprintf("failed to create auth service %s", err.Error()))
 		return err
+	}
+	if strings.TrimSpace(as.storageDir) == "" {
+		return ErrMissingRunIDStore
 	}
 
 	grpcServerOptions := []grpc.ServerOption{
@@ -69,10 +85,7 @@ func (as *agentServer) Start(cfg agent.AgentConfig, cmp agent.Computation) error
 	// Internal Unix socket is pure plaintext HTTP/2; Ingress Proxy handles external aTLS termination
 	grpcServerOptions = append(grpcServerOptions, grpc.Creds(insecure.NewCredentials()))
 
-	as.mu.Lock()
-	as.gs = grpc.NewServer(grpcServerOptions...)
-	gs := as.gs
-	as.mu.Unlock()
+	gs := grpc.NewServer(grpcServerOptions...)
 
 	reflection.Register(gs)
 	agent.RegisterAgentServiceServer(gs, agentgrpc.NewServer(as.svc))
@@ -85,24 +98,36 @@ func (as *agentServer) Start(cfg agent.AgentConfig, cmp agent.Computation) error
 	if socketPath == "" || socketPath == "0.0.0.0" {
 		socketPath = defSvcGRPCSocket
 	}
-
-	var listener net.Listener
-	if socketPath[0] == '/' || socketPath[0] == '.' {
-		// Remove existing socket file if it exists
-		_ = os.Remove(socketPath)
-		listener, err = net.Listen("unix", socketPath)
-	} else {
+	isUnix := socketPath[0] == '/' || socketPath[0] == '.'
+	if !isUnix {
 		host, _, splitErr := net.SplitHostPort(socketPath)
 		if splitErr != nil || !netguard.PlaintextBindAllowed(host) {
 			return fmt.Errorf("%w: %s", ErrPlaintextPublicAgentGRPC, socketPath)
 		}
+	}
+	if err := as.markRunID(cmp.ID); err != nil {
+		return err
+	}
+
+	var listener net.Listener
+	if isUnix {
+		// Remove existing socket file if it exists
+		_ = os.Remove(socketPath)
+		listener, err = net.Listen("unix", socketPath)
+	} else {
 		listener, err = net.Listen("tcp", socketPath)
 	}
 
 	if err != nil {
+		if removeErr := as.clearReservedRunID(cmp.ID); removeErr != nil {
+			as.logger.Error("failed to clear run ID after listener failure", "error", removeErr)
+		}
 		as.logger.Error(fmt.Sprintf("failed to listen on %s: %s", socketPath, err))
 		return err
 	}
+	as.mu.Lock()
+	as.gs = gs
+	as.mu.Unlock()
 
 	as.logger.Info(fmt.Sprintf("agent service gRPC server listening at %s without TLS", socketPath))
 
@@ -113,6 +138,51 @@ func (as *agentServer) Start(cfg agent.AgentConfig, cmp agent.Computation) error
 		}
 	}()
 
+	return nil
+}
+
+// markRunID persists the VM/run pair before accepting RPCs. A process restart
+// cannot reset this replay boundary while the VM keeps its identity.
+func (as *agentServer) markRunID(runID string) error {
+	path := as.runIDPath(runID)
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if errors.Is(err, os.ErrExist) {
+		return ErrRunIDReused
+	}
+	if err != nil {
+		return fmt.Errorf("agent grpc: record run ID: %w", err)
+	}
+	if err := file.Sync(); err != nil {
+		_ = file.Close()
+		return fmt.Errorf("agent grpc: sync run ID: %w", err)
+	}
+	if err := file.Close(); err != nil {
+		return fmt.Errorf("agent grpc: close run ID: %w", err)
+	}
+	return as.syncRunIDStore()
+}
+
+func (as *agentServer) runIDPath(runID string) string {
+	sum := sha256.Sum256([]byte(fmt.Sprintf("%d:%s%d:%s", len(as.instanceID), as.instanceID, len(runID), runID)))
+	return filepath.Join(as.storageDir, "run-id-"+hex.EncodeToString(sum[:]))
+}
+
+func (as *agentServer) clearReservedRunID(runID string) error {
+	if err := os.Remove(as.runIDPath(runID)); err != nil {
+		return err
+	}
+	return as.syncRunIDStore()
+}
+
+func (as *agentServer) syncRunIDStore() error {
+	dir, err := os.Open(as.storageDir)
+	if err != nil {
+		return fmt.Errorf("agent grpc: open run ID store: %w", err)
+	}
+	defer dir.Close()
+	if err := dir.Sync(); err != nil {
+		return fmt.Errorf("agent grpc: sync run ID store: %w", err)
+	}
 	return nil
 }
 

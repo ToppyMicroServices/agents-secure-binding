@@ -9,13 +9,15 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/policydecision"
 )
 
 func TestHumanDecisionKindsHaveSeparateAuthenticatedBindings(t *testing.T) {
 	digests := map[string]string{}
 	for _, kind := range []string{KindApprove, KindDecline, KindNotApplicable, KindUndetermined} {
 		command := Command{CommandID: "decision", Kind: kind, OperationID: "proposal", ProposalDigest: "sha256:" + strings.Repeat("a", 64)}
-		if err := command.Validate(); err != nil || !command.Mutation() || !ActorAllowed(ActorGateway, kind) || ActorAllowed(ActorAgent, kind) {
+		if err := command.Validate(); err != nil || !command.Mutation() || ActorDecision(ActorGateway, kind) != policydecision.Permit || ActorDecision(ActorAgent, kind) != policydecision.Deny {
 			t.Fatalf("invalid decision authorization for %s: %v", kind, err)
 		}
 		digest, err := CommandDigest(command)
@@ -29,9 +31,49 @@ func TestHumanDecisionKindsHaveSeparateAuthenticatedBindings(t *testing.T) {
 	}
 	for _, kind := range []string{"", "ALLOW", "UNKNOWN", "OUTCOME_UNKNOWN", "INDETERMINATE", "undetermined"} {
 		command := Command{CommandID: "decision", Kind: kind, OperationID: "proposal", ProposalDigest: "sha256:" + strings.Repeat("a", 64)}
-		if !errors.Is(command.Validate(), ErrInvalid) || command.Mutation() || ActorAllowed(ActorGateway, kind) {
+		if !errors.Is(command.Validate(), ErrInvalid) || command.Mutation() || ActorDecision(ActorGateway, kind) == policydecision.Permit {
 			t.Fatalf("unknown kind %q was treated as a Human decision", kind)
 		}
+	}
+}
+
+func TestActorDecisionFourOutcomes(t *testing.T) {
+	for _, test := range []struct {
+		name, actor, kind string
+		want              policydecision.Outcome
+	}{
+		{"allowed Human decision", ActorGateway, KindApprove, policydecision.Permit},
+		{"wrong actor", ActorAgent, KindApprove, policydecision.Deny},
+		{"missing actor", "", KindApprove, policydecision.Indeterminate},
+		{"missing command kind", ActorGateway, "", policydecision.Indeterminate},
+		{"outside actor scope", "unregistered:visitor", KindApprove, policydecision.NotApplicable},
+		{"outside command scope", ActorGateway, "UNKNOWN", policydecision.NotApplicable},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if got := ActorDecision(test.actor, test.kind); got != test.want {
+				t.Fatalf("ActorDecision(%q, %q) = %q, want %q", test.actor, test.kind, got, test.want)
+			}
+		})
+	}
+}
+
+func TestNonPermitActorDecisionsDoNotConsumeProofOrChangeSetting(t *testing.T) {
+	for _, test := range []struct {
+		name, actor string
+	}{
+		{"denied actor", ActorGateway},
+		{"missing actor", ""},
+		{"outside actor scope", "unregistered:visitor"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			store := openTestStore(t, filepath.Join(t.TempDir(), "state.sqlite"))
+			proposal := testProposal("policy-outcome", true, 0)
+			if _, err := store.Execute(t.Context(), proposal, testStoreAuth(test.actor, "proof")); !errors.Is(err, ErrUnauthorized) {
+				t.Fatalf("non-Permit actor authorization error = %v", err)
+			}
+			_, accepted := executeStore(t, store, proposal, ActorAgent, "proof")
+			requireSetting(t, accepted, false, 0)
+		})
 	}
 }
 

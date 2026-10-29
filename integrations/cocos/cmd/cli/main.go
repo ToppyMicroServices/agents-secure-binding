@@ -32,6 +32,8 @@ const (
 type config struct {
 	LogLevel                          string `env:"AGENT_LOG_LEVEL" envDefault:"info"`
 	IgvmBinaryPath                    string `env:"IGVM_BINARY_PATH" envDefault:"./build/igvmmeasure"`
+	InstanceID                        string `env:"AGENT_CVM_ID"`
+	ComputationID                     string `env:"AGENT_COMPUTATION_ID"`
 	AgentAttestationModule            string `env:"AGENT_GRPC_ATTESTATION_MODULE" envDefault:""`
 	AgentAttestationPlatformPolicy    string `env:"AGENT_GRPC_ATTESTATION_PLATFORM_POLICY" envDefault:""`
 	AgentAttestationEATPublicKey      string `env:"AGENT_GRPC_ATTESTATION_EAT_PUBLIC_KEY" envDefault:""`
@@ -137,7 +139,7 @@ func run() int {
 		return 1
 	}
 
-	cliSVC := cli.New(agentGRPCConfig, managerGRPCConfig, measurement)
+	cliSVC := cli.New(agentGRPCConfig, managerGRPCConfig, measurement, cfg.InstanceID, cfg.ComputationID)
 
 	if err := cliSVC.InitializeAgentSDK(rootCmd); err == nil {
 		defer cliSVC.Close()

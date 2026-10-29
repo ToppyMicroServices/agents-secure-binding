@@ -31,6 +31,8 @@ const (
 type config struct {
 	LogLevel       string `env:"AGENT_LOG_LEVEL" envDefault:"info"`
 	IgvmBinaryPath string `env:"IGVM_BINARY_PATH" envDefault:"./build/igvmmeasure"`
+	InstanceID     string `env:"AGENT_CVM_ID"`
+	ComputationID  string `env:"AGENT_COMPUTATION_ID"`
 }
 
 func main() {
@@ -126,7 +128,7 @@ func run() int {
 		return 1
 	}
 
-	cliSVC := cli.New(agentGRPCConfig, managerGRPCConfig, measurement)
+	cliSVC := cli.New(agentGRPCConfig, managerGRPCConfig, measurement, cfg.InstanceID, cfg.ComputationID)
 
 	defer cliSVC.Close()
 

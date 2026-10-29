@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/atls/identitypolicy"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/policydecision"
 	_ "modernc.org/sqlite"
 )
 
@@ -205,7 +206,7 @@ func (s *Store) Execute(ctx context.Context, command Command, authenticate Authe
 	if err != nil {
 		return nil, err
 	}
-	if replay.calls != 1 || !replay.marked || !ActorAllowed(identity.Agent, command.Kind) {
+	if replay.calls != 1 || !replay.marked || ActorDecision(identity.Agent, command.Kind) != policydecision.Permit {
 		return nil, ErrUnauthorized
 	}
 	var response []byte

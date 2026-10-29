@@ -15,6 +15,7 @@ import (
 	"testing"
 
 	"github.com/ToppyMicroServices/agents-secure-binding/v2/agent"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/agent/auth"
 	"github.com/ToppyMicroServices/agents-secure-binding/v2/internal/errors"
 	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/attestation/vtpm"
 	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/sdk"
@@ -34,6 +35,22 @@ var (
 	errInappropriateIoctl = errors.New("failed to get terminal width: inappropriate ioctl for device")
 )
 
+func TestNewAgentSDKRequiresComputationID(t *testing.T) {
+	for _, id := range []string{"", " \t"} {
+		got, err := sdk.NewAgentSDK(nil, "test-vm", id)
+		require.ErrorIs(t, err, auth.ErrMissingComputationID)
+		require.Nil(t, got)
+	}
+}
+
+func TestNewAgentSDKRequiresInstanceID(t *testing.T) {
+	for _, id := range []string{"", " \t"} {
+		got, err := sdk.NewAgentSDK(nil, id, "test-computation")
+		require.ErrorIs(t, err, auth.ErrMissingInstanceID)
+		require.Nil(t, got)
+	}
+}
+
 func TestAlgo(t *testing.T) {
 	conn, err := grpc.NewClient("passthrough://bufnet", grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithContextDialer(bufDialer))
 	if err != nil {
@@ -43,7 +60,8 @@ func TestAlgo(t *testing.T) {
 
 	client := agent.NewAgentServiceClient(conn)
 
-	sdk := sdk.NewAgentSDK(client)
+	sdk, err := sdk.NewAgentSDK(client, "test-vm", "test-computation")
+	require.NoError(t, err)
 	algo, err := os.ReadFile(algoPath)
 	require.NoError(t, err)
 
@@ -154,7 +172,8 @@ func TestData(t *testing.T) {
 
 	client := agent.NewAgentServiceClient(conn)
 
-	sdk := sdk.NewAgentSDK(client)
+	sdk, err := sdk.NewAgentSDK(client, "test-vm", "test-computation")
+	require.NoError(t, err)
 
 	data, err := os.ReadFile(dataPath)
 	require.NoError(t, err)
@@ -263,7 +282,8 @@ func TestResult(t *testing.T) {
 
 	client := agent.NewAgentServiceClient(conn)
 
-	sdk := sdk.NewAgentSDK(client)
+	sdk, err := sdk.NewAgentSDK(client, "test-vm", "test-computation")
+	require.NoError(t, err)
 
 	resultConsumerKey, _ := generateKeys(t, "ecdsa")
 	resultConsumer1Key, _ := generateKeys(t, "ed25519")
@@ -379,7 +399,8 @@ func TestAttestation(t *testing.T) {
 
 	client := agent.NewAgentServiceClient(conn)
 
-	sdk := sdk.NewAgentSDK(client)
+	sdk, err := sdk.NewAgentSDK(client, "test-vm", "test-computation")
+	require.NoError(t, err)
 
 	_, err = rand.Read(reportData)
 	require.NoError(t, err)
@@ -490,7 +511,8 @@ func TestAttestationToken(t *testing.T) {
 
 	client := agent.NewAgentServiceClient(conn)
 
-	sdk := sdk.NewAgentSDK(client)
+	sdk, err := sdk.NewAgentSDK(client, "test-vm", "test-computation")
+	require.NoError(t, err)
 
 	_, err = rand.Read(reportData)
 	require.NoError(t, err)
@@ -566,7 +588,8 @@ func TestIMAMeasurements(t *testing.T) {
 
 	client := agent.NewAgentServiceClient(conn)
 
-	sdk := sdk.NewAgentSDK(client)
+	sdk, err := sdk.NewAgentSDK(client, "test-vm", "test-computation")
+	require.NoError(t, err)
 
 	response := &agent.IMAMeasurementsResponse{
 		File: []byte{

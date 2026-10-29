@@ -14,6 +14,7 @@ import (
 	"encoding/hex"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/ToppyMicroServices/agents-secure-binding/v2/agent"
@@ -44,17 +45,23 @@ const (
 )
 
 type agentSDK struct {
-	client agent.AgentServiceClient
+	client        agent.AgentServiceClient
+	instanceID    string
+	computationID string
 }
 
-func NewAgentSDK(agentClient agent.AgentServiceClient) SDK {
-	return &agentSDK{
-		client: agentClient,
+func NewAgentSDK(agentClient agent.AgentServiceClient, instanceID, computationID string) (SDK, error) {
+	if strings.TrimSpace(instanceID) == "" {
+		return nil, auth.ErrMissingInstanceID
 	}
+	if strings.TrimSpace(computationID) == "" {
+		return nil, auth.ErrMissingComputationID
+	}
+	return &agentSDK{client: agentClient, instanceID: instanceID, computationID: computationID}, nil
 }
 
 func (sdk *agentSDK) Algo(ctx context.Context, algorithm, requirements *os.File, privKey any) error {
-	md, err := generateMetadata(auth.AlgorithmProviderRole, agent.AgentService_Algo_FullMethodName, privKey)
+	md, err := generateMetadata(sdk.instanceID, sdk.computationID, auth.AlgorithmProviderRole, agent.AgentService_Algo_FullMethodName, privKey)
 	if err != nil {
 		return err
 	}
@@ -73,7 +80,7 @@ func (sdk *agentSDK) Algo(ctx context.Context, algorithm, requirements *os.File,
 }
 
 func (sdk *agentSDK) Data(ctx context.Context, dataset *os.File, filename string, privKey any) error {
-	md, err := generateMetadata(auth.DataProviderRole, agent.AgentService_Data_FullMethodName, privKey)
+	md, err := generateMetadata(sdk.instanceID, sdk.computationID, auth.DataProviderRole, agent.AgentService_Data_FullMethodName, privKey)
 	if err != nil {
 		return err
 	}
@@ -94,7 +101,7 @@ func (sdk *agentSDK) Data(ctx context.Context, dataset *os.File, filename string
 func (sdk *agentSDK) Result(ctx context.Context, privKey any, resultFile *os.File) error {
 	request := &agent.ResultRequest{}
 
-	md, err := generateMetadata(auth.ConsumerRole, agent.AgentService_Result_FullMethodName, privKey)
+	md, err := generateMetadata(sdk.instanceID, sdk.computationID, auth.ConsumerRole, agent.AgentService_Result_FullMethodName, privKey)
 	if err != nil {
 		return err
 	}
@@ -207,10 +214,10 @@ func (sdk *agentSDK) IMAMeasurements(ctx context.Context, resultFile *os.File) (
 	return pb.ReceiveIMAMeasurements(imaMeasurementsProgressDescription, fileSize, stream, resultFile)
 }
 
-func signData(role auth.UserRole, method, issuedAt, nonce string, privKey crypto.Signer) ([]byte, error) {
+func signData(instanceID, computationID string, role auth.UserRole, method, issuedAt, nonce string, privKey crypto.Signer) ([]byte, error) {
 	var signature []byte
 	var err error
-	payload := auth.SignaturePayload(role, method, issuedAt, nonce)
+	payload := auth.SignaturePayload(instanceID, computationID, role, method, issuedAt, nonce)
 
 	switch k := privKey.(type) {
 	case ed25519.PrivateKey:
@@ -229,14 +236,14 @@ func signData(role auth.UserRole, method, issuedAt, nonce string, privKey crypto
 	return signature, nil
 }
 
-func generateMetadata(role auth.UserRole, method string, privateKey crypto.PrivateKey) (metadata.MD, error) {
+func generateMetadata(instanceID, computationID string, role auth.UserRole, method string, privateKey crypto.PrivateKey) (metadata.MD, error) {
 	issuedAt := time.Now().UTC().Format(time.RFC3339Nano)
 	nonce, err := newSignatureNonce()
 	if err != nil {
 		return nil, err
 	}
 
-	signature, err := signData(role, method, issuedAt, nonce, privateKey.(crypto.Signer))
+	signature, err := signData(instanceID, computationID, role, method, issuedAt, nonce, privateKey.(crypto.Signer))
 	if err != nil {
 		return nil, err
 	}

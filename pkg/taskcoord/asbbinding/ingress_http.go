@@ -115,6 +115,10 @@ func ingressCodeForError(err error) IngressErrorCode {
 	case errors.Is(err, errChallengeCollision):
 		return IngressCodeInternalError
 	case errors.Is(err, errOperationAuthorization),
+		errors.Is(err, ErrDelegationPolicyDenied),
+		errors.Is(err, ErrDelegationPolicyIndeterminate),
+		errors.Is(err, ErrDelegationNotApplicable),
+		errors.Is(err, ErrInvalidDelegationOutcome),
 		errors.Is(err, ErrMissingDelegationVerifier),
 		errors.Is(err, taskcoord.ErrAuthenticationRequired):
 		return IngressCodeOperationRejected

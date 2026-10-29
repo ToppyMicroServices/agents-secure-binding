@@ -24,6 +24,7 @@ import (
 
 	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/atls/identitypolicy"
 	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/clients"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/policydecision"
 	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/production"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
@@ -143,7 +144,7 @@ func (s *CoreServer) issue(r *http.Request, actor string, cmd Command) (challeng
 	if err := cmd.Validate(); err != nil {
 		return challenge{}, err
 	}
-	if !ActorAllowed(actor, cmd.Kind) {
+	if ActorDecision(actor, cmd.Kind) != policydecision.Permit {
 		return challenge{}, ErrUnauthorized
 	}
 	contextBytes, err := CommandContext(cmd)
@@ -193,7 +194,7 @@ func (s *CoreServer) execute(r *http.Request, actor string, envelope executeEnve
 	if err := cmd.Validate(); err != nil {
 		return nil, err
 	}
-	if !ActorAllowed(actor, cmd.Kind) {
+	if ActorDecision(actor, cmd.Kind) != policydecision.Permit {
 		return nil, ErrUnauthorized
 	}
 	digest, err := CommandDigest(cmd)
@@ -320,7 +321,7 @@ func (c *Client) Execute(ctx context.Context, cmd Command) ([]byte, error) {
 	if err := cmd.Validate(); err != nil {
 		return nil, err
 	}
-	if !ActorAllowed(c.actor, cmd.Kind) {
+	if ActorDecision(c.actor, cmd.Kind) != policydecision.Permit {
 		return nil, ErrUnauthorized
 	}
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)

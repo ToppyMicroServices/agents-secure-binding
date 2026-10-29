@@ -13,6 +13,7 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -31,7 +32,7 @@ const (
 	SignatureTimestampMetadataKey = "signature-timestamp"
 	SignatureNonceMetadataKey     = "signature-nonce"
 
-	signaturePayloadVersion = "agents-secure-binding-agent-auth-v1"
+	signaturePayloadVersion = "agents-secure-binding-agent-auth-v3"
 	maxSignatureAge         = 5 * time.Minute
 	maxSignatureFutureSkew  = time.Minute
 
@@ -46,6 +47,8 @@ var (
 	ErrSignatureVerificationFailed = errors.New("signature verification failed")
 	ErrSignatureExpired            = errors.New("signature timestamp outside allowed window")
 	ErrReplayDetected              = errors.New("signature nonce has already been used")
+	ErrMissingInstanceID           = errors.New("missing Agent instance ID")
+	ErrMissingComputationID        = errors.New("missing computation ID")
 )
 
 type Authenticator interface {
@@ -54,15 +57,26 @@ type Authenticator interface {
 
 type service struct {
 	mu                sync.Mutex
+	instanceID        string
+	computationID     string
 	resultConsumers   []any
 	datasetProviders  []any
 	algorithmProvider any
 	seenNonces        map[string]time.Time
 }
 
-func New(manifest agent.Computation) (Authenticator, error) {
+// New uses the verifier's Manager-assigned VM ID, not a value from the run request.
+func New(manifest agent.Computation, instanceID string) (Authenticator, error) {
+	if strings.TrimSpace(instanceID) == "" {
+		return nil, ErrMissingInstanceID
+	}
+	if strings.TrimSpace(manifest.ID) == "" {
+		return nil, ErrMissingComputationID
+	}
 	s := &service{
-		seenNonces: make(map[string]time.Time),
+		instanceID:    instanceID,
+		computationID: manifest.ID,
+		seenNonces:    make(map[string]time.Time),
 	}
 	for _, rc := range manifest.ResultConsumers {
 		pubKey, err := x509.ParsePKIXPublicKey(rc.UserKey)
@@ -119,8 +133,8 @@ func extractSignature(md metadata.MD) (string, error) {
 	return extractMetadataValue(md, SignatureMetadataKey)
 }
 
-func verifySignature(role UserRole, method, issuedAt, nonce, signature string, publicKey any) error {
-	payload := signaturePayload(role, method, issuedAt, nonce)
+func verifySignature(instanceID, computationID string, role UserRole, method, issuedAt, nonce, signature string, publicKey any) error {
+	payload := signaturePayload(instanceID, computationID, role, method, issuedAt, nonce)
 	hash := sha256.Sum256(payload)
 	sigByte, err := base64.StdEncoding.DecodeString(signature)
 	if err != nil {
@@ -176,7 +190,7 @@ func (s *service) AuthenticateUser(ctx context.Context, role UserRole, method st
 	switch role {
 	case ConsumerRole:
 		for i, rc := range s.resultConsumers {
-			if err := verifySignature(role, method, issuedAt, nonce, signature, rc); err == nil {
+			if err := verifySignature(s.instanceID, s.computationID, role, method, issuedAt, nonce, signature, rc); err == nil {
 				if err := s.markNonce(role, method, nonce, issuedAtTime.Add(maxSignatureAge)); err != nil {
 					return nil, err
 				}
@@ -185,7 +199,7 @@ func (s *service) AuthenticateUser(ctx context.Context, role UserRole, method st
 		}
 	case DataProviderRole:
 		for _, dp := range s.datasetProviders {
-			if err := verifySignature(role, method, issuedAt, nonce, signature, dp); err == nil {
+			if err := verifySignature(s.instanceID, s.computationID, role, method, issuedAt, nonce, signature, dp); err == nil {
 				if err := s.markNonce(role, method, nonce, issuedAtTime.Add(maxSignatureAge)); err != nil {
 					return nil, err
 				}
@@ -193,7 +207,7 @@ func (s *service) AuthenticateUser(ctx context.Context, role UserRole, method st
 			}
 		}
 	case AlgorithmProviderRole:
-		if err := verifySignature(role, method, issuedAt, nonce, signature, s.algorithmProvider); err == nil {
+		if err := verifySignature(s.instanceID, s.computationID, role, method, issuedAt, nonce, signature, s.algorithmProvider); err == nil {
 			if err := s.markNonce(role, method, nonce, issuedAtTime.Add(maxSignatureAge)); err != nil {
 				return nil, err
 			}
@@ -204,12 +218,13 @@ func (s *service) AuthenticateUser(ctx context.Context, role UserRole, method st
 	return ctx, ErrSignatureVerificationFailed
 }
 
-func signaturePayload(role UserRole, method, issuedAt, nonce string) []byte {
-	return []byte(fmt.Sprintf("%s\nrole=%s\nmethod=%s\nissued_at=%s\nnonce=%s", signaturePayloadVersion, role, method, issuedAt, nonce))
+func signaturePayload(instanceID, computationID string, role UserRole, method, issuedAt, nonce string) []byte {
+	return []byte(fmt.Sprintf("%s\ninstance_id=%d:%s\ncomputation_id=%d:%s\nrole=%s\nmethod=%s\nissued_at=%s\nnonce=%s", signaturePayloadVersion, len(instanceID), instanceID, len(computationID), computationID, role, method, issuedAt, nonce))
 }
 
-func SignaturePayload(role UserRole, method, issuedAt, nonce string) []byte {
-	return signaturePayload(role, method, issuedAt, nonce)
+// SignaturePayload binds one Agent RPC proof to its VM and computation.
+func SignaturePayload(instanceID, computationID string, role UserRole, method, issuedAt, nonce string) []byte {
+	return signaturePayload(instanceID, computationID, role, method, issuedAt, nonce)
 }
 
 func validateIssuedAt(issuedAt, now time.Time) error {

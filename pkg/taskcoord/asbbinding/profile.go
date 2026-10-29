@@ -13,18 +13,23 @@ import (
 
 	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/atls/identitypolicy"
 	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/clients"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/policydecision"
 	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/taskcoord"
 )
 
 var (
-	ErrMissingParticipantResolver = errors.New("asbbinding: missing Participant resolver")
-	ErrHumanRequired              = errors.New("asbbinding: Participant is not HUMAN")
-	ErrHumanInactive              = errors.New("asbbinding: Human Participant is not active")
-	ErrRequestContextMismatch     = errors.New("asbbinding: ASB request context does not bind the Human request")
-	ErrAmbiguousPolicy            = errors.New("asbbinding: application authorization policy is ambiguous")
-	ErrMissingASBProof            = errors.New("asbbinding: missing ASB proof material")
-	ErrInvalidProjection          = errors.New("asbbinding: invalid verified projection")
-	ErrMissingDelegationVerifier  = errors.New("asbbinding: missing delegation decision verifier")
+	ErrMissingParticipantResolver    = errors.New("asbbinding: missing Participant resolver")
+	ErrHumanRequired                 = errors.New("asbbinding: Participant is not HUMAN")
+	ErrHumanInactive                 = errors.New("asbbinding: Human Participant is not active")
+	ErrRequestContextMismatch        = errors.New("asbbinding: ASB request context does not bind the Human request")
+	ErrAmbiguousPolicy               = errors.New("asbbinding: application authorization policy is ambiguous")
+	ErrMissingASBProof               = errors.New("asbbinding: missing ASB proof material")
+	ErrInvalidProjection             = errors.New("asbbinding: invalid verified projection")
+	ErrMissingDelegationVerifier     = errors.New("asbbinding: missing delegation decision verifier")
+	ErrDelegationPolicyDenied        = errors.New("asbbinding: delegation policy denied")
+	ErrDelegationPolicyIndeterminate = errors.New("asbbinding: delegation policy indeterminate")
+	ErrDelegationNotApplicable       = errors.New("asbbinding: delegation policy not applicable")
+	ErrInvalidDelegationOutcome      = errors.New("asbbinding: invalid delegation policy outcome")
 )
 
 // Evidence carries signed ASB material and verifier-local acceptance state.
@@ -45,17 +50,22 @@ type Profile struct {
 	Now          func() time.Time
 }
 
-// DelegationDecisionVerifier produces a trusted, current policy decision for
-// one exact delegation request. Ingress invokes it only after the ASB grant and
-// session proof have been verified. Implementations must not copy a
-// client-supplied policy projection into the result.
+// DelegationDecision is one trusted policy result for the exact request.
+// Only Permit may carry a verified delegation projection.
+type DelegationDecision struct {
+	Outcome  policydecision.Outcome
+	Verified taskcoord.VerifiedDelegation // populated only for Permit
+}
+
+// DelegationDecisionVerifier evaluates one exact delegation request after ASB
+// proof acceptance. It must not copy peer-supplied policy projections.
 type DelegationDecisionVerifier interface {
 	VerifyDelegation(
 		context.Context,
 		taskcoord.Assignment,
 		DelegationRequest,
 		time.Time,
-	) (taskcoord.VerifiedDelegation, error)
+	) (DelegationDecision, error)
 }
 
 // DelegationDecisionVerifierFunc adapts a function to
@@ -65,16 +75,16 @@ type DelegationDecisionVerifierFunc func(
 	taskcoord.Assignment,
 	DelegationRequest,
 	time.Time,
-) (taskcoord.VerifiedDelegation, error)
+) (DelegationDecision, error)
 
 func (f DelegationDecisionVerifierFunc) VerifyDelegation(
 	ctx context.Context,
 	parent taskcoord.Assignment,
 	request DelegationRequest,
 	at time.Time,
-) (taskcoord.VerifiedDelegation, error) {
+) (DelegationDecision, error) {
 	if f == nil {
-		return taskcoord.VerifiedDelegation{}, ErrMissingDelegationVerifier
+		return DelegationDecision{}, ErrMissingDelegationVerifier
 	}
 	return f(ctx, parent, request, at)
 }
@@ -210,7 +220,7 @@ func (p Profile) Delegate(
 	evidence Evidence,
 ) (taskcoord.DelegationTransition, error) {
 	if isNilDelegationVerifier(verifier) {
-		return taskcoord.DelegationTransition{}, ErrMissingDelegationVerifier
+		return taskcoord.DelegationTransition{}, fmt.Errorf("%w: %w", ErrDelegationPolicyIndeterminate, ErrMissingDelegationVerifier)
 	}
 	return p.delegate(ctx, parent, request, evidence, verifier.VerifyDelegation)
 }
@@ -220,7 +230,7 @@ type delegationDecisionFunc func(
 	taskcoord.Assignment,
 	DelegationRequest,
 	time.Time,
-) (taskcoord.VerifiedDelegation, error)
+) (DelegationDecision, error)
 
 func (p Profile) delegate(
 	ctx context.Context,
@@ -285,15 +295,31 @@ func (p Profile) delegateAccepted(
 	// Assignment after their validation.
 	decisionParent := cloneAssignmentSnapshot(parent)
 	decisionRequest := cloneDelegationRequest(request)
-	verified, err := decision(ctx, decisionParent, decisionRequest, now)
+	policyResult, err := decision(ctx, decisionParent, decisionRequest, now)
 	if err != nil {
-		return taskcoord.DelegationTransition{}, fmt.Errorf("asbbinding: verify delegation decision: %w", err)
+		return taskcoord.DelegationTransition{}, fmt.Errorf("%w: verify delegation decision: %w", ErrDelegationPolicyIndeterminate, err)
 	}
+	var outcomeErr error
+	switch policyResult.Outcome {
+	case policydecision.Permit:
+	case policydecision.Deny:
+		outcomeErr = ErrDelegationPolicyDenied
+	case policydecision.Indeterminate:
+		outcomeErr = ErrDelegationPolicyIndeterminate
+	case policydecision.NotApplicable:
+		outcomeErr = ErrDelegationNotApplicable
+	default:
+		outcomeErr = fmt.Errorf("%w: %w", ErrDelegationPolicyIndeterminate, ErrInvalidDelegationOutcome)
+	}
+	if outcomeErr != nil {
+		return taskcoord.DelegationTransition{}, outcomeErr
+	}
+	verified := policyResult.Verified
 	if err := verified.Validate(); err != nil {
-		return taskcoord.DelegationTransition{}, err
+		return taskcoord.DelegationTransition{}, fmt.Errorf("%w: %w", ErrDelegationPolicyIndeterminate, err)
 	}
 	if verified.DecisionID != request.DecisionID {
-		return taskcoord.DelegationTransition{}, invalid("verified delegation decision does not match request")
+		return taskcoord.DelegationTransition{}, fmt.Errorf("%w: %w", ErrDelegationPolicyIndeterminate, invalid("verified delegation decision does not match request"))
 	}
 	target, err := p.resolveParticipant(ctx, request.TargetParticipantID)
 	if err != nil {

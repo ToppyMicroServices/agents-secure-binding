@@ -136,6 +136,13 @@ original target, diverted target, trigger, and reason code.
 ## Implementation
 
 The package `pkg/agtp/diversionpolicy` implements the static evaluator. It
-returns a decision plus an audit record. On denial, mismatch, hidden diversion
-without permission, unsupported version, or malformed policy, it returns an
-error and does not authorize the diversion.
+returns `Decision.Outcome`, an audit record for valid inputs, and the existing
+typed error. A matching allowed rule with all requirements met returns
+`Permit` without an error. An explicit denial, missing client notice, or hidden
+diversion without an explicit rule returns `Deny` with an error. An ordinary
+policy miss returns `NotApplicable` with `ErrNoMatchingRule`. An invalid policy
+or request returns `Indeterminate` with a validation error and no audit record.
+
+Only `Permit` without an error authorizes a diversion. `NotApplicable` still
+fails closed in required mode. `Indeterminate` means policy evaluation failed;
+it does not describe the outcome of a dispatched operation.

@@ -20,6 +20,7 @@ import (
 	protectedchange "github.com/ToppyMicroServices/agents-secure-binding/v2/examples/protected-change-consumer"
 	"github.com/ToppyMicroServices/agents-secure-binding/v2/internal/strictjson"
 	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/atls/identitypolicy"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/policydecision"
 	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/production"
 )
 
@@ -167,14 +168,30 @@ func isDecisionKind(kind string) bool {
 	}
 }
 
-func ActorAllowed(actor, kind string) bool {
+// ActorDecision evaluates the local actor/command authorization policy.
+// Human answers and execution outcomes have separate meanings.
+func ActorDecision(actor, kind string) policydecision.Outcome {
+	if actor == "" || kind == "" {
+		return policydecision.Indeterminate
+	}
+	switch kind {
+	case KindPropose, KindApprove, KindDecline, KindNotApplicable, KindUndetermined, KindStatus, KindInbox:
+	default:
+		return policydecision.NotApplicable
+	}
 	switch actor {
 	case ActorAgent:
-		return kind == KindPropose || kind == KindStatus || kind == KindInbox
+		if kind == KindPropose || kind == KindStatus || kind == KindInbox {
+			return policydecision.Permit
+		}
+		return policydecision.Deny
 	case ActorGateway:
-		return isDecisionKind(kind) || kind == KindStatus || kind == KindInbox
+		if isDecisionKind(kind) || kind == KindStatus || kind == KindInbox {
+			return policydecision.Permit
+		}
+		return policydecision.Deny
 	default:
-		return false
+		return policydecision.NotApplicable
 	}
 }
 

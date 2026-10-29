@@ -37,7 +37,7 @@ func TestCLIInterruptsStalledConnection(t *testing.T) {
 		}
 		cmd.Env = append(cmd.Env, entry)
 	}
-	cmd.Env = append(cmd.Env, "HOME="+t.TempDir(), "ASB_CLI_PROCESS_TEST=1", "AGENT_GRPC_URL="+listener.Addr().String(), "AGENT_GRPC_TIMEOUT=60s")
+	cmd.Env = append(cmd.Env, "HOME="+t.TempDir(), "ASB_CLI_PROCESS_TEST=1", "AGENT_GRPC_URL="+listener.Addr().String(), "AGENT_GRPC_TIMEOUT=60s", "AGENT_CVM_ID=test-vm", "AGENT_COMPUTATION_ID=test-computation")
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
