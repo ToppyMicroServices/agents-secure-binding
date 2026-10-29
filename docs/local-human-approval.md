@@ -181,6 +181,11 @@ The browser sends `POST /api/decision` with `operation_id`, `proposal_digest`,
 | 該当なし | `NOT_APPLICABLE` | `NOT_APPLICABLE`; the setting is unchanged. |
 | 判断不明 | `UNDETERMINED` | `UNDETERMINED`; the setting is unchanged. |
 
+These are answers to a proposal. The local actor/command policy separately
+returns `Permit`, `Deny`, `Indeterminate`, or `NotApplicable`. Only `Permit`
+passes that policy check; the ASB proof and proposal binding are checked
+separately.
+
 The existing session, same-origin, and CSRF checks still apply. For older
 clients, `approve: true` or `approve: false` alone maps to `APPROVE` or `DECLINE`.
 A request containing both `decision` and `approve` is rejected, as are missing,

@@ -17,6 +17,8 @@ import (
 	"strings"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/policydecision"
 )
 
 var (
@@ -101,21 +103,21 @@ type Request struct {
 
 // Decision records the outcome plus the audit material callers should log.
 type Decision struct {
-	Allowed bool
+	Outcome policydecision.Outcome
 	Audit   AuditRecord
 }
 
 // AuditRecord is deliberately small and stable so callers can preserve the
 // security-relevant decision fields without logging arbitrary peer metadata.
 type AuditRecord struct {
-	PolicyID       string     `json:"policy_id"`
-	RuleID         string     `json:"rule_id,omitempty"`
-	OriginalTarget Target     `json:"original_target"`
-	DivertedTarget Target     `json:"diverted_target"`
-	Visibility     Visibility `json:"visibility"`
-	Trigger        string     `json:"trigger"`
-	ReasonCode     string     `json:"reason_code"`
-	Allowed        bool       `json:"allowed"`
+	PolicyID       string                 `json:"policy_id"`
+	RuleID         string                 `json:"rule_id,omitempty"`
+	OriginalTarget Target                 `json:"original_target"`
+	DivertedTarget Target                 `json:"diverted_target"`
+	Visibility     Visibility             `json:"visibility"`
+	Trigger        string                 `json:"trigger"`
+	ReasonCode     string                 `json:"reason_code"`
+	Outcome        policydecision.Outcome `json:"outcome"`
 }
 
 // LoadJSON decodes a static diversion policy from JSON.
@@ -130,14 +132,14 @@ func LoadJSON(r io.Reader) (Policy, error) {
 // Evaluate checks one requested diversion against this static policy.
 func (p Policy) Evaluate(req Request) (Decision, error) {
 	if err := p.Validate(); err != nil {
-		return Decision{}, err
+		return Decision{Outcome: policydecision.Indeterminate}, err
 	}
 	if err := validateRequest(req); err != nil {
-		return Decision{}, err
+		return Decision{Outcome: policydecision.Indeterminate}, err
 	}
 
 	if req.Visibility == VisibilityHidden && !p.hasHiddenRuleFor(req) {
-		return Decision{Audit: auditForRequest(p.PolicyID, "", req, false)}, ErrHiddenNotAllowed
+		return Decision{Outcome: policydecision.Deny, Audit: auditForRequest(p.PolicyID, "", req, policydecision.Deny)}, ErrHiddenNotAllowed
 	}
 
 	for _, rule := range p.Rules {
@@ -154,16 +156,18 @@ func (p Policy) Evaluate(req Request) (Decision, error) {
 			ReasonCode:     req.ReasonCode,
 		}
 		if rule.RequireClientNotice && !req.ClientNotified {
-			return Decision{Audit: audit}, ErrClientNoticeRequired
+			audit.Outcome = policydecision.Deny
+			return Decision{Outcome: policydecision.Deny, Audit: audit}, ErrClientNoticeRequired
 		}
 		if !rule.Allowed {
-			return Decision{Audit: audit}, ErrDenied
+			audit.Outcome = policydecision.Deny
+			return Decision{Outcome: policydecision.Deny, Audit: audit}, ErrDenied
 		}
-		audit.Allowed = true
-		return Decision{Allowed: true, Audit: audit}, nil
+		audit.Outcome = policydecision.Permit
+		return Decision{Outcome: policydecision.Permit, Audit: audit}, nil
 	}
 
-	return Decision{Audit: auditForRequest(p.PolicyID, "", req, false)}, ErrNoMatchingRule
+	return Decision{Outcome: policydecision.NotApplicable, Audit: auditForRequest(p.PolicyID, "", req, policydecision.NotApplicable)}, ErrNoMatchingRule
 }
 
 // Validate checks policy shape and fail-closed requirements.
@@ -332,7 +336,7 @@ func validateValue(value string) error {
 	return nil
 }
 
-func auditForRequest(policyID, ruleID string, req Request, allowed bool) AuditRecord {
+func auditForRequest(policyID, ruleID string, req Request, outcome policydecision.Outcome) AuditRecord {
 	return AuditRecord{
 		PolicyID:       policyID,
 		RuleID:         ruleID,
@@ -341,6 +345,6 @@ func auditForRequest(policyID, ruleID string, req Request, allowed bool) AuditRe
 		Visibility:     req.Visibility,
 		Trigger:        req.Trigger,
 		ReasonCode:     req.ReasonCode,
-		Allowed:        allowed,
+		Outcome:        outcome,
 	}
 }

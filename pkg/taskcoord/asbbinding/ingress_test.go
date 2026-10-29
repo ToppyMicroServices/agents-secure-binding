@@ -29,6 +29,7 @@ import (
 
 	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/atls/identitypolicy"
 	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/clients"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/policydecision"
 	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/taskcoord"
 	"github.com/golang-jwt/jwt/v5"
 )
@@ -438,12 +439,12 @@ func TestIngressDelegatesAfterASBAndPolicyVerification(t *testing.T) {
 			gotParent taskcoord.Assignment,
 			request DelegationRequest,
 			at time.Time,
-		) (taskcoord.VerifiedDelegation, error) {
+		) (DelegationDecision, error) {
 			verifierCalls.Add(1)
 			if gotParent.AssignmentID != parent.AssignmentID {
-				return taskcoord.VerifiedDelegation{}, taskcoord.ErrInvalidDelegation
+				return DelegationDecision{}, taskcoord.ErrInvalidDelegation
 			}
-			return verifiedDelegationFor(gotParent, request, at), nil
+			return DelegationDecision{Outcome: policydecision.Permit, Verified: verifiedDelegationFor(gotParent, request, at)}, nil
 		})
 	})
 
@@ -502,9 +503,9 @@ func TestIngressVerifiesASBBeforeDelegationDecisionLookup(t *testing.T) {
 			parent taskcoord.Assignment,
 			request DelegationRequest,
 			at time.Time,
-		) (taskcoord.VerifiedDelegation, error) {
+		) (DelegationDecision, error) {
 			verifierCalls.Add(1)
-			return verifiedDelegationFor(parent, request, at), nil
+			return DelegationDecision{Outcome: policydecision.Permit, Verified: verifiedDelegationFor(parent, request, at)}, nil
 		})
 	})
 	request := liveDelegationRequest(parent, target.ParticipantID)
@@ -539,8 +540,8 @@ func TestIngressRejectsUntrustedDelegationProjection(t *testing.T) {
 			parent taskcoord.Assignment,
 			request DelegationRequest,
 			at time.Time,
-		) (taskcoord.VerifiedDelegation, error) {
-			return verifiedDelegationFor(parent, request, at), nil
+		) (DelegationDecision, error) {
+			return DelegationDecision{Outcome: policydecision.Permit, Verified: verifiedDelegationFor(parent, request, at)}, nil
 		})
 	})
 	request := liveDelegationRequest(parent, target.ParticipantID)
@@ -597,10 +598,10 @@ func TestIngressRejectsMismatchedDelegationDecisionWithoutWrites(t *testing.T) {
 			parent taskcoord.Assignment,
 			request DelegationRequest,
 			at time.Time,
-		) (taskcoord.VerifiedDelegation, error) {
+		) (DelegationDecision, error) {
 			decision := verifiedDelegationFor(parent, request, at)
 			decision.ToParticipantID = "agent:other"
-			return decision, nil
+			return DelegationDecision{Outcome: policydecision.Permit, Verified: decision}, nil
 		})
 	})
 	request := liveDelegationRequest(parent, target.ParticipantID)
@@ -610,10 +611,16 @@ func TestIngressRejectsMismatchedDelegationDecisionWithoutWrites(t *testing.T) {
 		t.Fatal(err)
 	}
 	grant, proof := signedIngressEvidence(t, now, digest, challenge)
-	executeOperation(t, client, server.URL, ExecuteRequest{
-		ChallengeID: challenge.ChallengeID, Operation: OperationAssignmentDelegation,
-		Request: mustJSON(t, request), GrantJWT: grant, SessionBindingJWT: proof,
-	}, http.StatusForbidden)
+	response, raw := doIngressContractRequest(
+		t, client, http.MethodPost, server.URL+IngressExecutePath, "application/json", "",
+		mustJSON(t, ExecuteRequest{
+			ChallengeID: challenge.ChallengeID, Operation: OperationAssignmentDelegation,
+			Request: mustJSON(t, request), GrantJWT: grant, SessionBindingJWT: proof,
+		}),
+	)
+	assertIngressContractError(t, response, raw, http.StatusForbidden,
+		IngressCodeOperationRejected, testUnauthorizedOperationMessage, false)
+	assertIngressContractRedacted(t, raw, "agent:other")
 	storedParent, err := store.LoadAssignment(context.Background(), parent.AssignmentID)
 	if err != nil {
 		t.Fatal(err)
@@ -626,6 +633,75 @@ func TestIngressRejectsMismatchedDelegationDecisionWithoutWrites(t *testing.T) {
 	}
 	if _, err := store.LoadDelegation(context.Background(), request.EventID); err == nil {
 		t.Fatal("mismatched decision created delegation record")
+	}
+}
+
+func TestIngressRejectsNonPermitDelegationOutcomesWithoutWrites(t *testing.T) {
+	now := time.Date(2026, 8, 13, 10, 0, 0, 0, time.UTC)
+	for _, test := range []struct {
+		name    string
+		outcome policydecision.Outcome
+		want    error
+	}{
+		{"deny", policydecision.Deny, ErrDelegationPolicyDenied},
+		{"indeterminate", policydecision.Indeterminate, ErrDelegationPolicyIndeterminate},
+		{"not applicable", policydecision.NotApplicable, ErrDelegationNotApplicable},
+		{"zero outcome", "", ErrInvalidDelegationOutcome},
+		{"unknown outcome", "private-policy-outcome", ErrInvalidDelegationOutcome},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			store, parent, target := seededDelegationIngressStore(t, now)
+			var internalIngress *Ingress
+			server, client := newLiveIngressWithStore(t, now, store, func(ingress *Ingress) {
+				// Retain the internal entry point for a typed-error assertion.
+				internalIngress = ingress
+				ingress.Policy.DelegationVerifier = DelegationDecisionVerifierFunc(func(
+					_ context.Context, current taskcoord.Assignment, request DelegationRequest, at time.Time,
+				) (DelegationDecision, error) {
+					return DelegationDecision{Outcome: test.outcome, Verified: verifiedDelegationFor(current, request, at)}, nil
+				})
+			})
+			request := liveDelegationRequest(parent, target.ParticipantID)
+			operation, err := decodeOperation(OperationAssignmentDelegation, mustJSON(t, request))
+			if err != nil {
+				t.Fatal(err)
+			}
+			internalEvidence := testEvidence(t, now, operation.digest, operation.digest,
+				"authorization:delegate:internal", "proof:delegate:internal", "nonce:delegate:internal", nil)
+			if _, err := internalIngress.executeVerified(context.Background(), store, operation, internalEvidence); !errors.Is(err, test.want) {
+				t.Fatalf("internal delegation error = %v, want %v", err, test.want)
+			} else if (test.outcome == policydecision.Deny || test.outcome == policydecision.NotApplicable) &&
+				errors.Is(err, ErrDelegationPolicyIndeterminate) {
+				t.Fatalf("%s was reclassified as Indeterminate: %v", test.outcome, err)
+			} else if (test.outcome == "" || test.outcome == "private-policy-outcome") &&
+				!errors.Is(err, ErrDelegationPolicyIndeterminate) {
+				t.Fatalf("invalid outcome did not fail as Indeterminate: %v", err)
+			}
+			challenge := requestChallenge(t, client, server.URL, OperationAssignmentDelegation, request, http.StatusCreated)
+			grant, proof := signedIngressEvidence(t, now, operation.digest, challenge)
+			response, raw := doIngressContractRequest(
+				t, client, http.MethodPost, server.URL+IngressExecutePath, "application/json", "",
+				mustJSON(t, ExecuteRequest{
+					ChallengeID: challenge.ChallengeID, Operation: OperationAssignmentDelegation,
+					Request: mustJSON(t, request), GrantJWT: grant, SessionBindingJWT: proof,
+				}),
+			)
+			assertIngressContractError(t, response, raw, http.StatusForbidden,
+				IngressCodeOperationRejected, testUnauthorizedOperationMessage, false)
+			if test.outcome != "" && strings.Contains(string(raw), string(test.outcome)) {
+				t.Fatalf("private policy outcome leaked: %s", raw)
+			}
+			storedParent, err := store.LoadAssignment(context.Background(), parent.AssignmentID)
+			if err != nil || storedParent.Revision != parent.Revision {
+				t.Fatalf("rejected outcome changed parent: %+v, %v", storedParent, err)
+			}
+			if _, err := store.LoadAssignment(context.Background(), request.ChildAssignmentID); !errors.Is(err, taskcoord.ErrNotFound) {
+				t.Fatalf("rejected outcome created child: %v", err)
+			}
+			if _, err := store.LoadDelegation(context.Background(), request.EventID); !errors.Is(err, taskcoord.ErrNotFound) {
+				t.Fatalf("rejected outcome created delegation: %v", err)
+			}
+		})
 	}
 }
 
@@ -721,8 +797,8 @@ func TestIngressAuthenticatesBeforeAssignmentLookup(t *testing.T) {
 			parent taskcoord.Assignment,
 			request DelegationRequest,
 			at time.Time,
-		) (taskcoord.VerifiedDelegation, error) {
-			return verifiedDelegationFor(parent, request, at), nil
+		) (DelegationDecision, error) {
+			return DelegationDecision{Outcome: policydecision.Permit, Verified: verifiedDelegationFor(parent, request, at)}, nil
 		})
 	})
 

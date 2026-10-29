@@ -27,11 +27,11 @@ status lookup or reconciliation, not a new authorization or a blind retry.
 
 | Component | Decision contract and observed behavior |
 | --- | --- |
-| [Local Human approval](local-human-approval.md#four-human-decisions) | Four explicit answers. Non-approval results finish the proposal without changing the setting. Human `UNDETERMINED` is separate from request `OUTCOME_UNKNOWN`. |
+| [Local Human approval](local-human-approval.md#four-human-decisions) | Four explicit Human answers. Non-approval results finish the proposal without changing the setting. Its actor/command policy also returns four distinct authorization outcomes; only `Permit` allows a command. Human `UNDETERMINED` is separate from request `OUTCOME_UNKNOWN`. |
 | [Identity policy](../pkg/atls/identitypolicy/policy_v2.go) | Required missing or mismatched values return validation errors. If D7 is not required, effective authorization is empty; peer-provided authority is not copied. Required creator-isolation evidence fails when unavailable. |
 | [Least privilege](../pkg/leastprivilege/authorization.go) | Returns a capability only after verification and mandate checks. `AllowAutomatic=false` returns `ErrHumanRequired`; an optimal solution alone grants no permission. [Durable execution](../pkg/leastprivilege/durable_execution.go) keeps `UNKNOWN` separate and does not redispatch unresolved operations. |
-| [Diversion policy](../pkg/agtp/diversionpolicy/policy.go) | Explicit allow, deny, no matching rule, and invalid/missing requirements use a Boolean decision plus typed errors. Only a matching allowed rule with all requirements met yields permission. The audit inconsistency below was repaired. |
-| [Task Coordination](../pkg/taskcoord/model.go) | Uses responsibility states such as `ACCEPTED` and `DECLINED`, not the four Human answers. [Action binding](../pkg/taskcoord/actionbinding/binding.go) requires `ACCEPTED`; unknown operations and other states cannot start execution. |
+| [Diversion policy](../pkg/agtp/diversionpolicy/policy.go) | The current evaluator returns `Permit`, `Deny`, `Indeterminate`, or `NotApplicable` with typed errors. Only `Permit` without an error authorizes diversion. The earlier Boolean audit repair is described below. |
+| [Task Coordination](../pkg/taskcoord/model.go) | Uses responsibility states such as `ACCEPTED` and `DECLINED`, not the four Human answers. The [Human delegation policy adapter](../pkg/taskcoord/asbbinding/profile.go) returns four policy outcomes; only `Permit` with a matching verified delegation can advance the assignment. [Action binding](../pkg/taskcoord/actionbinding/binding.go) requires `ACCEPTED`; unknown operations and other states cannot start execution. |
 | [Authority quorum](../pkg/authorityquorum/memory_store.go) | Counts verified affirmative approvals only. Missing, expired, revoked, or insufficient approvals return errors. It does not store separate deny/out-of-scope/undetermined votes. |
 | [Model runtime](../pkg/llmruntime/model.go) | Missing or mismatched model/bundle/LoRA pins, unavailable retrieval, unsupported adapters, and unverified external APIs return errors. Integrity success identifies approved bytes; it does not by itself prove benign model behavior. |
 | [Required attestation](../pkg/atls/eaattestation/verify.go) | Empty required evidence and a missing verifier are errors. Optional evidence collection is a separate API with the legacy exception below. |
@@ -45,10 +45,11 @@ that notice, but its audit copied the rule's `Allowed=true`. A runtime probe
 returned `decision_allowed=false`, `audit_allowed=true`, and
 `ErrClientNoticeRequired`.
 
-The audit now remains false until every required check passes. The same probe
-returns false for both flags. Regression tests check the rejected case and
-the successful case. The request was already blocked before this repair;
-the change corrects the audit record, with no API shape change.
+At the time of that repair, the audit remained false until every required
+check passed, and the same probe returned false for both flags. Regression
+tests checked the rejected and successful cases. The request was already
+blocked before this repair, which did not change the API shape at that time.
+The current API uses `Decision.Outcome` and `Audit.Outcome` instead.
 
 ## Boundaries
 

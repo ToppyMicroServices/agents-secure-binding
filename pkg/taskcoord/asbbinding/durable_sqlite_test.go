@@ -27,6 +27,7 @@ import (
 
 	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/atls/identitypolicy"
 	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/clients"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/policydecision"
 	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/taskcoord"
 	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/taskcoord/asbbinding"
 	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/taskcoord/sqlitestore"
@@ -249,8 +250,8 @@ func sqliteIngressServer(t *testing.T, store taskcoord.Store, now time.Time, dro
 			}
 			return time.Time{}, nil
 		},
-		DelegationVerifier: asbbinding.DelegationDecisionVerifierFunc(func(_ context.Context, parent taskcoord.Assignment, r asbbinding.DelegationRequest, at time.Time) (taskcoord.VerifiedDelegation, error) {
-			return taskcoord.VerifiedDelegation{DecisionID: r.DecisionID, ParentAssignmentID: parent.AssignmentID, ChildAssignmentID: r.ChildAssignmentID, FromParticipantID: parent.ParticipantID, ToParticipantID: r.TargetParticipantID, ParentAuthorityDigest: parent.AuthorityDigest, ChildAuthorityDigest: r.AuthorityDigest, PolicyRef: "urn:policy:1", EvidenceRef: "urn:evidence:1", VerifiedAt: at}, nil
+		DelegationVerifier: asbbinding.DelegationDecisionVerifierFunc(func(_ context.Context, parent taskcoord.Assignment, r asbbinding.DelegationRequest, at time.Time) (asbbinding.DelegationDecision, error) {
+			return asbbinding.DelegationDecision{Outcome: policydecision.Permit, Verified: taskcoord.VerifiedDelegation{DecisionID: r.DecisionID, ParentAssignmentID: parent.AssignmentID, ChildAssignmentID: r.ChildAssignmentID, FromParticipantID: parent.ParticipantID, ToParticipantID: r.TargetParticipantID, ParentAuthorityDigest: parent.AuthorityDigest, ChildAuthorityDigest: r.AuthorityDigest, PolicyRef: "urn:policy:1", EvidenceRef: "urn:evidence:1", VerifiedAt: at}}, nil
 		}),
 	}}
 	for _, apply := range configure {

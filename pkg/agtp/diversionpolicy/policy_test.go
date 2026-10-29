@@ -7,6 +7,8 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/policydecision"
 )
 
 func TestEvaluateAcceptsClientVisibleDiversion(t *testing.T) {
@@ -17,8 +19,8 @@ func TestEvaluateAcceptsClientVisibleDiversion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Evaluate() error = %v", err)
 	}
-	if !decision.Allowed || !decision.Audit.Allowed {
-		t.Fatal("Evaluate() decision is not allowed")
+	if decision.Outcome != policydecision.Permit || decision.Audit.Outcome != policydecision.Permit {
+		t.Fatalf("Evaluate() outcome/audit outcome = %q/%q, want Permit/Permit", decision.Outcome, decision.Audit.Outcome)
 	}
 	if decision.Audit.PolicyID != policy.PolicyID {
 		t.Fatalf("audit policy id = %q, want %q", decision.Audit.PolicyID, policy.PolicyID)
@@ -43,8 +45,8 @@ func TestEvaluateRejectsHiddenDiversionWithoutExplicitRule(t *testing.T) {
 	if !errors.Is(err, ErrHiddenNotAllowed) {
 		t.Fatalf("Evaluate() error = %v, want %v", err, ErrHiddenNotAllowed)
 	}
-	if decision.Allowed {
-		t.Fatal("Evaluate() allowed hidden diversion without explicit rule")
+	if decision.Outcome != policydecision.Deny || decision.Audit.Outcome != policydecision.Deny {
+		t.Fatalf("Evaluate() outcome/audit outcome = %q/%q, want Deny/Deny", decision.Outcome, decision.Audit.Outcome)
 	}
 	if decision.Audit.PolicyID != policy.PolicyID {
 		t.Fatalf("audit policy id = %q, want %q", decision.Audit.PolicyID, policy.PolicyID)
@@ -56,9 +58,15 @@ func TestEvaluateRejectsWrongDivertedTarget(t *testing.T) {
 	request := testRequest()
 	request.DivertedTarget.Deployment = "prod-us"
 
-	_, err := policy.Evaluate(request)
+	decision, err := policy.Evaluate(request)
 	if !errors.Is(err, ErrNoMatchingRule) {
 		t.Fatalf("Evaluate() error = %v, want %v", err, ErrNoMatchingRule)
+	}
+	if decision.Outcome != policydecision.NotApplicable || decision.Audit.Outcome != policydecision.NotApplicable {
+		t.Fatalf("Evaluate() outcome/audit outcome = %q/%q, want NotApplicable/NotApplicable", decision.Outcome, decision.Audit.Outcome)
+	}
+	if decision.Audit.PolicyID != policy.PolicyID || decision.Audit.RuleID != "" || decision.Audit.DivertedTarget != request.DivertedTarget {
+		t.Fatalf("Evaluate() policy-miss audit = %#v", decision.Audit)
 	}
 }
 
@@ -71,8 +79,8 @@ func TestEvaluateRejectsDeniedRuleAndPreservesAudit(t *testing.T) {
 	if !errors.Is(err, ErrDenied) {
 		t.Fatalf("Evaluate() error = %v, want %v", err, ErrDenied)
 	}
-	if decision.Allowed {
-		t.Fatal("Evaluate() allowed denied rule")
+	if decision.Outcome != policydecision.Deny || decision.Audit.Outcome != policydecision.Deny {
+		t.Fatalf("Evaluate() outcome/audit outcome = %q/%q, want Deny/Deny", decision.Outcome, decision.Audit.Outcome)
 	}
 	if decision.Audit.RuleID != policy.Rules[0].RuleID {
 		t.Fatalf("audit rule id = %q, want %q", decision.Audit.RuleID, policy.Rules[0].RuleID)
@@ -91,11 +99,52 @@ func TestEvaluateRejectsClientVisibleDiversionWithoutNotice(t *testing.T) {
 	if !errors.Is(err, ErrClientNoticeRequired) {
 		t.Fatalf("Evaluate() error = %v, want %v", err, ErrClientNoticeRequired)
 	}
-	if decision.Allowed || decision.Audit.Allowed {
-		t.Fatalf("Evaluate() recorded permission without required notice: %#v", decision)
+	if decision.Outcome != policydecision.Deny || decision.Audit.Outcome != policydecision.Deny {
+		t.Fatalf("Evaluate() outcome/audit outcome = %q/%q, want Deny/Deny", decision.Outcome, decision.Audit.Outcome)
 	}
 	if decision.Audit.RuleID != policy.Rules[0].RuleID {
 		t.Fatalf("audit rule id = %q, want %q", decision.Audit.RuleID, policy.Rules[0].RuleID)
+	}
+}
+
+func TestEvaluateIndeterminateOnInvalidPolicyOrRequest(t *testing.T) {
+	tests := []struct {
+		name      string
+		change    func(*Policy, *Request)
+		wantError error
+	}{
+		{
+			name:      "missing policy ID",
+			change:    func(policy *Policy, _ *Request) { policy.PolicyID = "" },
+			wantError: ErrMissingPolicyID,
+		},
+		{
+			name:      "unsupported policy version",
+			change:    func(policy *Policy, _ *Request) { policy.Version = "2" },
+			wantError: ErrUnsupportedVersion,
+		},
+		{
+			name:      "missing request reason code",
+			change:    func(_ *Policy, request *Request) { request.ReasonCode = "" },
+			wantError: ErrMissingReasonCode,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			policy := testPolicy()
+			request := testRequest()
+			test.change(&policy, &request)
+			decision, err := policy.Evaluate(request)
+			if !errors.Is(err, test.wantError) {
+				t.Fatalf("Evaluate() error = %v, want %v", err, test.wantError)
+			}
+			if decision.Outcome != policydecision.Indeterminate {
+				t.Fatalf("Evaluate() outcome = %q, want Indeterminate", decision.Outcome)
+			}
+			if decision.Audit != (AuditRecord{}) {
+				t.Fatalf("Evaluate() audit = %#v, want empty audit for invalid input", decision.Audit)
+			}
+		})
 	}
 }
 

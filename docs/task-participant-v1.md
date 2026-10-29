@@ -207,7 +207,11 @@ verify tokens, signatures, or authorization policy itself.
 
 Opaque authority digests cannot prove scope narrowing. Before `Delegate` is
 called, an authorization component must verify the child authority against the
-parent and produce a `VerifiedDelegation`. The state machine checks that the
+parent. The Human delegation adapter returns `Permit`, `Deny`, `Indeterminate`,
+or `NotApplicable` for that exact request. Only `Permit` with a matching
+`VerifiedDelegation` can commit the delegation. The other outcomes leave the
+Assignments unchanged. These policy results are separate from a Human answer
+and from an unknown result after execution. The state machine checks that the
 verified parent and child digests match the committed Assignments.
 
 ## Automated services

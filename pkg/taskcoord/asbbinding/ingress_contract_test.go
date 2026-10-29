@@ -342,8 +342,8 @@ func TestIngressRedactsDelegationVerifierError(t *testing.T) {
 			taskcoord.Assignment,
 			DelegationRequest,
 			time.Time,
-		) (taskcoord.VerifiedDelegation, error) {
-			return taskcoord.VerifiedDelegation{}, errors.New(canary)
+		) (DelegationDecision, error) {
+			return DelegationDecision{}, errors.New(canary)
 		})
 	})
 	request := liveDelegationRequest(parent, target.ParticipantID)

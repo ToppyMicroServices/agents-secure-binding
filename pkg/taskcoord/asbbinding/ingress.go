@@ -24,6 +24,7 @@ import (
 	eaattestation "github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/atls/eaattestation"
 	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/atls/identitypolicy"
 	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/clients"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/policydecision"
 	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/taskcoord"
 	"github.com/ToppyMicroServices/agents-secure-binding/v2/schemas"
 )
@@ -502,16 +503,25 @@ func (s *Ingress) applyOperation(ctx context.Context, store taskcoord.Store, pro
 		if parent.TaskID != request.ParentTaskID || parent.Revision != request.ExpectedRevision {
 			return ExecuteResponse{}, taskcoord.ErrRevisionConflict
 		}
-		verifyDelegation := func(ctx context.Context, current taskcoord.Assignment, request DelegationRequest, at time.Time) (taskcoord.VerifiedDelegation, error) {
-			verified, err := s.Policy.DelegationVerifier.VerifyDelegation(ctx, current, request, at)
-			if err != nil || verified.Validate() != nil ||
+		verifyDelegation := func(ctx context.Context, current taskcoord.Assignment, request DelegationRequest, at time.Time) (DelegationDecision, error) {
+			decision, err := s.Policy.DelegationVerifier.VerifyDelegation(ctx, current, request, at)
+			if err != nil {
+				return DelegationDecision{}, errOperationAuthorization
+			}
+			// Let the policy boundary retain its distinct non-Permit outcome.
+			// A projection has authority only when the outcome is Permit.
+			if decision.Outcome != policydecision.Permit {
+				return decision, nil
+			}
+			verified := decision.Verified
+			if verified.Validate() != nil ||
 				verified.DecisionID != request.DecisionID || verified.ParentAssignmentID != current.AssignmentID ||
 				verified.ChildAssignmentID != request.ChildAssignmentID || verified.FromParticipantID != current.ParticipantID ||
 				verified.ToParticipantID != request.TargetParticipantID || verified.ParentAuthorityDigest != current.AuthorityDigest ||
 				verified.ChildAuthorityDigest != request.AuthorityDigest || verified.VerifiedAt.After(at) {
-				return taskcoord.VerifiedDelegation{}, errOperationAuthorization
+				return DelegationDecision{}, errOperationAuthorization
 			}
-			return verified, nil
+			return decision, nil
 		}
 		transition, err := profile.delegateAccepted(ctx, parent, request, accepted, now, verifyDelegation)
 		if err != nil {

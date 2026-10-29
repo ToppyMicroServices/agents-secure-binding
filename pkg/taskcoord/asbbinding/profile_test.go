@@ -13,6 +13,7 @@ import (
 
 	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/atls/identitypolicy"
 	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/clients"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/policydecision"
 	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/taskcoord"
 	"github.com/golang-jwt/jwt/v5"
 )
@@ -29,7 +30,7 @@ func (*panicDelegationVerifier) VerifyDelegation(
 	taskcoord.Assignment,
 	DelegationRequest,
 	time.Time,
-) (taskcoord.VerifiedDelegation, error) {
+) (DelegationDecision, error) {
 	panic("typed-nil delegation verifier was invoked")
 }
 
@@ -354,8 +355,8 @@ func TestProfileOffersDelegatesAndAuthorsInteraction(t *testing.T) {
 		taskcoord.Assignment,
 		DelegationRequest,
 		time.Time,
-	) (taskcoord.VerifiedDelegation, error) {
-		return verified, nil
+	) (DelegationDecision, error) {
+		return DelegationDecision{Outcome: policydecision.Permit, Verified: verified}, nil
 	})
 	delegated, err := profile.Delegate(ctx, parent, delegationRequest, verifier,
 		testEvidence(t, now, delegationDigest, delegationDigest, "authorization:delegate:1", "proof:delegate:1", "nonce:delegate:1", nil))
@@ -425,9 +426,9 @@ func TestProfileDelegateRequiresVerifierWithoutConsumingReplay(t *testing.T) {
 		current taskcoord.Assignment,
 		bound DelegationRequest,
 		at time.Time,
-	) (taskcoord.VerifiedDelegation, error) {
+	) (DelegationDecision, error) {
 		calls++
-		return verifiedDelegationFor(current, bound, at), nil
+		return DelegationDecision{Outcome: policydecision.Permit, Verified: verifiedDelegationFor(current, bound, at)}, nil
 	})
 	if _, err := profile.Delegate(ctx, parent, request, verifier, evidence); err != nil {
 		t.Fatalf("Delegate() retry with verifier error = %v", err)
@@ -460,9 +461,9 @@ func TestProfileDelegateAuthenticatesBeforeVerifier(t *testing.T) {
 		current taskcoord.Assignment,
 		bound DelegationRequest,
 		at time.Time,
-	) (taskcoord.VerifiedDelegation, error) {
+	) (DelegationDecision, error) {
 		calls++
-		return verifiedDelegationFor(current, bound, at), nil
+		return DelegationDecision{Outcome: policydecision.Permit, Verified: verifiedDelegationFor(current, bound, at)}, nil
 	})
 
 	if _, err := profile.Delegate(ctx, parent, request, verifier, corrupt); err == nil {
@@ -496,10 +497,10 @@ func TestProfileDelegateRejectsMismatchedDecisionWithoutConsumingReplay(t *testi
 		current taskcoord.Assignment,
 		bound DelegationRequest,
 		at time.Time,
-	) (taskcoord.VerifiedDelegation, error) {
+	) (DelegationDecision, error) {
 		decision := verifiedDelegationFor(current, bound, at)
 		decision.ToParticipantID = "agent:other"
-		return decision, nil
+		return DelegationDecision{Outcome: policydecision.Permit, Verified: decision}, nil
 	})
 	if _, err := profile.Delegate(ctx, parent, request, mismatched, evidence); !errors.Is(err, taskcoord.ErrInvalidDelegation) {
 		t.Fatalf("Delegate() mismatch error = %v, want %v", err, taskcoord.ErrInvalidDelegation)
@@ -510,11 +511,54 @@ func TestProfileDelegateRejectsMismatchedDecisionWithoutConsumingReplay(t *testi
 		current taskcoord.Assignment,
 		bound DelegationRequest,
 		at time.Time,
-	) (taskcoord.VerifiedDelegation, error) {
-		return verifiedDelegationFor(current, bound, at), nil
+	) (DelegationDecision, error) {
+		return DelegationDecision{Outcome: policydecision.Permit, Verified: verifiedDelegationFor(current, bound, at)}, nil
 	})
 	if _, err := profile.Delegate(ctx, parent, request, valid, evidence); err != nil {
 		t.Fatalf("Delegate() retry after rejected decision error = %v", err)
+	}
+}
+
+func TestProfileDelegateRejectsNonPermitPolicyOutcomesWithoutConsumingReplay(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 8, 13, 10, 0, 0, 0, time.UTC)
+	verifierErr := errors.New("delegation policy evaluator failed")
+	for _, test := range []struct {
+		name        string
+		outcome     policydecision.Outcome
+		verifierErr error
+		want        error
+	}{
+		{"deny", policydecision.Deny, nil, ErrDelegationPolicyDenied},
+		{"indeterminate", policydecision.Indeterminate, nil, ErrDelegationPolicyIndeterminate},
+		{"not applicable", policydecision.NotApplicable, nil, ErrDelegationNotApplicable},
+		{"zero outcome", "", nil, ErrInvalidDelegationOutcome},
+		{"unknown outcome", "UNKNOWN", nil, ErrInvalidDelegationOutcome},
+		{"permit with error", policydecision.Permit, verifierErr, verifierErr},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			profile, parent, request, digest := delegationProfileFixture(t, now)
+			replay := identitypolicy.NewMemoryReplayCacheWithClock(func() time.Time { return now })
+			evidence := testEvidence(t, now, digest, digest,
+				"authorization:delegate:outcome", "proof:delegate:outcome", "nonce:delegate:outcome", replay)
+			verifier := DelegationDecisionVerifierFunc(func(
+				_ context.Context, current taskcoord.Assignment, bound DelegationRequest, at time.Time,
+			) (DelegationDecision, error) {
+				// A contradictory projection must not turn a non-Permit into permission.
+				return DelegationDecision{Outcome: test.outcome, Verified: verifiedDelegationFor(current, bound, at)}, test.verifierErr
+			})
+			if transition, err := profile.Delegate(context.Background(), parent, request, verifier, evidence); !errors.Is(err, test.want) || transition.Delegation.DecisionID != "" {
+				t.Fatalf("Delegate() = (%+v, %v), want no transition and %v", transition, err, test.want)
+			}
+			permit := DelegationDecisionVerifierFunc(func(
+				_ context.Context, current taskcoord.Assignment, bound DelegationRequest, at time.Time,
+			) (DelegationDecision, error) {
+				return DelegationDecision{Outcome: policydecision.Permit, Verified: verifiedDelegationFor(current, bound, at)}, nil
+			})
+			if _, err := profile.Delegate(context.Background(), parent, request, permit, evidence); err != nil {
+				t.Fatalf("Permit after rejected evaluation failed; replay may have been consumed: %v", err)
+			}
+		})
 	}
 }
 
@@ -540,7 +584,7 @@ func TestProfileDelegateIsolatesVerifierInputPointers(t *testing.T) {
 		current taskcoord.Assignment,
 		bound DelegationRequest,
 		at time.Time,
-	) (taskcoord.VerifiedDelegation, error) {
+	) (DelegationDecision, error) {
 		if current.AcceptedAt == parent.AcceptedAt || current.DueAt == parent.DueAt || bound.DueAt == request.DueAt {
 			t.Fatal("delegation verifier received shared pointer fields")
 		}
@@ -548,7 +592,7 @@ func TestProfileDelegateIsolatesVerifierInputPointers(t *testing.T) {
 		*current.AcceptedAt = time.Time{}
 		*current.DueAt = now.Add(-2 * time.Hour)
 		*bound.DueAt = now.Add(-time.Hour)
-		return decision, nil
+		return DelegationDecision{Outcome: policydecision.Permit, Verified: decision}, nil
 	})
 
 	transition, err := profile.Delegate(ctx, parent, request, verifier, evidence)
