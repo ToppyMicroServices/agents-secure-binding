@@ -375,7 +375,7 @@ func (s *Ingress) acceptOperation(ctx context.Context, store taskcoord.Store, op
 		if !policyExpiry.IsZero() && policyExpiry.Before(accepted.expiresAt) {
 			accepted.expiresAt = policyExpiry
 		}
-		if !now.Before(accepted.expiresAt) {
+		if !s.currentTime().Before(accepted.expiresAt) {
 			return profile, acceptance{}, now, errOperationAuthorization
 		}
 	}
@@ -453,6 +453,9 @@ func (s *Ingress) applyOperation(ctx context.Context, store taskcoord.Store, pro
 		if err != nil {
 			return ExecuteResponse{}, err
 		}
+		if !s.currentTime().Before(accepted.expiresAt) {
+			return ExecuteResponse{}, errOperationAuthorization
+		}
 		if err := store.CommitAssignment(ctx, 0, transition.Assignment, transition.Record); err != nil {
 			return ExecuteResponse{}, err
 		}
@@ -470,6 +473,9 @@ func (s *Ingress) applyOperation(ctx context.Context, store taskcoord.Store, pro
 		if err != nil {
 			return ExecuteResponse{}, err
 		}
+		if !s.currentTime().Before(accepted.expiresAt) {
+			return ExecuteResponse{}, errOperationAuthorization
+		}
 		if err := store.CommitAssignment(ctx, request.ExpectedRevision, transition.Assignment, transition.Record); err != nil {
 			return ExecuteResponse{}, err
 		}
@@ -486,6 +492,9 @@ func (s *Ingress) applyOperation(ctx context.Context, store taskcoord.Store, pro
 		event, err := profile.newInteractionEventAccepted(request, accepted, now)
 		if err != nil {
 			return ExecuteResponse{}, err
+		}
+		if !s.currentTime().Before(accepted.expiresAt) {
+			return ExecuteResponse{}, errOperationAuthorization
 		}
 		if err := store.AppendInteractionEvent(ctx, event); err != nil {
 			return ExecuteResponse{}, err
@@ -526,6 +535,9 @@ func (s *Ingress) applyOperation(ctx context.Context, store taskcoord.Store, pro
 		transition, err := profile.delegateAccepted(ctx, parent, request, accepted, now, verifyDelegation)
 		if err != nil {
 			return ExecuteResponse{}, err
+		}
+		if !s.currentTime().Before(accepted.expiresAt) {
+			return ExecuteResponse{}, errOperationAuthorization
 		}
 		if err := store.CommitDelegation(ctx, request.ExpectedRevision, transition); err != nil {
 			return ExecuteResponse{}, err

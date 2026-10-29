@@ -986,6 +986,72 @@ func TestIngressCollapsesAcceptedUntilErrorAfterProof(t *testing.T) {
 	}
 }
 
+func TestIngressRejectsAcceptedUntilExpiryDuringPolicyCallback(t *testing.T) {
+	now := time.Date(2026, 8, 13, 10, 0, 0, 0, time.UTC)
+	store := seededIngressStore(t, now)
+	var expired atomic.Bool
+	server, client := newLiveIngressWithStore(t, now, store, func(ingress *Ingress) {
+		ingress.Now = func() time.Time {
+			if expired.Load() {
+				return now.Add(2 * time.Second)
+			}
+			return now
+		}
+		ingress.Policy.AcceptedUntil = func(context.Context, RequestKind, Digest) (time.Time, error) {
+			expired.Store(true)
+			return now.Add(time.Second), nil
+		}
+	})
+	request := TransitionRequest{
+		ParticipantID: "human:alice", EventID: "event:accept:expired-policy",
+		TaskID: "task:human:1", AssignmentID: "assignment:human:1",
+		Operation: taskcoord.OperationAccept, ExpectedRevision: 1,
+	}
+	executeValidOperation(t, client, server.URL, now, OperationAssignmentTransition, request, http.StatusForbidden)
+	stored, err := store.LoadAssignment(context.Background(), request.AssignmentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Revision != 1 || stored.Status != taskcoord.AssignmentOffered {
+		t.Fatalf("expired policy changed Assignment: %+v", stored)
+	}
+}
+
+func TestIngressRejectsDelegationWhenProofExpiresDuringDecision(t *testing.T) {
+	now := time.Date(2026, 8, 13, 10, 0, 0, 0, time.UTC)
+	store, parent, target := seededDelegationIngressStore(t, now)
+	var expired atomic.Bool
+	server, client := newLiveIngressWithStore(t, now, store, func(ingress *Ingress) {
+		ingress.Now = func() time.Time {
+			if expired.Load() {
+				return now.Add(2 * time.Second)
+			}
+			return now
+		}
+		ingress.Policy.AcceptedUntil = func(context.Context, RequestKind, Digest) (time.Time, error) {
+			return now.Add(time.Second), nil
+		}
+		ingress.Policy.DelegationVerifier = DelegationDecisionVerifierFunc(func(
+			_ context.Context, current taskcoord.Assignment, request DelegationRequest, at time.Time,
+		) (DelegationDecision, error) {
+			expired.Store(true)
+			return DelegationDecision{Outcome: policydecision.Permit, Verified: verifiedDelegationFor(current, request, at)}, nil
+		})
+	})
+	request := liveDelegationRequest(parent, target.ParticipantID)
+	executeValidOperation(t, client, server.URL, now, OperationAssignmentDelegation, request, http.StatusForbidden)
+	stored, err := store.LoadAssignment(context.Background(), parent.AssignmentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Revision != parent.Revision {
+		t.Fatalf("expired decision changed parent Assignment: %+v", stored)
+	}
+	if _, err := store.LoadAssignment(context.Background(), request.ChildAssignmentID); !errors.Is(err, taskcoord.ErrNotFound) {
+		t.Fatalf("expired decision created child Assignment: %v", err)
+	}
+}
+
 func TestIngressRejectsPlainHTTPAndUnverifiedClient(t *testing.T) {
 	now := time.Date(2026, 8, 13, 10, 0, 0, 0, time.UTC)
 	store := seededIngressStore(t, now)
