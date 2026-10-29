@@ -25,6 +25,12 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
+const (
+	testComputationID = "test-comp-id"
+	testRunA          = "run-A"
+	testRunB          = "run-B"
+)
+
 type mockStream struct {
 	mock.Mock
 	grpc.ClientStream
@@ -236,12 +242,12 @@ func TestRunReqChunksRejectsMismatchedID(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	data, err := proto.Marshal(&cvms.ComputationRunReq{Id: "run-B"})
+	data, err := proto.Marshal(&cvms.ComputationRunReq{Id: testRunB})
 	if err != nil {
 		t.Fatal(err)
 	}
 	err = client.handleRunReqChunks(context.Background(), &cvms.ServerStreamMessage_RunReqChunks{
-		RunReqChunks: &cvms.RunReqChunks{Id: "run-A", Data: data, IsLast: true},
+		RunReqChunks: &cvms.RunReqChunks{Id: testRunA, Data: data, IsLast: true},
 	})
 	if err == nil || !errors.Is(err, errCorruptedManifest) {
 		t.Fatalf("chunk error = %v, want corrupted manifest", err)
@@ -263,7 +269,7 @@ func TestRunMessageCompletesBeforeFollowingStop(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	data, err := proto.Marshal(&cvms.ComputationRunReq{Id: "run-A"})
+	data, err := proto.Marshal(&cvms.ComputationRunReq{Id: testRunA})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -289,7 +295,7 @@ func TestRunMessageCompletesBeforeFollowingStop(t *testing.T) {
 	go func() {
 		runReturned <- client.processIncomingMessage(context.Background(), &cvms.ServerStreamMessage{
 			Message: &cvms.ServerStreamMessage_RunReqChunks{
-				RunReqChunks: &cvms.RunReqChunks{Id: "run-A", Data: data, IsLast: true},
+				RunReqChunks: &cvms.RunReqChunks{Id: testRunA, Data: data, IsLast: true},
 			},
 		})
 	}()
@@ -314,7 +320,7 @@ func TestRunMessageCompletesBeforeFollowingStop(t *testing.T) {
 	}
 	if err := client.processIncomingMessage(context.Background(), &cvms.ServerStreamMessage{
 		Message: &cvms.ServerStreamMessage_StopComputation{
-			StopComputation: &cvms.StopComputation{ComputationId: "run-A"},
+			StopComputation: &cvms.StopComputation{ComputationId: testRunA},
 		},
 	}); err != nil {
 		t.Fatal(err)
@@ -378,7 +384,7 @@ func TestExecuteRunReportsInitializationFailure(t *testing.T) {
 	svc.On("State").Return("ReceivingManifest").Once()
 	svc.On("InitComputation", mock.Anything, mock.Anything).Return(assert.AnError).Once()
 
-	client.executeRun(context.Background(), &cvms.ComputationRunReq{Id: "run-A"})
+	client.executeRun(context.Background(), &cvms.ComputationRunReq{Id: testRunA})
 	response := (<-queue).GetRunRes()
 	if response == nil || response.Error == "" {
 		t.Fatalf("run response = %+v, want initialization error", response)
@@ -406,7 +412,7 @@ func TestExecuteRunReportsIngressStartFailure(t *testing.T) {
 	serverSvc.On("Stop").Return(nil).Once()
 	proxy.On("Start", mock.Anything, mock.Anything).Return(assert.AnError).Once()
 
-	client.executeRun(context.Background(), &cvms.ComputationRunReq{Id: "run-A"})
+	client.executeRun(context.Background(), &cvms.ComputationRunReq{Id: testRunA})
 	response := (<-queue).GetRunRes()
 	if response == nil || response.Error == "" {
 		t.Fatalf("run response = %+v, want ingress startup error", response)
@@ -430,11 +436,11 @@ func TestManagerClient_handleStopComputation(t *testing.T) {
 
 	client, err := NewClient(mockStream, mockSvc, messageQueue, logger, mockServerSvc, nil, t.TempDir(), func(ctx context.Context) (pkggrpc.Client, cvms.Service_ProcessClient, error) { return nil, nil, nil }, grpcClient)
 	assert.NoError(t, err)
-	client.activeRunID = "test-comp-id"
+	client.activeRunID = testComputationID
 
 	stopReq := &cvms.ServerStreamMessage_StopComputation{
 		StopComputation: &cvms.StopComputation{
-			ComputationId: "test-comp-id",
+			ComputationId: testComputationID,
 		},
 	}
 
@@ -452,7 +458,7 @@ func TestManagerClient_handleStopComputation(t *testing.T) {
 	msg := <-messageQueue
 	stopRes, ok := msg.Message.(*cvms.ClientStreamMessage_StopComputationRes)
 	assert.True(t, ok)
-	assert.Equal(t, "test-comp-id", stopRes.StopComputationRes.ComputationId)
+	assert.Equal(t, testComputationID, stopRes.StopComputationRes.ComputationId)
 	assert.Empty(t, stopRes.StopComputationRes.Message)
 }
 
@@ -461,7 +467,7 @@ func TestStopComputationRejectsWrongRun(t *testing.T) {
 		name string
 		id   string
 	}{
-		{name: "stale run", id: "run-A"},
+		{name: "stale run", id: testRunA},
 		{name: "missing run", id: ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -474,7 +480,7 @@ func TestStopComputationRejectsWrongRun(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			client.activeRunID = "run-B"
+			client.activeRunID = testRunB
 
 			client.handleStopComputation(context.Background(), &cvms.ServerStreamMessage_StopComputation{
 				StopComputation: &cvms.StopComputation{ComputationId: tc.id},
@@ -484,7 +490,7 @@ func TestStopComputationRejectsWrongRun(t *testing.T) {
 			if response == nil || response.ComputationId != tc.id || response.Message == "" {
 				t.Fatalf("stop response = %+v, want rejection for %q", response, tc.id)
 			}
-			if client.activeRunID != "run-B" {
+			if client.activeRunID != testRunB {
 				t.Fatalf("active run = %q, want run-B", client.activeRunID)
 			}
 			svc.AssertNotCalled(t, "StopComputation", mock.Anything)
@@ -503,23 +509,23 @@ func TestStopFailureBlocksNextRun(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	client.activeRunID = "run-A"
+	client.activeRunID = testRunA
 	svc.On("StopComputation", mock.Anything).Return(nil).Once()
 	serverSvc.On("Stop").Return(assert.AnError).Once()
 
 	client.handleStopComputation(context.Background(), &cvms.ServerStreamMessage_StopComputation{
-		StopComputation: &cvms.StopComputation{ComputationId: "run-A"},
+		StopComputation: &cvms.StopComputation{ComputationId: testRunA},
 	})
 	response := (<-queue).GetStopComputationRes()
 	if response == nil || response.Message == "" {
 		t.Fatalf("stop response = %+v, want cleanup error", response)
 	}
-	client.executeRun(context.Background(), &cvms.ComputationRunReq{Id: "run-B"})
+	client.executeRun(context.Background(), &cvms.ComputationRunReq{Id: testRunB})
 	runResponse := (<-queue).GetRunRes()
 	if runResponse == nil || runResponse.Error == "" {
 		t.Fatalf("run response = %+v, want active-run rejection", runResponse)
 	}
-	if client.activeRunID != "run-A" {
+	if client.activeRunID != testRunA {
 		t.Fatalf("active run = %q, want failed run-A retained", client.activeRunID)
 	}
 	svc.AssertNotCalled(t, "InitComputation", mock.Anything, mock.Anything)
@@ -556,7 +562,7 @@ func TestStopAndRunSerializeBeforeInitialization(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	client.activeRunID = "run-A"
+	client.activeRunID = testRunA
 
 	stopEntered := make(chan struct{})
 	releaseStop := make(chan struct{})
@@ -571,14 +577,14 @@ func TestStopAndRunSerializeBeforeInitialization(t *testing.T) {
 	serverSvc.On("Start", mock.Anything, mock.Anything).Return(nil).Once()
 
 	go client.handleStopComputation(context.Background(), &cvms.ServerStreamMessage_StopComputation{
-		StopComputation: &cvms.StopComputation{ComputationId: "run-A"},
+		StopComputation: &cvms.StopComputation{ComputationId: testRunA},
 	})
 	select {
 	case <-stopEntered:
 	case <-time.After(2 * time.Second):
 		t.Fatal("stop did not reach Agent server")
 	}
-	go client.executeRun(context.Background(), &cvms.ComputationRunReq{Id: "run-B"})
+	go client.executeRun(context.Background(), &cvms.ComputationRunReq{Id: testRunB})
 	select {
 	case <-stateCalled:
 		t.Fatal("new run checked service state before old Agent server stopped")
@@ -595,7 +601,7 @@ func TestStopAndRunSerializeBeforeInitialization(t *testing.T) {
 	client.runMu.Lock()
 	activeRunID := client.activeRunID
 	client.runMu.Unlock()
-	if activeRunID != "run-B" {
+	if activeRunID != testRunB {
 		t.Fatalf("active run = %q, want run-B", activeRunID)
 	}
 	svc.AssertExpectations(t)
@@ -747,11 +753,11 @@ func TestManagerClient_handleStopComputationWithIngressProxy(t *testing.T) {
 
 	client, err := NewClient(mockStream, mockSvc, messageQueue, logger, mockServerSvc, mockIngressProxy, t.TempDir(), func(ctx context.Context) (pkggrpc.Client, cvms.Service_ProcessClient, error) { return nil, nil, nil }, grpcClient)
 	assert.NoError(t, err)
-	client.activeRunID = "test-comp-id"
+	client.activeRunID = testComputationID
 
 	stopReq := &cvms.ServerStreamMessage_StopComputation{
 		StopComputation: &cvms.StopComputation{
-			ComputationId: "test-comp-id",
+			ComputationId: testComputationID,
 		},
 	}
 
@@ -781,11 +787,11 @@ func TestManagerClient_handleStopComputationWithIngressProxyError(t *testing.T) 
 
 	client, err := NewClient(mockStream, mockSvc, messageQueue, logger, mockServerSvc, mockIngressProxy, t.TempDir(), func(ctx context.Context) (pkggrpc.Client, cvms.Service_ProcessClient, error) { return nil, nil, nil }, grpcClient)
 	assert.NoError(t, err)
-	client.activeRunID = "test-comp-id"
+	client.activeRunID = testComputationID
 
 	stopReq := &cvms.ServerStreamMessage_StopComputation{
 		StopComputation: &cvms.StopComputation{
-			ComputationId: "test-comp-id",
+			ComputationId: testComputationID,
 		},
 	}
 
