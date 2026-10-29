@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -39,7 +40,10 @@ type PendingMessage struct {
 }
 
 type CVMSClient struct {
-	mu            sync.Mutex
+	mu sync.Mutex
+	// runMu keeps run and stop transitions separate from stream I/O.
+	runMu         sync.Mutex
+	activeRunID   string
 	stream        cvms.Service_ProcessClient
 	svc           agent.Service
 	messageQueue  chan *cvms.ClientStreamMessage
@@ -175,6 +179,9 @@ func (client *CVMSClient) sendPendingMessages(pending []storage.Message) {
 }
 
 func (client *CVMSClient) processIncomingMessage(ctx context.Context, req *cvms.ServerStreamMessage) error {
+	if req == nil {
+		return errUnknownMessageType
+	}
 	switch mes := req.Message.(type) {
 	case *cvms.ServerStreamMessage_RunReqChunks:
 		return client.handleRunReqChunks(ctx, mes)
@@ -209,6 +216,9 @@ func (client *CVMSClient) handleAgentStateReq(mes *cvms.ServerStreamMessage_Agen
 }
 
 func (client *CVMSClient) handleRunReqChunks(ctx context.Context, msg *cvms.ServerStreamMessage_RunReqChunks) error {
+	if msg == nil || msg.RunReqChunks == nil {
+		return errCorruptedManifest
+	}
 	client.logger.Debug("Received RunReq chunk", "id", msg.RunReqChunks.Id, "size", len(msg.RunReqChunks.Data), "isLast", msg.RunReqChunks.IsLast)
 	buffer, complete := client.runReqManager.addChunk(msg.RunReqChunks.Id, msg.RunReqChunks.Data, msg.RunReqChunks.IsLast)
 
@@ -218,15 +228,32 @@ func (client *CVMSClient) handleRunReqChunks(ctx context.Context, msg *cvms.Serv
 		if err := proto.Unmarshal(buffer, &runReq); err != nil {
 			return errors.Wrap(err, errCorruptedManifest)
 		}
+		if runReq.Id != msg.RunReqChunks.Id {
+			return fmt.Errorf("%w: run request ID does not match chunk ID", errCorruptedManifest)
+		}
 
 		client.logger.Info("Starting computation execution", "computationId", runReq.Id, "name", runReq.Name)
-		go client.executeRun(ctx, &runReq)
+		client.executeRun(ctx, &runReq)
 	}
 
 	return nil
 }
 
 func (client *CVMSClient) executeRun(ctx context.Context, runReq *cvms.ComputationRunReq) {
+	if runReq == nil || strings.TrimSpace(runReq.Id) == "" {
+		id := ""
+		if runReq != nil {
+			id = runReq.Id
+		}
+		client.sendMessage(&cvms.ClientStreamMessage{Message: &cvms.ClientStreamMessage_RunRes{
+			RunRes: &cvms.RunResponse{ComputationId: id, Error: "missing computation ID"},
+		}})
+		return
+	}
+	runRes := &cvms.ClientStreamMessage_RunRes{
+		RunRes: &cvms.RunResponse{ComputationId: runReq.Id},
+	}
+
 	ac := agent.Computation{
 		ID:          runReq.Id,
 		Name:        runReq.Name,
@@ -282,33 +309,40 @@ func (client *CVMSClient) executeRun(ctx context.Context, runReq *cvms.Computati
 		}
 	}
 
+	client.runMu.Lock()
+	defer client.runMu.Unlock()
+
 	// Check if the agent is in the correct state to initialize a new computation.
 	// If the agent is already processing this computation (e.g., after a reconnection),
 	// skip initialization to avoid state errors.
+	if client.activeRunID != "" {
+		client.logger.Info("Agent already processing computation, skipping initialization", "computationId", runReq.Id)
+		if client.activeRunID != runReq.Id {
+			runRes.RunRes.Error = "agent is processing another computation"
+			client.sendMessage(&cvms.ClientStreamMessage{Message: runRes})
+		}
+		return
+	}
 	currentState := client.svc.State()
 	if currentState != "ReceivingManifest" {
 		client.logger.Info("Agent already processing computation, skipping initialization", "state", currentState, "computationId", runReq.Id)
+		runRes.RunRes.Error = "agent is not ready for a new computation"
+		client.sendMessage(&cvms.ClientStreamMessage{Message: runRes})
 		return
 	}
 
 	if err := client.svc.InitComputation(ctx, ac); err != nil {
 		client.logger.Warn(err.Error())
+		runRes.RunRes.Error = err.Error()
+		client.sendMessage(&cvms.ClientStreamMessage{Message: runRes})
 		return
 	}
+	client.activeRunID = runReq.Id
 
 	ccPlatform := attestation.CCPlatform()
 
-	client.mu.Lock()
-	defer client.mu.Unlock()
-
 	if runReq.AgentConfig == nil {
 		runReq.AgentConfig = &cvms.AgentConfig{}
-	}
-
-	runRes := &cvms.ClientStreamMessage_RunRes{
-		RunRes: &cvms.RunResponse{
-			ComputationId: runReq.Id,
-		},
 	}
 
 	if err := client.sp.Start(agent.AgentConfig{
@@ -323,6 +357,8 @@ func (client *CVMSClient) executeRun(ctx context.Context, runReq *cvms.Computati
 		if stopErr := client.svc.StopComputation(ctx); stopErr != nil {
 			client.logger.Error("Failed to reset computation after Agent server startup error", "error", stopErr)
 			runRes.RunRes.Error = fmt.Sprintf("%s; reset failed: %s", err, stopErr)
+		} else {
+			client.activeRunID = ""
 		}
 		client.sendMessage(&cvms.ClientStreamMessage{Message: runRes})
 		return
@@ -341,6 +377,21 @@ func (client *CVMSClient) executeRun(ctx context.Context, runReq *cvms.Computati
 			ingress.ComputationToProxyContext(ac),
 		); err != nil {
 			client.logger.Warn(fmt.Sprintf("failed to start ingress proxy: %s", err.Error()))
+			runRes.RunRes.Error = fmt.Sprintf("failed to start ingress proxy: %s", err)
+			var resetErr error
+			if err := client.svc.StopComputation(ctx); err != nil {
+				resetErr = errors.Wrap(resetErr, err)
+			}
+			if err := client.sp.Stop(); err != nil {
+				resetErr = errors.Wrap(resetErr, err)
+			}
+			if resetErr != nil {
+				runRes.RunRes.Error = fmt.Sprintf("%s; reset failed: %s", runRes.RunRes.Error, resetErr)
+			} else {
+				client.activeRunID = ""
+			}
+			client.sendMessage(&cvms.ClientStreamMessage{Message: runRes})
+			return
 		}
 	}
 
@@ -362,26 +413,43 @@ func (client *CVMSClient) executeRun(ctx context.Context, runReq *cvms.Computati
 }
 
 func (client *CVMSClient) handleStopComputation(ctx context.Context, mes *cvms.ServerStreamMessage_StopComputation) {
+	requestedID := ""
+	if mes != nil && mes.StopComputation != nil {
+		requestedID = mes.StopComputation.ComputationId
+	}
 	msg := &cvms.ClientStreamMessage_StopComputationRes{
 		StopComputationRes: &cvms.StopComputationResponse{
-			ComputationId: mes.StopComputation.ComputationId,
+			ComputationId: requestedID,
 		},
 	}
-	if err := client.svc.StopComputation(ctx); err != nil {
-		msg.StopComputationRes.Message = err.Error()
+	client.runMu.Lock()
+	if requestedID == "" || requestedID != client.activeRunID {
+		client.runMu.Unlock()
+		msg.StopComputationRes.Message = "stop request does not match active computation"
+		client.sendMessage(&cvms.ClientStreamMessage{Message: msg})
+		return
 	}
 
-	client.mu.Lock()
+	var stopErr error
+	if err := client.svc.StopComputation(ctx); err != nil {
+		stopErr = errors.Wrap(stopErr, err)
+	}
 	if err := client.sp.Stop(); err != nil {
-		msg.StopComputationRes.Message = err.Error()
+		stopErr = errors.Wrap(stopErr, err)
 	}
 	// Stop ingress proxy if available
 	if client.ingressProxy != nil {
 		if err := client.ingressProxy.Stop(); err != nil {
 			client.logger.Warn(fmt.Sprintf("failed to stop ingress proxy: %s", err.Error()))
+			stopErr = errors.Wrap(stopErr, err)
 		}
 	}
-	client.mu.Unlock()
+	if stopErr == nil {
+		client.activeRunID = ""
+	} else {
+		msg.StopComputationRes.Message = stopErr.Error()
+	}
+	client.runMu.Unlock()
 
 	client.sendMessage(&cvms.ClientStreamMessage{Message: msg})
 }
