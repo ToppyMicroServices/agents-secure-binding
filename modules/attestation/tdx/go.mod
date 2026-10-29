@@ -6,7 +6,7 @@ toolchain go1.26.10
 
 require (
 	github.com/google/go-tdx-guest v0.3.2-0.20241009005452-097ee70d0843
-	google.golang.org/protobuf v1.36.11
+	google.golang.org/protobuf v1.36.12
 )
 
 require (
