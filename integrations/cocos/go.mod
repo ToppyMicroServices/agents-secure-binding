@@ -7,7 +7,7 @@ toolchain go1.26.10
 require (
 	github.com/ToppyMicroServices/agents-secure-binding/modules/attestation/snp v0.1.1
 	github.com/ToppyMicroServices/agents-secure-binding/modules/attestation/tdx v0.1.2
-	github.com/ToppyMicroServices/agents-secure-binding/v2 v2.0.0-rc.2.0.20261029132141-03167c306ffa
+	github.com/ToppyMicroServices/agents-secure-binding/v2 v2.0.0-rc.2.0.20261029143530-abe9e145c0d2
 	github.com/caarlos0/env/v11 v11.4.1
 	github.com/fatih/color v1.19.0
 	github.com/fxamacker/cbor/v2 v2.9.2
