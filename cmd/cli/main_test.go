@@ -46,7 +46,9 @@ func TestCLIExitStatus(t *testing.T) {
 		{"missing local file", []string{"checksum", fixture + ".absent"}, nil, 1, "Error computing hash:"},
 		{"invalid command", []string{"invalid-command"}, nil, 1, "unknown command"},
 		{"invalid environment", []string{"--help"}, []string{"AGENT_GRPC_TIMEOUT=invalid"}, 1, "failed to load"},
-		{"agent setup failure", []string{"algo", fixture, fixture}, []string{"AGENT_GRPC_URL=remote.invalid:9999"}, 1, "Failed to connect to agent:"},
+		{"agent setup failure", []string{"algo", fixture, fixture}, []string{"AGENT_GRPC_URL=remote.invalid:9999", "AGENT_CVM_ID=test-vm", "AGENT_COMPUTATION_ID=test-computation"}, 1, "Failed to connect to agent:"},
+		{"agent missing VM", []string{"algo", fixture, fixture}, []string{"AGENT_GRPC_URL=remote.invalid:9999", "AGENT_COMPUTATION_ID=test-computation"}, 1, "missing Agent instance ID"},
+		{"agent missing computation", []string{"algo", fixture, fixture}, []string{"AGENT_GRPC_URL=remote.invalid:9999", "AGENT_CVM_ID=test-vm"}, 1, "missing computation ID"},
 		{"help without agent", []string{"--help"}, []string{"AGENT_GRPC_URL=remote.invalid:9999"}, 0, "Usage:"},
 	} {
 		t.Run(test.name, func(t *testing.T) {

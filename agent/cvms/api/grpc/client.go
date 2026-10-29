@@ -320,6 +320,12 @@ func (client *CVMSClient) executeRun(ctx context.Context, runReq *cvms.Computati
 	}, ac); err != nil {
 		client.logger.Warn(err.Error())
 		runRes.RunRes.Error = err.Error()
+		if stopErr := client.svc.StopComputation(ctx); stopErr != nil {
+			client.logger.Error("Failed to reset computation after Agent server startup error", "error", stopErr)
+			runRes.RunRes.Error = fmt.Sprintf("%s; reset failed: %s", err, stopErr)
+		}
+		client.sendMessage(&cvms.ClientStreamMessage{Message: runRes})
+		return
 	}
 
 	// Start ingress proxy if available

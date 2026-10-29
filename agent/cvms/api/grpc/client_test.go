@@ -10,6 +10,7 @@ import (
 	"github.com/ToppyMicroServices/agents-secure-binding/v2/agent"
 	"github.com/ToppyMicroServices/agents-secure-binding/v2/agent/cvms"
 	"github.com/ToppyMicroServices/agents-secure-binding/v2/agent/cvms/api/grpc/storage"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/agent/cvms/server"
 	servermocks "github.com/ToppyMicroServices/agents-secure-binding/v2/agent/cvms/server/mocks"
 	"github.com/ToppyMicroServices/agents-secure-binding/v2/agent/mocks"
 	mglog "github.com/ToppyMicroServices/agents-secure-binding/v2/internal/runtime/logging"
@@ -225,6 +226,36 @@ func TestManagerClient_handleRunReqChunks(t *testing.T) {
 	runRes, ok := msg.Message.(*cvms.ClientStreamMessage_RunRes)
 	assert.True(t, ok)
 	assert.Equal(t, "test-id", runRes.RunRes.ComputationId)
+}
+
+func TestExecuteRunSkipsIngressWhenAgentStartFails(t *testing.T) {
+	mockSvc := new(mocks.Service)
+	mockServerSvc := new(servermocks.AgentServer)
+	proxy := new(mockIngressProxy)
+	queue := make(chan *cvms.ClientStreamMessage, 1)
+	client, err := NewClient(new(mockStream), mockSvc, queue, mglog.NewMock(), mockServerSvc, proxy, t.TempDir(),
+		func(context.Context) (pkggrpc.Client, cvms.Service_ProcessClient, error) { return nil, nil, nil }, new(clientmocks.Client))
+	if err != nil {
+		t.Fatal(err)
+	}
+	mockSvc.On("State").Return("ReceivingManifest").Once()
+	mockSvc.On("InitComputation", mock.Anything, mock.Anything).Return(nil).Once()
+	mockSvc.On("StopComputation", mock.Anything).Return(nil).Once()
+	mockServerSvc.On("Start", mock.Anything, mock.Anything).Return(server.ErrRunIDReused).Once()
+
+	client.executeRun(context.Background(), &cvms.ComputationRunReq{Id: "run-1"})
+	select {
+	case msg := <-queue:
+		result, ok := msg.Message.(*cvms.ClientStreamMessage_RunRes)
+		if !ok || result.RunRes.Error != server.ErrRunIDReused.Error() {
+			t.Fatalf("RunRes = %+v, want rejected run ID", msg)
+		}
+	default:
+		t.Fatal("missing rejected RunRes")
+	}
+	proxy.AssertNotCalled(t, "Start", mock.Anything, mock.Anything)
+	mockSvc.AssertExpectations(t)
+	mockServerSvc.AssertExpectations(t)
 }
 
 func TestManagerClient_handleStopComputation(t *testing.T) {

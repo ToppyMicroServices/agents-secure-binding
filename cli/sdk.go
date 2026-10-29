@@ -3,6 +3,9 @@
 package cli
 
 import (
+	"strings"
+
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/agent/auth"
 	"github.com/ToppyMicroServices/agents-secure-binding/v2/manager"
 	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/attestation/cmdconfig"
 	"github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/clients"
@@ -17,6 +20,8 @@ var Verbose bool
 
 type CLI struct {
 	agentSDK          sdk.SDK
+	instanceID        string
+	computationID     string
 	agentConfig       clients.AttestedClientConfig
 	managerConfig     clients.StandardClientConfig
 	client            grpc.Client
@@ -27,25 +32,38 @@ type CLI struct {
 	measurement       cmdconfig.MeasurementProvider
 }
 
-func New(agentConfig clients.AttestedClientConfig, managerConfig clients.StandardClientConfig, measurement cmdconfig.MeasurementProvider) *CLI {
+func New(agentConfig clients.AttestedClientConfig, managerConfig clients.StandardClientConfig, measurement cmdconfig.MeasurementProvider, instanceID, computationID string) *CLI {
 	return &CLI{
 		agentConfig:   agentConfig,
 		managerConfig: managerConfig,
 		measurement:   measurement,
+		instanceID:    instanceID,
+		computationID: computationID,
 	}
 }
 
 func (c *CLI) InitializeAgentSDK(cmd *cobra.Command) error {
+	if strings.TrimSpace(c.instanceID) == "" {
+		return auth.ErrMissingInstanceID
+	}
+	if strings.TrimSpace(c.computationID) == "" {
+		return auth.ErrMissingComputationID
+	}
 	agentGRPCClient, agentClient, err := agent.NewAgentClient(cmd.Context(), c.agentConfig)
 	if err != nil {
+		c.connectErr = err
+		return err
+	}
+	agentSDK, err := sdk.NewAgentSDK(agentClient, c.instanceID, c.computationID)
+	if err != nil {
+		_ = agentGRPCClient.Close()
 		c.connectErr = err
 		return err
 	}
 	cmd.Println("🔗 Connected to agent ", agentGRPCClient.Secure())
 	c.client = agentGRPCClient
 	c.connectErr = nil
-
-	c.agentSDK = sdk.NewAgentSDK(agentClient)
+	c.agentSDK = agentSDK
 	return nil
 }
 

@@ -9,11 +9,13 @@ import (
 	"crypto/rand"
 	"crypto/x509"
 	"log/slog"
+	"net"
 	"os"
 	"testing"
 	"time"
 
 	"github.com/ToppyMicroServices/agents-secure-binding/v2/agent"
+	"github.com/ToppyMicroServices/agents-secure-binding/v2/agent/auth"
 	"github.com/ToppyMicroServices/agents-secure-binding/v2/agent/mocks"
 	"github.com/stretchr/testify/assert"
 )
@@ -36,29 +38,33 @@ func TestNewServer(t *testing.T) {
 	logger, svc, host, _ := setupTest(t)
 
 	tests := []struct {
-		name     string
-		logger   *slog.Logger
-		svc      agent.Service
-		host     string
-		expected AgentServer
+		name       string
+		logger     *slog.Logger
+		svc        agent.Service
+		host       string
+		instanceID string
+		expected   AgentServer
 	}{
 		{
-			name:   "valid server creation",
-			logger: logger,
-			svc:    svc,
-			host:   host,
+			name:       "valid server creation",
+			logger:     logger,
+			svc:        svc,
+			host:       host,
+			instanceID: "test-vm",
 		},
 		{
-			name:   "server with empty host",
-			logger: logger,
-			svc:    svc,
-			host:   "",
+			name:       "server with empty host",
+			logger:     logger,
+			svc:        svc,
+			host:       "",
+			instanceID: "test-vm",
 		},
 		{
-			name:   "server with empty caUrl",
-			logger: logger,
-			svc:    svc,
-			host:   host,
+			name:       "server with empty caUrl",
+			logger:     logger,
+			svc:        svc,
+			host:       host,
+			instanceID: "test-vm",
 		},
 		{
 			name:   "server with empty cvmId",
@@ -70,7 +76,7 @@ func TestNewServer(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			server := NewServer(tt.logger, tt.svc, tt.host)
+			server := NewServer(tt.logger, tt.svc, tt.host, tt.instanceID, t.TempDir())
 
 			assert.NotNil(t, server)
 
@@ -79,6 +85,7 @@ func TestNewServer(t *testing.T) {
 			assert.Equal(t, tt.logger, agentSrv.logger)
 			assert.Equal(t, tt.svc, agentSrv.svc)
 			assert.Equal(t, tt.host, agentSrv.host)
+			assert.Equal(t, tt.instanceID, agentSrv.instanceID)
 		})
 	}
 }
@@ -194,7 +201,7 @@ func TestAgentServer_Start(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			tt.setupMocks(svc)
 
-			server := NewServer(logger, svc, host)
+			server := NewServer(logger, svc, host, "test-vm", t.TempDir())
 
 			err := server.Start(tt.cfg, tt.cmp)
 
@@ -222,7 +229,7 @@ func TestAgentServer_Start(t *testing.T) {
 
 func TestAgentServer_StartRejectsPlaintextPublicTCP(t *testing.T) {
 	logger, svc, _, pubKey := setupTest(t)
-	server := NewServer(logger, svc, "192.0.2.10:7001")
+	server := NewServer(logger, svc, "192.0.2.10:7001", "test-vm", t.TempDir())
 
 	err := server.Start(agent.AgentConfig{}, agent.Computation{
 		ID:   "test-public-bind",
@@ -234,6 +241,72 @@ func TestAgentServer_StartRejectsPlaintextPublicTCP(t *testing.T) {
 	})
 
 	assert.ErrorIs(t, err, ErrPlaintextPublicAgentGRPC)
+}
+
+func TestAgentServer_StartRequiresInstanceID(t *testing.T) {
+	logger, svc, host, pubKey := setupTest(t)
+	server := NewServer(logger, svc, host, "", t.TempDir())
+	err := server.Start(agent.AgentConfig{}, agent.Computation{
+		ID: "run-1", Algorithm: agent.Algorithm{UserKey: pubKey},
+	})
+	assert.ErrorIs(t, err, auth.ErrMissingInstanceID)
+}
+
+func TestAgentServer_StartRequiresRunIDStore(t *testing.T) {
+	logger, svc, host, pubKey := setupTest(t)
+	server := NewServer(logger, svc, host, "vm-A", "")
+	err := server.Start(agent.AgentConfig{}, agent.Computation{
+		ID: "run-1", Algorithm: agent.Algorithm{UserKey: pubKey},
+	})
+	assert.ErrorIs(t, err, ErrMissingRunIDStore)
+}
+
+func TestAgentServer_StartRejectsReusedRunIDAcrossInstances(t *testing.T) {
+	logger, svc, host, pubKey := setupTest(t)
+	store := t.TempDir()
+	start := func(instanceID, runID string) error {
+		t.Helper()
+		server := NewServer(logger, svc, host, instanceID, store)
+		err := server.Start(agent.AgentConfig{}, agent.Computation{
+			ID: runID, Algorithm: agent.Algorithm{UserKey: pubKey},
+		})
+		if err == nil {
+			if stopErr := server.Stop(); stopErr != nil {
+				t.Fatalf("Stop() error = %v", stopErr)
+			}
+		}
+		return err
+	}
+
+	assert.NoError(t, start("vm-A", "run-1"))
+	assert.ErrorIs(t, start("vm-A", "run-1"), ErrRunIDReused)
+	assert.NoError(t, start("vm-B", "run-1"))
+	assert.NoError(t, start("vm-A", "run-2"))
+}
+
+func TestAgentServer_StartCanRetryRunIDAfterBindFailure(t *testing.T) {
+	logger, svc, _, pubKey := setupTest(t)
+	occupied, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	host := occupied.Addr().String()
+	store := t.TempDir()
+	computation := agent.Computation{ID: "run-1", Algorithm: agent.Algorithm{UserKey: pubKey}}
+	server := NewServer(logger, svc, host, "vm-A", store)
+	if err := server.Start(agent.AgentConfig{}, computation); err == nil || err == ErrRunIDReused {
+		t.Fatalf("Start() with occupied listener error = %v, want bind failure", err)
+	}
+	if err := occupied.Close(); err != nil {
+		t.Fatal(err)
+	}
+	server = NewServer(logger, svc, host, "vm-A", store)
+	if err := server.Start(agent.AgentConfig{}, computation); err != nil {
+		t.Fatalf("Start() retry after bind failure = %v", err)
+	}
+	if err := server.Stop(); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestAgentServer_Stop(t *testing.T) {
@@ -284,7 +357,7 @@ func TestAgentServer_Stop(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			server := NewServer(logger, svc, host)
+			server := NewServer(logger, svc, host, "test-vm", t.TempDir())
 
 			err := tt.setupServer(server)
 			if err != nil {
@@ -312,7 +385,7 @@ func TestAgentServer_Stop(t *testing.T) {
 
 func TestAgentServer_StopMultipleTimes(t *testing.T) {
 	logger, svc, host, pubKey := setupTest(t)
-	server := NewServer(logger, svc, host)
+	server := NewServer(logger, svc, host, "test-vm", t.TempDir())
 
 	// Start the server
 	cfg := agent.AgentConfig{}
@@ -356,7 +429,7 @@ func TestAgentServer_StopMultipleTimes(t *testing.T) {
 
 func TestAgentServer_StartAfterStop(t *testing.T) {
 	logger, svc, host, pubKey := setupTest(t)
-	server := NewServer(logger, svc, host)
+	server := NewServer(logger, svc, host, "test-vm", t.TempDir())
 
 	cfg := agent.AgentConfig{}
 	cmp := agent.Computation{
@@ -504,7 +577,7 @@ func TestAgentServer_ConfigValidation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			server := NewServer(logger, svc, host)
+			server := NewServer(logger, svc, host, "test-vm", t.TempDir())
 
 			err := server.Start(tt.config, tt.cmp)
 
