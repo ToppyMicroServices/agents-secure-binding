@@ -32,9 +32,11 @@ const (
 	defSvcGRPCSocket = "/run/agents-secure-binding/agent.sock"
 )
 
-var ErrPlaintextPublicAgentGRPC = fmt.Errorf("agent grpc: plaintext listener requires unix socket or loopback")
-var ErrMissingRunIDStore = errors.New("agent grpc: missing persistent run ID store")
-var ErrRunIDReused = errors.New("agent grpc: computation run ID already used by this VM")
+var (
+	ErrPlaintextPublicAgentGRPC = fmt.Errorf("agent grpc: plaintext listener requires unix socket or loopback")
+	ErrMissingRunIDStore        = errors.New("agent grpc: missing persistent run ID store")
+	ErrRunIDReused              = errors.New("agent grpc: computation run ID already used by this VM")
+)
 
 type AgentServer interface {
 	Start(cfg agent.AgentConfig, cmp agent.Computation) error
