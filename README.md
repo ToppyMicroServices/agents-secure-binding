@@ -81,10 +81,11 @@ request has not been confirmed and requires a status check.
 
 The Agent prints the result. Press Ctrl+C to stop the service; the decision,
 setting, and recovery receipts remain in `.asb-human`. The browser UI is shared
-across the macOS, Linux, and Windows builds; check the [runtime CI results](https://github.com/ToppyMicroServices/agents-secure-binding/actions/workflows/human-approval.yaml)
-for the commit you use. This is a one-host, one-user
-preview, not a general TaskCoord production service. `demo` chooses free ports
-automatically; always use the link from the current run.
+across the macOS, Linux, and Windows builds. Native macOS checks in the
+[runtime workflow](https://github.com/ToppyMicroServices/agents-secure-binding/actions/workflows/human-approval.yaml)
+run only when started manually. Check the results for the commit you use. This
+is a one-host, one-user preview, not a general TaskCoord production service.
+`demo` chooses free ports automatically; always use the link from the current run.
 
 See the [local approval guide](docs/local-human-approval.md) for building a
 reusable executable, troubleshooting, separate processes, and restart recovery.
