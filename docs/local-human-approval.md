@@ -366,8 +366,9 @@ go vet ./internal/humanapp ./cmd/asb-human
 ```
 
 The [Local Human Approval workflow](../.github/workflows/human-approval.yaml)
-is configured for Ubuntu, macOS, and Windows runtime tests and separate
-cross-builds. Check the results for your commit: a successful cross-build does
-not establish that the app ran on that OS. The
+normally runs Ubuntu and Windows runtime tests and separate cross-builds.
+Native macOS runtime and artifact checks run only when started manually.
+Check the results for your commit: a successful cross-build does not establish
+that the app ran on that OS. The
 [validation record](local-human-approval-validation.md) distinguishes local
 checks from CI and remaining qualification work.
