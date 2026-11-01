@@ -8,6 +8,10 @@ candidate Linux test hosts; neither establishes a long-lived deployment by name
 alone. The existing [relay library](agent-to-human-relay-v1.md) has bounded Linux
 persistence and synthetic provider tests.
 
+For the implemented Cloudflare adapter and its bounded test scope, see
+[Cloudflare email notifications](asb-cloudflare-notifications.md). This SES
+proposal is independent of that adapter.
+
 ## Provider boundary
 
 SES `SendEmail` returns a `MessageId` when SES accepts the message. Acceptance
