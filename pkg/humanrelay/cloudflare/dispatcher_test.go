@@ -61,21 +61,21 @@ func testConfig(t *testing.T) (Config, humanrelay.DispatchRequest, string) {
 		t.Fatal(err)
 	}
 	return Config{
-		AccountID:   testAccount,
-		APIToken:    testToken,
-		Sender:      testSender,
-		Routes:      map[string]string{testSession: testRecipient},
-		Messages:    map[string]Message{testContent: message},
-		Journal:     journal,
-		Timeout:     time.Second,
-		MaxInFlight: 8,
-	}, humanrelay.DispatchRequest{
-		IntentID:        "intent:cloudflare:1",
-		RelaySessionRef: testSession,
-		Channel:         taskcoord.ReachabilityEmail,
-		ContentRef:      testContent,
-		ContentDigest:   digest,
-	}, path
+			AccountID:   testAccount,
+			APIToken:    testToken,
+			Sender:      testSender,
+			Routes:      map[string]string{testSession: testRecipient},
+			Messages:    map[string]Message{testContent: message},
+			Journal:     journal,
+			Timeout:     time.Second,
+			MaxInFlight: 8,
+		}, humanrelay.DispatchRequest{
+			IntentID:        "intent:cloudflare:1",
+			RelaySessionRef: testSession,
+			Channel:         taskcoord.ReachabilityEmail,
+			ContentRef:      testContent,
+			ContentDigest:   digest,
+		}, path
 }
 
 func newTestDispatcher(t *testing.T, cfg Config, transport http.RoundTripper) *Dispatcher {
