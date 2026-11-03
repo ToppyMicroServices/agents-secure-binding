@@ -31,7 +31,8 @@ jobs:
         run: |
           mkdir -p /tmp/pr92-format
           golangci-lint version > /tmp/pr92-format/tool-version.txt
-          golangci-lint fmt ./pkg/humanrelay/cloudflare
+          golangci-lint fmt --stdin < pkg/humanrelay/cloudflare/dispatcher_test.go > /tmp/pr92-format/dispatcher_test.go
+          cp /tmp/pr92-format/dispatcher_test.go pkg/humanrelay/cloudflare/dispatcher_test.go
           git diff --binary -- pkg/humanrelay/cloudflare > /tmp/pr92-format/formatter.patch
           git diff --stat -- pkg/humanrelay/cloudflare
       - uses: actions/upload-artifact@v4
