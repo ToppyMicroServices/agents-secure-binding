@@ -5,7 +5,7 @@ architecture named in the artifact. No Go installation, Node.js, Docker, LLM
 account, or TEE hardware is needed to run it. Keep all extracted files in one
 folder and open a terminal there.
 
-Choose a successful **Local Human Approval** workflow run with a passing
+Release assets link to a successful **Local Human Approval** workflow run with a passing
 **Run artifact** job for your OS and architecture. That job downloads the
 archive, checks its binary checksum, and runs that executable's `self-test`
 without rebuilding it. A successful **Compile** job alone is not an execution
@@ -63,11 +63,12 @@ Use one trusted computer and OS user. This is not multi-user isolation, real
 Human identity verification, hardware qualification, or a production service.
 It does not change any external server or send messages to a delivery provider.
 
-The artifact name identifies its source commit. `SHA256SUMS` records the binary
-checksum, not a signature or proof of trust. These are short-lived CI artifacts,
-not signed or notarized releases. If your OS blocks the executable, use the
-source-build instructions instead of disabling its security checks.
+The bundle includes its source and dependency inventory, the ASB license and
+linked dependency notices. `SHA256SUMS` records the binary checksum; release
+asset checksums and CI evidence are listed in the release record. Executables
+are not platform-code-signed or notarized. If your OS blocks the executable,
+use the source-build instructions instead of disabling its security checks.
 
-See the [source, usage, and recovery guide](https://github.com/ToppyMicroServices/agents-secure-binding/blob/feat/human-coordination-product-v1/docs/local-human-approval.md).
+See the [source, usage, and recovery guide](https://github.com/ToppyMicroServices/agents-secure-binding/blob/main/docs/local-human-approval.md).
 It includes Go build instructions, troubleshooting, separate Agent commands,
 and storage limits. Run the executable with `--help` for available commands.

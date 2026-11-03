@@ -34,6 +34,17 @@ on:
       - 'go.sum'
       - 'LICENSE'
   workflow_dispatch:
+    inputs:
+      package_version:
+        description: Debian Preview package version to qualify
+        required: true
+        default: '0.1.0~preview.1-2'
+        type: string
+      package_maintainer:
+        description: Responsible package maintainer name and email
+        required: true
+        default: 'ASB CI <ci@example.invalid>'
+        type: string
 
 permissions:
   contents: read
@@ -46,6 +57,8 @@ jobs:
       GOWORK: 'off'
       PYTHONDONTWRITEBYTECODE: '1'
       ASB_UPGRADE_BASE: 'b8fd28939a7385a1dab66317d085d58755df0209'
+      ASB_CANDIDATE_VERSION: ${{ inputs.package_version || '0.1.0~preview.1-2' }}
+      ASB_CANDIDATE_MAINTAINER: ${{ inputs.package_maintainer || 'ASB CI <ci@example.invalid>' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -86,8 +99,8 @@ jobs:
         run: |
           python3 scripts/build-asb-deb.py \
             --source-commit "$(git rev-parse HEAD)" \
-            --version '0.1.0~preview.1-2' \
-            --maintainer 'ASB CI <ci@example.invalid>' \
+            --version "$ASB_CANDIDATE_VERSION" \
+            --maintainer "$ASB_CANDIDATE_MAINTAINER" \
             --output build/debian-upgrade --with-human --with-s3
           python3 scripts/check-asb-deb-lifecycle.py \
             --artifacts build/debian-upgrade \
