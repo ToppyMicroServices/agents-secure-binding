@@ -23,12 +23,13 @@ import (
 )
 
 const (
-	testAccount   = "0123456789abcdef0123456789abcdef"
-	testToken     = "test-cloudflare-token"
-	testSender    = "notify@example.com"
-	testRecipient = "human@example.net"
-	testSession   = "https://gateway.example/relay/session-1"
-	testContent   = "https://content.example/notification/1"
+	testAccount      = "0123456789abcdef0123456789abcdef"
+	testToken        = "test-cloudflare-token"
+	testSender       = "notify@example.com"
+	testRecipient    = "human@example.net"
+	testSession      = "https://gateway.example/relay/session-1"
+	testContent      = "https://content.example/notification/1"
+	testSessionField = "session"
 )
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
@@ -60,13 +61,20 @@ func testConfig(t *testing.T) (Config, humanrelay.DispatchRequest, string) {
 		t.Fatal(err)
 	}
 	return Config{
-		AccountID: testAccount, APIToken: testToken, Sender: testSender,
-		Routes:   map[string]string{testSession: testRecipient},
-		Messages: map[string]Message{testContent: message},
-		Journal:  journal, Timeout: time.Second, MaxInFlight: 8,
+		AccountID:   testAccount,
+		APIToken:    testToken,
+		Sender:      testSender,
+		Routes:      map[string]string{testSession: testRecipient},
+		Messages:    map[string]Message{testContent: message},
+		Journal:     journal,
+		Timeout:     time.Second,
+		MaxInFlight: 8,
 	}, humanrelay.DispatchRequest{
-		IntentID: "intent:cloudflare:1", RelaySessionRef: testSession,
-		Channel: taskcoord.ReachabilityEmail, ContentRef: testContent, ContentDigest: digest,
+		IntentID:        "intent:cloudflare:1",
+		RelaySessionRef: testSession,
+		Channel:         taskcoord.ReachabilityEmail,
+		ContentRef:      testContent,
+		ContentDigest:   digest,
 	}, path
 }
 
@@ -417,7 +425,7 @@ func TestProviderResponseValidation(t *testing.T) {
 }
 
 func TestChangedRequestOrRoutingCannotReuseIntent(t *testing.T) {
-	for _, change := range []string{"session", "content-ref", "message", "recipient", "sender", "account"} {
+	for _, change := range []string{testSessionField, "content-ref", "message", "recipient", "sender", "account"} {
 		t.Run(change, func(t *testing.T) {
 			cfg, request, _ := testConfig(t)
 			var calls atomic.Int32
@@ -430,7 +438,7 @@ func TestChangedRequestOrRoutingCannotReuseIntent(t *testing.T) {
 				t.Fatal(err)
 			}
 			switch change {
-			case "session":
+			case testSessionField:
 				request.RelaySessionRef = "https://gateway.example/relay/session-2"
 				cfg.Routes[request.RelaySessionRef] = testRecipient
 			case "content-ref":
@@ -484,7 +492,7 @@ func TestConstructorCopiesPrivateConfiguration(t *testing.T) {
 }
 
 func TestInvalidRequestDoesNotReachProvider(t *testing.T) {
-	for _, kind := range []string{"channel", "session", "content", "digest", "intent"} {
+	for _, kind := range []string{"channel", testSessionField, "content", "digest", "intent"} {
 		t.Run(kind, func(t *testing.T) {
 			cfg, request, _ := testConfig(t)
 			var calls atomic.Int32
@@ -495,7 +503,7 @@ func TestInvalidRequestDoesNotReachProvider(t *testing.T) {
 			switch kind {
 			case "channel":
 				request.Channel = taskcoord.ReachabilitySNS
-			case "session":
+			case testSessionField:
 				request.RelaySessionRef = "https://unregistered.example/session"
 			case "content":
 				request.ContentRef = "https://unregistered.example/content"
@@ -618,7 +626,7 @@ func TestJournalFailuresDoNotAuthorizeBlindRetry(t *testing.T) {
 }
 
 func TestRejectUnsafeConfiguration(t *testing.T) {
-	for _, kind := range []string{"account", "token", "sender", "recipient", "session", "content", "journal", "typed-nil-journal", "subject"} {
+	for _, kind := range []string{"account", "token", "sender", "recipient", testSessionField, "content", "journal", "typed-nil-journal", "subject"} {
 		t.Run(kind, func(t *testing.T) {
 			cfg, _, _ := testConfig(t)
 			switch kind {
@@ -630,7 +638,7 @@ func TestRejectUnsafeConfiguration(t *testing.T) {
 				cfg.Sender = "Sender <notify@example.com>"
 			case "recipient":
 				cfg.Routes[testSession] = "one@example.net,two@example.net"
-			case "session":
+			case testSessionField:
 				cfg.Routes["https://gateway.example/relay?token=secret"] = testRecipient
 			case "content":
 				cfg.Messages["http://content.example/plain"] = cfg.Messages[testContent]
