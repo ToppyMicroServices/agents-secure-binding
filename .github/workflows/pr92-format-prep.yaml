@@ -1,0 +1,42 @@
+name: PR92 formatter preparation
+
+on:
+  push:
+    branches: [chore/dependency-pr-reconciliation-20261103]
+    paths: [.github/workflows/pr92-format-prep.yaml]
+
+permissions:
+  contents: read
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ce7cfa20597f26f0848d37f317d8e83499054924
+          persist-credentials: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version: 1.26.10
+          cache: false
+      - name: Install the CI formatter without running lint
+        uses: golangci/golangci-lint-action@v8
+        with:
+          version: v2.11.1
+          args: --help
+          skip-cache: true
+      - name: Capture the exact formatter changes
+        run: |
+          mkdir -p /tmp/pr92-format
+          golangci-lint version > /tmp/pr92-format/tool-version.txt
+          golangci-lint fmt ./pkg/humanrelay/cloudflare
+          git diff --binary -- pkg/humanrelay/cloudflare > /tmp/pr92-format/formatter.patch
+          git diff --stat -- pkg/humanrelay/cloudflare
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pr92-format-ce7cfa20
+          path: /tmp/pr92-format/
+          if-no-files-found: error
+          retention-days: 7
