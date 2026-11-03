@@ -51,7 +51,7 @@ An exported Go identifier outside the supported list is not implicitly stable.
 
 ## A2A Security Test Kit candidate
 
-The main branch contains an unreleased, self-contained ASB binding tester. Its
+The v2 prerelease contains an experimental, self-contained ASB binding tester. Its
 default Direct-Agent v1 profile runs eight fixed scenarios and can emit a
 machine-readable report described by
 `schemas/a2a-security-test-report-v1.schema.json`. The candidate also includes

@@ -1,5 +1,32 @@
 # Changelog
 
+## v2.0.0-rc.3
+
+- Add the local Human approval Preview with four distinct decisions. Only
+  approval permits a change; an undecided Human judgment remains separate
+  from an unknown execution result.
+- Add experimental Human Coordination, Task–Action lifecycle, single-host
+  SQLite recovery, durable relay state and an opt-in Cloudflare notification
+  adapter. Notification acknowledgement does not grant Human approval.
+- Verify GGUF and Safetensors/LoRA model bundles under the documented runtime
+  restrictions, and reject external model APIs without verifiable evidence.
+- Reject missing, malformed and sample evidence when attestation is required;
+  record direct GCP SNP and limited Azure MAA verification evidence.
+- Bind Agent RPC proofs to the intended VM and run, recheck authority before
+  state changes, and harden runtime isolation and resource lifecycles.
+- Add Preview distribution tooling, Linux package lifecycle checks, and
+  native execution checks for downloaded Human binaries. Distribution does
+  not change component support status or qualify production APT delivery.
+- Update Go to 1.26.10 and refresh dependencies, including JOSE 4.1.6,
+  chi 5.5.0 and protobuf 1.36.12.
+
+The supported Direct-Agent v1 API boundary is unchanged. Human, model-runtime,
+least-privilege and delivery features retain their documented Preview or
+experimental status. SNP, TDX and Cocos remain independently versioned. Full
+Azure acceptance, live delivery-provider operation and other operator-specific
+qualification remain separate. The release record identifies the exact
+source, final artifacts and successful CI runs.
+
 ## v2.0.0-rc.1
 
 - Move the public Go module and imports to the canonical `/v2` path.

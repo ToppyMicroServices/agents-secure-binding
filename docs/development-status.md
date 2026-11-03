@@ -49,8 +49,8 @@ evidence for that revision; a later change must pass its own required checks.
 
 The repository had zero open Dependabot alerts when checked on 22 October.
 Routine dependency-update proposals are maintenance work, not evidence of an
-unfinished feature. The published stable release remains `v1.1.1`; the latest
-v2 prerelease remains `v2.0.0-rc.2`. This closeout does not create a new tag or
+unfinished feature. At that checkpoint the published stable release was `v1.1.1`
+and the latest v2 prerelease was `v2.0.0-rc.2`. That closeout did not create a new tag or
 include current-branch features retroactively in either release.
 
 During closeout, a fresh required vulnerability scan reported `GO-2026-6809`

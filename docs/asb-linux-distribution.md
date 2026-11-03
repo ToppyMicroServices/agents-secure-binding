@@ -4,9 +4,9 @@ ASB is the Agent interaction and verification framework. The S3 reader is one
 application profile. Its passing AWS tests do not qualify the CLI, discovery,
 Human coordination, confidential-VM integrations or a complete installation.
 
-This records the scope of the [local Debian candidates](asb-debian-packages.md)
-and a future ASB-owned apt repository. No `.deb` or apt repository has been
-published by this work. Start with Ubuntu 24.04/amd64;
+This records the scope of the [Debian Preview packages](asb-debian-packages.md)
+distributed through GitHub Releases and a future ASB-owned apt repository.
+Production apt publication remains separate. Start with Ubuntu 24.04/amd64;
 support for other distributions or architectures needs separate installation
 and runtime evidence. Existing Go module and supported API boundaries remain
 unchanged.
