@@ -19,7 +19,7 @@ require (
 	golang.org/x/crypto v0.57.0
 	golang.org/x/sync v0.23.0
 	google.golang.org/grpc v1.83.2
-	google.golang.org/protobuf v1.36.11
+	google.golang.org/protobuf v1.36.12
 	modernc.org/sqlite v1.58.0
 )
 
@@ -27,8 +27,8 @@ require (
 	cloud.google.com/go/storage v1.68.0
 	github.com/caarlos0/env/v10 v10.0.0
 	github.com/fxamacker/cbor/v2 v2.9.2
-	github.com/go-chi/chi/v5 v5.3.2
-	github.com/go-jose/go-jose/v4 v4.1.4
+	github.com/go-chi/chi/v5 v5.5.0
+	github.com/go-jose/go-jose/v4 v4.1.6
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/google/gce-tcb-verifier v0.3.1
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3
