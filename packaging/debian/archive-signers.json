@@ -1,0 +1,11 @@
+{
+  "schema": "asb.apt-pages-policy/v2",
+  "base_url": "https://www.toppymicros.com/agents-secure-binding",
+  "signers": [
+    "EC470317CE4DA1F9237B3D7840FF815AEF7C0197"
+  ],
+  "keyring_sha256": "4dc73c64dd43bea840f5b6158a065a2851904a6f89dbb17c1e8bc6a1956100ee",
+  "subkey_primaries": {
+    "EC470317CE4DA1F9237B3D7840FF815AEF7C0197": "47AF4750A71D3D1641AB857A867DD812CCE94EBF"
+  }
+}

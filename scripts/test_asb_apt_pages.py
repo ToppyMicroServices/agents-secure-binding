@@ -1,9 +1,16 @@
 #!/usr/bin/env python3
 """Exercise publication trust, archive boundaries and public-content allowlists."""
+import argparse
+from contextlib import ExitStack
 from datetime import datetime, timezone
 import importlib.util
 import io
+import os
 from pathlib import Path
+import pwd
+import shutil
+import subprocess
+import sys
 import tarfile
 import tempfile
 import unittest
@@ -50,6 +57,32 @@ class AptPagesTest(unittest.TestCase):
             path.write_bytes(b'{"schema":"a","schema":"b"}')
             with self.assertRaises(ValueError):
                 pages.policy(path)
+
+    def test_subkey_policy_binds_only_exact_signers_to_their_primaries(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "policy.json"
+            _, _, standalone = fixture()
+            primary, subkey = "A" * 40, "B" * 40
+            chosen = dict(standalone, schema="asb.apt-pages-policy/v2", signers=[subkey],
+                          subkey_primaries={subkey: primary})
+            path.write_bytes(apt.encoded(chosen))
+            self.assertEqual(pages.policy(path), chosen)
+            rotating = dict(chosen, signers=[subkey, "C" * 40],
+                            subkey_primaries={subkey: primary, "C" * 40: primary})
+            path.write_bytes(apt.encoded(rotating))
+            self.assertEqual(pages.policy(path), rotating)
+            for changed in (dict(chosen, subkey_primaries={}),
+                            dict(chosen, subkey_primaries={primary: subkey}),
+                            dict(chosen, subkey_primaries={subkey: subkey}),
+                            dict(chosen, subkey_primaries={subkey: "a" * 40}),
+                            dict(chosen, signers=[primary, subkey], subkey_primaries={primary: subkey, subkey: primary}),
+                            dict(chosen, extra=True)):
+                path.write_bytes(apt.encoded(changed))
+                with self.subTest(changed=changed), self.assertRaises(ValueError):
+                    pages.policy(path)
+            source = pages.web_files(fixture()[0], chosen)["asb.sources"].decode()
+            self.assertIn(f"Signed-By: /etc/apt/keyrings/asb-archive.gpg {subkey}!\n", source)
+            self.assertNotIn(primary + "!", source)
 
     def test_archive_rejects_traversal_links_duplicates_and_trailing_bytes_before_writing(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -98,6 +131,135 @@ class AptPagesTest(unittest.TestCase):
             pages.public_keyring(b"public fixture", public_policy)
         with self.assertRaises(ValueError):
             pages.public_keyring(b"changed bytes", public_policy)
+
+    def test_subkey_keyring_rejects_wrong_binding_extra_keys_and_bad_status(self):
+        _, _, standalone = fixture()
+        primary, subkey = "A" * 40, "B" * 40
+        chosen = dict(standalone, schema="asb.apt-pages-policy/v2", signers=[subkey],
+                      subkey_primaries={subkey: primary})
+
+        def record(kind, identity=None, validity="-", expires=""):
+            fields = [""] * 12
+            fields[0], fields[1], fields[6] = kind, validity, expires
+            if identity is not None:
+                fields[9] = identity
+            return ":".join(fields) + "\n"
+
+        pub = record("pub") + record("fpr", primary)
+        sub = record("sub") + record("fpr", subkey)
+        valid = pub + sub
+        with patch.object(apt, "execute", return_value=valid.encode()):
+            pages.public_keyring(b"public fixture", chosen)
+        rotating = dict(chosen, signers=[subkey, "C" * 40],
+                        subkey_primaries={subkey: primary, "C" * 40: primary})
+        with patch.object(apt, "execute", return_value=(valid + record("sub") + record("fpr", "C" * 40)).encode()):
+            pages.public_keyring(b"public fixture", rotating)
+        bad = (record("sec") + valid, valid + record("sub") + record("fpr", "C" * 40),
+               valid + record("pub") + record("fpr", "C" * 40), pub,
+               record("pub") + record("fpr", "C" * 40) + sub,
+               pub + record("sub", validity="r") + record("fpr", subkey),
+               pub + record("sub", validity="e") + record("fpr", subkey),
+               pub + record("sub", expires="1") + record("fpr", subkey),
+               record("pub") + record("fpr", subkey) + record("sub") + record("fpr", primary))
+        for output in bad:
+            with self.subTest(output=output), patch.object(apt, "execute", return_value=output.encode()), self.assertRaises(ValueError):
+                pages.public_keyring(b"public fixture", chosen)
+
+    @unittest.skipUnless(sys.platform == "linux" and all(shutil.which(name) for name in ("gpg", "gpgv", "gpgconf", "apt-get")),
+                         "requires Linux, GnuPG and apt")
+    def test_ephemeral_subkey_is_the_only_accepted_repository_and_apt_signer(self):
+        with tempfile.TemporaryDirectory() as temp, ExitStack() as cleanup:
+            root = Path(temp)
+            home = root / "gnupg"
+            home.mkdir(mode=0o700)
+            cleanup.callback(lambda: subprocess.run(["gpgconf", "--homedir", str(home), "--kill", "gpg-agent"],
+                                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=30))
+
+            def gpg(*command):
+                return subprocess.run(["gpg", "--homedir", str(home), "--batch", *command],
+                                      check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=120).stdout
+
+            gpg("--pinentry-mode", "loopback", "--passphrase", "", "--quick-generate-key",
+                "ASB ephemeral apt subkey <apt-subkey@example.invalid>", "ed25519", "sign", "1d")
+            listing = gpg("--with-colons", "--list-keys").decode()
+            primary = next(line.split(":")[9] for line in listing.splitlines() if line.startswith("fpr:"))
+            gpg("--pinentry-mode", "loopback", "--passphrase", "", "--quick-add-key", primary, "ed25519", "sign", "1d")
+            listing = gpg("--with-colons", "--list-keys", primary).decode()
+            fingerprints = [line.split(":")[9] for line in listing.splitlines() if line.startswith("fpr:")]
+            self.assertEqual(len(fingerprints), 2)
+            self.assertEqual(fingerprints[0], primary)
+            subkey = fingerprints[1]
+            keyring = root / "asb-archive.gpg"
+            keyring.write_bytes(gpg("--export-options", "export-minimal", "--export", primary))
+            manifest, files, standalone = fixture()
+            chosen = dict(standalone, schema="asb.apt-pages-policy/v2", signers=[subkey],
+                          subkey_primaries={subkey: primary}, keyring_sha256=apt.sha(keyring.read_bytes()))
+            pages.public_keyring(keyring.read_bytes(), chosen)
+
+            def repository(name, signer):
+                path = root / name
+                for file, data in files.items():
+                    if file not in (str(apt.DIST / "InRelease"), str(apt.DIST / "Release.gpg")):
+                        pages.write_new(path / file, data)
+                apt.sign(argparse.Namespace(repository=path, gnupg_home=home, signer=signer))
+                return path
+
+            selected = repository("selected", subkey)
+            site = root / "site"
+            self.assertTrue(pages.stage(selected, keyring, chosen, manifest["source_commit"], site)["passed"])
+            generated = (site / "asb.sources").read_text()
+            self.assertIn(subkey + "!", generated)
+            self.assertNotIn(primary + "!", generated)
+
+            def apt_update(repo, name):
+                client = root / name
+                client.mkdir()
+                state, cache = client / "state", client / "cache"
+                (state / "lists" / "partial").mkdir(parents=True)
+                (cache / "archives" / "partial").mkdir(parents=True)
+                (client / "trusted.gpg.d").mkdir()
+                (client / "status").write_bytes(b"")
+                (client / "trusted.gpg").write_bytes(b"")
+                source = generated.replace(pages.BASE_URL + "/apt", repo.as_uri())
+                source = source.replace("/etc/apt/keyrings/asb-archive.gpg", str(keyring))
+                sources = client / "asb.sources"
+                sources.write_text(source)
+                options = {"Dir::Etc::sourcelist": sources, "Dir::Etc::sourceparts": "-",
+                           "Dir::Etc::trusted": client / "trusted.gpg", "Dir::Etc::trustedparts": client / "trusted.gpg.d",
+                           "Dir::State": state, "Dir::State::status": client / "status", "Dir::Cache": cache,
+                           "APT::Sandbox::User": pwd.getpwuid(os.getuid()).pw_name,
+                           "APT::Update::Error-Mode": "any", "Debug::NoLocking": "1", "Acquire::Languages": "none"}
+                command = ["apt-get"]
+                for option, value in options.items():
+                    command.extend(("-o", f"{option}={value}"))
+                command.append("update")
+                return subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                      env={**os.environ, "LC_ALL": "C"}, timeout=120)
+
+            accepted = apt_update(selected, "apt-selected")
+            self.assertEqual(accepted.returncode, 0, accepted.stdout.decode(errors="replace"))
+
+            primary_signed = repository("primary-signed", primary)
+            with self.assertRaisesRegex(ValueError, "exact signer"):
+                pages.stage(primary_signed, keyring, chosen, manifest["source_commit"], root / "primary-site")
+            denied = apt_update(primary_signed, "apt-primary")
+            self.assertNotEqual(denied.returncode, 0, denied.stdout.decode(errors="replace"))
+            self.assertTrue(any(word in denied.stdout for word in (b"NO_PUBKEY", b"GPG error", b"not signed")),
+                            denied.stdout.decode(errors="replace"))
+
+            signature = selected / apt.DIST / "Release.gpg"
+            data = signature.read_bytes()
+            signature.write_bytes(data[:-1] + bytes([data[-1] ^ 1]))
+            with self.assertRaises(subprocess.SubprocessError):
+                apt.verify(argparse.Namespace(repository=selected, keyring=keyring, signer=[subkey]))
+
+            wrong_primary = dict(chosen, subkey_primaries={subkey: "C" * 40})
+            with self.assertRaises(ValueError):
+                pages.public_keyring(keyring.read_bytes(), wrong_primary)
+            gpg("--pinentry-mode", "loopback", "--passphrase", "", "--quick-add-key", primary, "ed25519", "sign", "1d")
+            extra_export = gpg("--export-options", "export-minimal", "--export", primary)
+            with self.assertRaises(ValueError):
+                pages.public_keyring(extra_export, dict(chosen, keyring_sha256=apt.sha(extra_export)))
 
     def test_publication_rejects_extra_file_html_change_and_source_change(self):
         with tempfile.TemporaryDirectory() as temp:

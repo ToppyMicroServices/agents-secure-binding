@@ -32,14 +32,31 @@ MAX_FILES = 128
 def policy(path: Path) -> dict:
     # This schema contains public fingerprints and hashes only, never credentials.
     value = apt.strict_json(apt.read(path))
-    if (set(value) != {"schema", "base_url", "signers", "keyring_sha256"}
-            or value["schema"] != "asb.apt-pages-policy/v1" or value["base_url"] != BASE_URL
-            or not isinstance(value["signers"], list) or not 1 <= len(value["signers"]) <= 2
-            or len(set(value["signers"])) != len(value["signers"])
-            or not re.fullmatch(r"[0-9a-f]{64}", value["keyring_sha256"])):
+    common = {"schema", "base_url", "signers", "keyring_sha256"}
+    schema = value.get("schema")
+    fields = common | ({"subkey_primaries"} if schema == "asb.apt-pages-policy/v2" else set())
+    signers = value.get("signers")
+    digest = value.get("keyring_sha256")
+    if (schema not in ("asb.apt-pages-policy/v1", "asb.apt-pages-policy/v2")
+            or set(value) != fields or value.get("base_url") != BASE_URL
+            or not isinstance(signers, list) or not 1 <= len(signers) <= 2
+            or not all(isinstance(identity, str) for identity in signers)
+            or len(set(signers)) != len(signers)
+            or not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest)):
         raise ValueError("invalid or unconfigured publication policy")
-    for identity in value["signers"]:
+    for identity in signers:
         apt.fingerprint(identity)
+    if schema == "asb.apt-pages-policy/v2":
+        primaries = value["subkey_primaries"]
+        if (not isinstance(primaries, dict) or set(primaries) != set(signers)
+                or not all(isinstance(primary, str) for primary in primaries.values())):
+            raise ValueError("publication policy must bind each signing subkey to one primary")
+        for signer, primary in primaries.items():
+            apt.fingerprint(primary)
+            if signer == primary:
+                raise ValueError("a signing subkey must differ from its primary")
+        if set(signers) & set(primaries.values()):
+            raise ValueError("primary fingerprints cannot be approved signers")
     return value
 
 
@@ -60,14 +77,58 @@ def public_keyring(data: bytes, public_policy: dict) -> None:
         output = apt.execute("gpg", "--homedir", str(home), "--no-options", "--batch", "--with-colons",
                              "--import-options", "show-only", "--import", str(key)).decode()
     records = [line.split(":") for line in output.splitlines()]
+    if any(item[0] == "fpr" and len(item) <= 9 for item in records):
+        raise ValueError("public keyring has an invalid fingerprint record")
     identities = [item[9] for item in records if item[0] == "fpr"]
-    if (any(item[0] in ("sec", "ssb") for item in records)
-            or len(identities) != len(public_policy["signers"]) or set(identities) != set(public_policy["signers"])):
-        raise ValueError("keyring must contain only the approved standalone public signing keys")
+    if any(item[0] in ("sec", "ssb") for item in records):
+        raise ValueError("public keyring contains private key material")
+    if public_policy["schema"] == "asb.apt-pages-policy/v1":
+        if len(identities) != len(public_policy["signers"]) or set(identities) != set(public_policy["signers"]):
+            raise ValueError("keyring must contain only the approved standalone public signing keys")
+        return
+
+    # A signing subkey is always exported with its primary. Keep the primary in
+    # the keyring for binding verification, but never authorize its signatures.
+    pairs = []
+    current = None
+    pending = None
+    now = int(datetime.now(timezone.utc).timestamp())
+    for item in records:
+        kind = item[0]
+        if kind in ("pub", "sub"):
+            if len(item) <= 9 or pending is not None or (kind == "sub" and current is None):
+                raise ValueError("public keyring has an incomplete key binding")
+            if item[1] in ("r", "e", "d", "i") or (item[6] not in ("", "0") and (not item[6].isdigit() or int(item[6]) <= now)):
+                raise ValueError("public keyring contains a revoked or expired key")
+            if kind == "pub":
+                current = {"primary": None, "subkeys": []}
+                pairs.append(current)
+            else:
+                current["subkeys"].append(None)
+            pending = kind
+        elif kind == "fpr":
+            if pending is None or len(item) <= 9:
+                raise ValueError("public keyring has an unbound fingerprint")
+            identity = apt.fingerprint(item[9])
+            if pending == "pub":
+                current["primary"] = identity
+            else:
+                current["subkeys"][-1] = identity
+            pending = None
+    expected = {(primary, signer) for signer, primary in public_policy["subkey_primaries"].items()}
+    expected_primaries = {primary for primary, _ in expected}
+    actual_primaries = [key["primary"] for key in pairs]
+    actual_pairs = [(key["primary"], subkey) for key in pairs for subkey in key["subkeys"]]
+    if (pending is not None or any(key["primary"] is None or not key["subkeys"] for key in pairs)
+            or len(pairs) != len(expected_primaries) or set(actual_primaries) != expected_primaries
+            or len(actual_pairs) != len(expected) or set(actual_pairs) != expected
+            or len(identities) != len(expected_primaries) + len(expected)):
+        raise ValueError("keyring must contain only the approved primary and signing subkey pairs")
 
 
 def web_files(manifest: dict, public_policy: dict) -> dict[str, bytes]:
-    source = apt.source(public_policy["base_url"] + "/apt")
+    exact_signers = public_policy["signers"] if public_policy["schema"] == "asb.apt-pages-policy/v2" else None
+    source = apt.source(public_policy["base_url"] + "/apt", exact_signers)
     identities = "\n".join(public_policy["signers"])
     page = f'''<!doctype html>
 <html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width">

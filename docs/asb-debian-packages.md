@@ -96,8 +96,9 @@ belongs to the package file list, so package removal must preserve it.
 ## Prepare an authenticated apt snapshot
 
 `scripts/asb-apt-repository.py` prepares repository metadata and signs a local
-snapshot. It does not publish it or install trust on a client. It requires
-Python, `dpkg-deb`, GnuPG and `gpgv` on Linux. The signing input must match a
+snapshot. It does not publish it or install trust on a client. Preparation
+requires Python and `dpkg-deb` on Linux. Signing and verification use Python,
+GnuPG and `gpgv` on the operator's host. The signing input must match a
 successful lifecycle record for those exact package bytes, source and version.
 A successful record is evidence for review, not an independent release approval.
 
@@ -121,8 +122,12 @@ fingerprint is the complete uppercase 40-character fingerprint of the exact
 signing key or subkey. The signer requires an explicit private GnuPG home; it
 never selects a default identity or replaces existing signatures. Production
 key custody, offline backup, access approval and revocation remain operator
-choices. CI generates unrelated one-day test keys in a temporary home and
-destroys that home after the check. It never uses a personal or production key.
+choices. Package qualification CI generates unrelated one-day test keys in a
+temporary home and destroys that home after the check. Publication CI verifies
+the approved public key; no personal or production private key enters CI.
+For GitHub Pages publication with an existing signing subkey, the reviewed
+policy also binds its primary key and restricts the generated APT source to
+the exact signing fingerprint. See [APT publication](asb-apt-publication.md).
 
 The unsigned `Packages`, compressed index, SHA-256 by-hash objects and `Release`
 are deterministic for the supplied packages and times. OpenPGP signatures have
@@ -162,10 +167,16 @@ For planned rotation, deliver an A+B public keyring through the organization's
 authenticated configuration channel while A still signs current metadata. Check
 both fingerprints against the approved record. After clients have that keyring,
 publish a fresh B-signed snapshot. Verify their update results, then replace the
-keyring with B alone. The Linux check proves that A-only clients reject B before
-the overlap, that A+B clients can upgrade with B, and that B-only clients reject
-A afterwards. Clients that missed the overlap need an authenticated keyring
-update; do not recover by disabling signature checks. If A is compromised, an
+keyring with B alone. If the source pins exact signing fingerprints, update it
+through the same authenticated channel to allow `A! B!` before switching, and
+then `B!` after retiring A. Adding a key to the keyring alone does not update
+that allowlist. The existing Linux rotation check covers keyring-based trust:
+A-only clients reject B before the overlap, A+B clients can upgrade with B,
+and B-only clients reject
+A afterwards. It does not establish deployed v2 source-update or recovery
+procedures. Clients that missed the overlap need authenticated keyring and,
+where applicable, source updates; do not recover by disabling signature checks.
+If A is compromised, an
 A-signed delivery alone cannot authenticate B: use the independent recovery
 channel and remove A promptly.
 
