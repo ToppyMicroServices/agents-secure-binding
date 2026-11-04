@@ -15,6 +15,7 @@ import tarfile
 import tempfile
 import unittest
 from unittest.mock import Mock, patch
+from urllib.error import HTTPError
 
 spec = importlib.util.spec_from_file_location("asb_pages", Path(__file__).with_name("asb-apt-pages.py"))
 pages = importlib.util.module_from_spec(spec)
@@ -261,7 +262,7 @@ class AptPagesTest(unittest.TestCase):
             with self.assertRaises(ValueError):
                 pages.public_keyring(extra_export, dict(chosen, keyring_sha256=apt.sha(extra_export)))
 
-    def test_publication_rejects_extra_file_html_change_and_source_change(self):
+    def test_publication_rejects_missing_changed_and_extra_files_even_with_updated_inventory(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             manifest, files, public_policy = fixture()
@@ -277,12 +278,22 @@ class AptPagesTest(unittest.TestCase):
             with patch.object(pages, "public_keyring"), patch.object(apt, "verify", side_effect=verified):
                 site = root / "site"
                 self.assertTrue(pages.stage(repo, key, public_policy, manifest["source_commit"], site)["passed"])
-                for mode in ("extra", "html", "source"):
+                for mode in ("extra", "nested-marker", "missing-marker", "nonempty-marker", "html", "source"):
                     saved = pages.file_map(site)
                     inventory = apt.strict_json(saved["publication.json"])
                     if mode == "extra":
                         (site / "private-key.txt").write_bytes(b"must not publish")
                         inventory["files"]["private-key.txt"] = apt.sha(b"must not publish")
+                    elif mode == "nested-marker":
+                        (site / "nested").mkdir()
+                        (site / "nested" / ".nojekyll").write_bytes(b"")
+                        inventory["files"]["nested/.nojekyll"] = apt.sha(b"")
+                    elif mode == "missing-marker":
+                        (site / ".nojekyll").unlink()
+                        inventory["files"].pop(".nojekyll")
+                    elif mode == "nonempty-marker":
+                        (site / ".nojekyll").write_bytes(b"changed marker")
+                        inventory["files"][".nojekyll"] = apt.sha(b"changed marker")
                     elif mode == "html":
                         (site / "index.html").write_bytes(b"<script>unreviewed</script>")
                         inventory["files"]["index.html"] = apt.sha((site / "index.html").read_bytes())
@@ -294,6 +305,8 @@ class AptPagesTest(unittest.TestCase):
                     for name in pages.file_map(site):
                         if name not in saved:
                             (site / name).unlink()
+                    if mode == "nested-marker":
+                        (site / "nested").rmdir()
                     for name, data in saved.items():
                         (site / name).write_bytes(data)
 
@@ -301,13 +314,14 @@ class AptPagesTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             site = Path(temp) / "site"
             site.mkdir()
+            (site / ".nojekyll").write_bytes(b"")
             (site / "index.html").write_bytes(b"approved bytes")
             _, _, public_policy = fixture()
             def verify(captured, _policy, _source):
                 self.assertNotEqual(captured, site)
                 self.assertEqual((captured / "index.html").read_bytes(), b"approved bytes")
                 (site / "index.html").write_bytes(b"changed after verification")
-                return {"passed": True}
+                return {"passed": True, "files": 2}
             response = Mock()
             response.status = 200
             response.geturl.return_value = pages.BASE_URL + "/index.html"
@@ -318,8 +332,46 @@ class AptPagesTest(unittest.TestCase):
             opener = Mock()
             opener.open.return_value = response
             with patch.object(pages, "_verify_snapshot", side_effect=verify), patch.object(pages, "build_opener", return_value=opener):
-                self.assertTrue(pages.verify_live(site, public_policy, "a" * 40)["published"])
+                result = pages.verify_live(site, public_policy, "a" * 40)
+            self.assertTrue(result["published"])
+            self.assertEqual((result["files"], result["archive_files"], result["public_files"]), (2, 2, 1))
+            self.assertEqual(result["archive_only_markers"], [".nojekyll"])
+            opener.open.assert_called_once()
+            self.assertEqual(opener.open.call_args.args[0].full_url, pages.BASE_URL + "/index.html")
             response.read.assert_called_once_with(len(b"approved bytes") + 1)
+
+    def test_live_readback_rejects_http_errors_changed_bytes_and_redirects(self):
+        with tempfile.TemporaryDirectory() as temp:
+            site = Path(temp) / "site"
+            site.mkdir()
+            (site / ".nojekyll").write_bytes(b"")
+            (site / "index.html").write_bytes(b"approved bytes")
+            _, _, public_policy = fixture()
+            url = pages.BASE_URL + "/index.html"
+            for status in (403, 404):
+                opener = Mock()
+                opener.open.side_effect = HTTPError(url, status, "private message", {}, io.BytesIO(b"private body"))
+                with self.subTest(status=status), patch.object(pages, "_verify_snapshot", return_value={"passed": True}), patch.object(pages, "build_opener", return_value=opener):
+                    with self.assertRaisesRegex(ValueError, f"index.html HTTP {status}") as caught:
+                        pages.verify_live(site, public_policy, "a" * 40)
+                    self.assertNotIn("private", str(caught.exception))
+                    opener.open.assert_called_once()
+            response = Mock()
+            response.status = 200
+            response.geturl.return_value = url
+            response.headers = {}
+            response.read.return_value = b"changed bytes"
+            response.__enter__ = Mock(return_value=response)
+            response.__exit__ = Mock(return_value=False)
+            opener = Mock()
+            opener.open.return_value = response
+            with patch.object(pages, "_verify_snapshot", return_value={"passed": True}), patch.object(pages, "build_opener", return_value=opener):
+                with self.assertRaisesRegex(ValueError, "published bytes differ.*index.html"):
+                    pages.verify_live(site, public_policy, "a" * 40)
+            opener.open.side_effect = ValueError("publication verification rejects redirects")
+            with patch.object(pages, "_verify_snapshot", return_value={"passed": True}), patch.object(pages, "build_opener", return_value=opener):
+                with self.assertRaisesRegex(ValueError, "rejects redirects"):
+                    pages.verify_live(site, public_policy, "a" * 40)
 
     def test_redirects_are_rejected(self):
         with self.assertRaises(ValueError):

@@ -17,6 +17,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+from urllib.error import HTTPError
 from urllib.parse import quote
 from urllib.request import HTTPSHandler, HTTPRedirectHandler, Request, build_opener
 
@@ -314,17 +315,28 @@ def verify_live(site: Path, public_policy: dict, source: str) -> dict:
     with snapshot_site(site) as captured:
         result = _verify_snapshot(captured, public_policy, source)
         files = file_map(captured)
+    # The reviewed archive requires this exact empty Pages marker. Its public
+    # URL is not served by this deployment, so only it is excluded from HTTP.
+    if files.get(".nojekyll") != b"":
+        raise ValueError("archive-only .nojekyll marker is missing or nonempty")
+    archive_only_markers = [".nojekyll"]
+    public_files = {name: data for name, data in files.items() if name != ".nojekyll"}
     opener = build_opener(HTTPSHandler(), NoRedirect())
-    for name, expected in sorted(files.items()):
+    for name, expected in sorted(public_files.items()):
         uri = public_policy["base_url"] + "/" + quote(name, safe="/._+~-")
         request = Request(uri, headers={"Accept-Encoding": "identity", "User-Agent": "ASB-publication-verifier"})
-        with opener.open(request, timeout=30) as response:
-            if response.status != 200 or response.geturl() != uri or response.headers.get("Content-Encoding", "identity") != "identity":
-                raise ValueError("unexpected HTTPS publication response")
-            delivered = response.read(len(expected) + 1)
+        try:
+            with opener.open(request, timeout=30) as response:
+                if response.status != 200 or response.geturl() != uri or response.headers.get("Content-Encoding", "identity") != "identity":
+                    raise ValueError("unexpected HTTPS publication response: " + name)
+                delivered = response.read(len(expected) + 1)
+        except HTTPError as error:
+            raise ValueError(f"unexpected HTTPS publication response: {name} HTTP {error.code}") from None
         if delivered != expected:
             raise ValueError("published bytes differ from approved site: " + name)
     return result | {"published": True, "transport": "https", "base_url": public_policy["base_url"],
+                     "archive_files": len(files), "public_files": len(public_files),
+                     "archive_only_markers": archive_only_markers,
                      "verified_at": datetime.now(timezone.utc).isoformat()}
 
 

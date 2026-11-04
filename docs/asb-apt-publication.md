@@ -132,10 +132,14 @@ publication workflow's commit.
 The preparation job has read access only. It authenticates the archive against
 the committed policy before uploading a Pages artifact. Only the deployment
 job receives `pages:write` and `id-token:write`. A separate job verifies the
-saved archive again and compares every published file over HTTPS, rejecting
-redirects, changed content and extra response bytes. A successful deployment
-with a failed readback is **not verified publication**; inspect the saved
-per-attempt evidence before reporting availability.
+saved archive again and compares every public file over HTTPS, rejecting
+redirects, changed content and extra response bytes. The exact empty root
+`.nojekyll` file remains required in the reviewed archive and offline inventory.
+It is a Pages build marker; on this deployment its public URL returned 404.
+The readback result reports archive and public file counts and names this
+archive-only marker. It does not exempt any other file or accept changed HTML.
+A successful deployment with a failed readback is **not verified publication**;
+inspect the saved per-attempt evidence before reporting availability.
 
 After HTTPS byte verification, an isolated APT client fetches the published
 index using the generated source and verifies the four expected package
