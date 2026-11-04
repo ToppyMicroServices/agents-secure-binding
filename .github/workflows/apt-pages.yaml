@@ -7,6 +7,7 @@ on:
       - 'scripts/asb-apt-pages.py'
       - 'scripts/test_asb_apt_pages.py'
       - 'scripts/asb-apt-repository.py'
+      - 'scripts/test_asb_apt_repository.py'
       - 'packaging/debian/archive-signers.json'
   workflow_dispatch:
     inputs:
@@ -39,7 +40,9 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
-      - run: python3 scripts/test_asb_apt_pages.py
+      - run: |
+          python3 scripts/test_asb_apt_repository.py
+          python3 scripts/test_asb_apt_pages.py
 
   prepare:
     if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'ToppyMicroServices/agents-secure-binding'
@@ -136,6 +139,51 @@ jobs:
             if [ "$attempt" -lt 5 ]; then sleep 15; fi
           done
           exit 1
+      - name: Verify the published repository with an isolated APT client
+        env:
+          SITE: ${{ runner.temp }}/site
+        run: |
+          python3 - <<'PY'
+          import importlib.util, json, os, pathlib, pwd, subprocess, tempfile
+          spec = importlib.util.spec_from_file_location('pages', 'scripts/asb-apt-pages.py')
+          pages = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(pages)
+          site = pathlib.Path(os.environ['SITE'])
+          policy = pages.policy(pathlib.Path('packaging/debian/archive-signers.json'))
+          verified = pages.verify_site(site, policy, os.environ['SOURCE_COMMIT'])
+          with tempfile.TemporaryDirectory(prefix='asb-apt-client-') as temporary:
+              root = pathlib.Path(temporary)
+              for path in ('state/lists/partial', 'cache/archives/partial', 'etc'):
+                  (root / path).mkdir(parents=True, exist_ok=True)
+              (root / 'status').write_text('')
+              keyring = root / 'archive.gpg'
+              keyring.write_bytes((site / 'asb-archive.gpg').read_bytes())
+              source = (site / 'asb.sources').read_text()
+              source = source.replace('/etc/apt/keyrings/asb-archive.gpg', str(keyring))
+              source_path = root / 'etc/asb.sources'
+              source_path.write_text(source)
+              options = ['-o', 'Dir::Etc::sourcelist=' + str(source_path),
+                         '-o', 'Dir::Etc::sourceparts=-', '-o', 'Dir::State=' + str(root / 'state'),
+                         '-o', 'Dir::State::status=' + str(root / 'status'),
+                         '-o', 'Dir::Cache=' + str(root / 'cache'), '-o', 'Debug::NoLocking=1',
+                         '-o', 'APT::Sandbox::User=' + pwd.getpwuid(os.getuid()).pw_name,
+                         '-o', 'APT::Update::Error-Mode=any']
+              with open('evidence/apt-update.log', 'w') as log:
+                  subprocess.run(['apt-get', *options, 'update'], stdout=log,
+                                 stderr=subprocess.STDOUT, check=True, timeout=180)
+              packages = {}
+              for name in ('asb', 'asb-tools', 'asb-human', 'asb-s3'):
+                  output = subprocess.check_output(['apt-cache', *options, 'show', name], text=True, timeout=30)
+                  versions = [line[9:] for line in output.splitlines() if line.startswith('Version: ')]
+                  if versions != [verified['version']]:
+                      raise SystemExit('APT package version differs: ' + name)
+                  packages[name] = versions[0]
+              pathlib.Path('evidence/apt-client.json').write_text(json.dumps({
+                  'passed': True, 'source_commit': os.environ['SOURCE_COMMIT'],
+                  'signer': verified['signer'], 'packages': packages,
+                  'scope': 'HTTPS apt update and package-index inspection; no package installation'
+              }, indent=2) + '\n')
+          PY
       - uses: actions/upload-artifact@v4
         if: always()
         with:

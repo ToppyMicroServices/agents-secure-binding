@@ -312,13 +312,23 @@ def sign(args: argparse.Namespace) -> dict:
         return verify(argparse.Namespace(repository=args.repository, keyring=directory / "signer.gpg", signer=[identity]))
 
 
-def source(uri: str) -> str:
+def source(uri: str, signers: list[str] | None = None) -> str:
     parsed = urlsplit(uri)
     if (parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment
             or any(c.isspace() for c in uri)):
         raise ValueError("repository URI must be an explicit HTTPS URL without credentials, query or fragment")
+    # A keyring path alone lets apt accept any signing-capable key in that
+    # keyring. Pin exact subkeys for the publication policy; ! excludes the
+    # primary and any other subkeys under it.
+    exact = ""
+    if signers is not None:
+        if (not isinstance(signers, list) or not 1 <= len(signers) <= 2
+                or not all(isinstance(identity, str) for identity in signers)
+                or len(set(signers)) != len(signers)):
+            raise ValueError("provide one or two distinct exact signing fingerprints")
+        exact = " " + " ".join(fingerprint(identity) + "!" for identity in signers)
     return (f"Types: deb\nURIs: {uri}\nSuites: {SUITE}\nComponents: main\nArchitectures: amd64\n"
-            "Signed-By: /etc/apt/keyrings/asb-archive.gpg\nCheck-Valid-Until: yes\nCheck-Date: yes\n")
+            f"Signed-By: /etc/apt/keyrings/asb-archive.gpg{exact}\nCheck-Valid-Until: yes\nCheck-Date: yes\n")
 
 
 def main() -> int:
@@ -340,10 +350,11 @@ def main() -> int:
     command.add_argument("--signer", action="append", required=True)
     command = commands.add_parser("source")
     command.add_argument("--uri", required=True)
+    command.add_argument("--signer", action="append")
     args = parser.parse_args()
     try:
         if args.command == "source":
-            print(source(args.uri), end="")
+            print(source(args.uri, args.signer), end="")
         else:
             print(json.dumps({"prepare": prepare, "sign": sign, "verify": verify}[args.command](args), sort_keys=True))
         return 0

@@ -44,6 +44,12 @@ class AptRepositoryTest(unittest.TestCase):
         self.assertIn("Signed-By: /etc/apt/keyrings/asb-archive.gpg\n", result)
         self.assertIn("Check-Valid-Until: yes\n", result)
         self.assertNotIn("Trusted:", result)
+        signer = "A" * 40
+        self.assertIn(f"Signed-By: /etc/apt/keyrings/asb-archive.gpg {signer}!\n",
+                      apt.source("https://packages.example.invalid/asb", [signer]))
+        for signers in ([], [signer, signer], [signer, "B" * 40, "C" * 40], ["a" * 40]):
+            with self.subTest(signers=signers), self.assertRaises(ValueError):
+                apt.source("https://packages.example.invalid/asb", signers)
         for uri in ("http://example.invalid", "https://u:p@example.invalid", "https://example.invalid\nTrusted: yes", "https://example.invalid?token=a", "file:/tmp/repository"):
             with self.subTest(uri=uri), self.assertRaises(ValueError):
                 apt.source(uri)
