@@ -187,7 +187,7 @@ def prepare(archive, authorization, output):
               "lifecycle_sha256": apt.sha(lifecycle_bytes), "files": dict(inventory),
               "limits": ["Unsigned metadata: independent review and offline signing are still required.",
                          "Existing Linux package qualification is reused; no product or package installation runs in preparation.",
-                         "Seven-day metadata validity requires renewal; no production key or deployment is configured here."]}
+                         "45-day metadata validity requires monthly renewal; no production key or deployment is configured here."]}
     write_new(output / "prepare-report.json", apt.encoded(result))
     inventory["prepare-report.json"] = apt.sha(apt.encoded(result))
     write_new(output / "SHA256SUMS", "".join(f"{digest}  {name}\n" for name, digest in sorted(inventory.items())).encode())

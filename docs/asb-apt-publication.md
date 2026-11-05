@@ -8,8 +8,9 @@ repository Pages API returned that URL with `build_type: workflow` and HTTPS
 enforced. No DNS or organization-site configuration was changed. The verifier
 uses this exact destination and rejects redirects.
 
-The publication workflow is manual and accepts only a reviewed archive from an
-`apt-preview-...` release. Configuring Pages does not establish that signed
+The publication workflow accepts only a reviewed archive from an
+`apt-preview-...` release. The monthly renewal helper dispatches it automatically
+after the operator signs and publishes the return archive; manual dispatch remains available. Configuring Pages does not establish that signed
 packages have been deployed or that public delivery has passed verification.
 
 ## Trust and key custody
@@ -91,7 +92,7 @@ original qualification artifact to the prepared files. This uses GitHub's
 artifact identity and the recorded Linux results; it is not independent proof
 of a reproducible build.
 
-Metadata is created on Linux with seven days of validity. Preparation uses the
+Metadata is created on Linux with at most 45 days of validity. Preparation uses the
 qualified package bytes without rebuilding or installing them and has no
 signing key or publication permission. Existing package and component limits
 continue to apply. An expired CI snapshot cannot be reused as a fresh signed
@@ -152,10 +153,86 @@ send email, create AWS resources, install a service, or upload private keys.
 
 ## Continuing operation
 
-Metadata expires within seven days. Renew and resign it before expiry using
-the same reviewed payload, or qualify a new source and package version. The
-workflow does not renew signatures automatically. Do not disable apt date or
-signature checks to work around expired metadata.
+Metadata validity is capped at **45 days**, with one attended signing session
+per calendar month. This is an ASB operating policy, not an APT requirement.
+It permits replay of an older signed snapshot for up to 45 days, rather than
+the previous seven-day bound. Date and signature checks remain enabled.
+New packages still need separate qualification and a reviewed policy update;
+monthly renewal preserves the exact approved payload.
+
+### Monthly preparation and expiry notices
+
+`ASB monthly apt renewal` prepares unsigned metadata on the first day of each
+month at **09:17 Asia/Tokyo** (00:17 UTC). It checks public expiry every day at
+**09:37 Asia/Tokyo**. Both operations can also be dispatched manually on `main`.
+The jobs use fixed workflow commits, Linux hosted runners and one operations
+concurrency group. They do not build or install packages.
+
+`packaging/debian/apt-renewal.json` pins an immutable baseline release, its exact
+archive SHA-256/size, source/version, and a payload digest. The payload digest
+covers the full qualified manifest except its two timestamps, including package
+hashes, control fields and the lifecycle evidence hash. A historical baseline
+may have expired: it is accepted only under this independently reviewed whole
+archive hash, never served as fresh. Preparation creates new unsigned metadata
+with exactly 45 days of validity. It does not depend on expiring Actions
+qualification artifacts. The initial baseline is the verified rc.3 APT archive.
+
+[Issue #97](https://github.com/ToppyMicroServices/agents-secure-binding/issues/97),
+assigned to `thinksyncs`, receives monthly signing requests and expiry notices at
+14 days, seven days, expiration, or authentication/transport failure. The monitor
+authenticates both public APT signatures and the signed manifest before trusting
+the expiry. Failures are reported as unknown freshness, never healthy. Repeated
+notices for the same state/month are suppressed. Successful renewed publication
+closes the issue; a later monthly request reopens it. GitHub email/push delivery
+depends on the assignee's notification preferences; this workflow does not
+configure a separate mail provider.
+
+GitHub scheduled workflows can be delayed or dropped and may be disabled after
+60 days without repository activity. These notices therefore depend on GitHub
+scheduling; they are not an independent availability monitor. Check workflow
+health when attending the monthly signing session. See
+[GitHub scheduling limits](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule).
+
+### Attend only the signing operation
+
+Use the helper from latest protected `main`, with the existing GnuPG home and
+normal PIN/touch policy. Download the preparation named in the signing request:
+
+```sh
+PREPARATION_RUN=123456789 # replace with the successful monthly preparation run
+PREPARED="/private/tmp/asb-apt-monthly-$PREPARATION_RUN"
+gh run download "$PREPARATION_RUN" --repo ToppyMicroServices/agents-secure-binding \
+  --name "asb-apt-monthly-$PREPARATION_RUN" --dir "$PREPARED"
+python3 scripts/renew-asb-apt.py sign --input "$PREPARED" \
+  --output "$PWD/asb-apt-site.tar" --gnupg-home "$HOME/.gnupg" --publish
+```
+
+The helper captures and validates the preparation before asking for connection.
+It rejects changed payloads, keys, plans, extra files, existing signatures,
+preparations older than seven days, and validity other than exactly 45 days.
+Connect the YubiKey only at its prompt and attend the authentication window.
+It confirms that the exact approved signer has a hardware-token reference,
+then performs only the two APT signatures with a combined 180-second limit.
+There are no automatic signing retries. It immediately tells the operator to
+remove the key on success, failure, cancellation or timeout. Key/PIN/touch
+settings are not changed, and private keys are never exported or uploaded.
+
+After removal, the helper verifies signatures, stages and checks the final
+archive. With `--publish`, it uploads only that archive to a draft Preview
+release, publishes the immutable release, and dispatches renewal validation on
+protected `main`. The CI entry point does not execute code from a release tag.
+It revalidates signatures, exact payload, creation time and the GitHub asset
+hash before dispatching `ASB apt Pages publication`. That workflow again checks
+the final artifact, deploys it, compares public HTTPS bytes, and runs the
+isolated APT client. Preview support classifications remain unchanged.
+
+If upload fails after signing, remove the YubiKey and retain the signed archive.
+`python3 scripts/renew-asb-apt.py upload --input "$PWD/asb-apt-site.tar"` can submit
+an existing verified archive without signing again. A failed upload may leave
+a draft release: inspect it before retrying; the helper never clobbers assets.
+The old published snapshot keeps its original expiry until successful delivery
+of the renewed archive. Changing this code or policy does not extend an
+already-published signature.
 
 Key rotation needs an overlapping public keyring update before publishing
 metadata signed only by the new key. With v2 exact-signer pinning, also deliver

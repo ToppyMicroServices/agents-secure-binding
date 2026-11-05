@@ -1,0 +1,120 @@
+name: ASB monthly apt renewal
+
+on:
+  schedule:
+    - cron: '17 0 1 * *'
+    - cron: '37 0 * * *'
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: 'Prepare for attended signing, check expiry, or submit a signed release'
+        type: choice
+        options: [prepare, monitor, submit]
+        default: monitor
+        required: true
+      release_tag:
+        description: 'Signed apt-preview-renewal-... release (submit only)'
+        type: string
+  pull_request:
+    paths:
+      - '.github/workflows/apt-renewal.yaml'
+      - '.github/workflows/apt-pages.yaml'
+      - 'scripts/renew-asb-apt.py'
+      - 'scripts/test_renew_asb_apt.py'
+      - 'scripts/asb-apt-repository.py'
+      - 'scripts/asb-apt-pages.py'
+      - 'packaging/debian/apt-renewal.json'
+      - 'packaging/debian/archive-signers.json'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: asb-apt-renewal-${{ github.event_name == 'pull_request' && github.event.number || 'operations' }}
+  cancel-in-progress: false
+
+jobs:
+  checks:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - run: python3 scripts/test_renew_asb_apt.py
+
+  prepare:
+    if: github.repository == 'ToppyMicroServices/agents-secure-binding' && github.ref == 'refs/heads/main' && (github.event.schedule == '17 0 1 * *' || (github.event_name == 'workflow_dispatch' && inputs.operation == 'prepare'))
+    needs: checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Prepare only the approved immutable payload
+        run: python3 scripts/renew-asb-apt.py prepare --output "$RUNNER_TEMP/asb-apt-monthly"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: asb-apt-monthly-${{ github.run_id }}
+          path: ${{ runner.temp }}/asb-apt-monthly/
+          retention-days: 7
+          if-no-files-found: error
+      - name: Request one attended signing session
+        run: |
+          python3 scripts/renew-asb-apt.py notify --state ready \
+            --detail "Monthly preparation is ready: artifact asb-apt-monthly-$GITHUB_RUN_ID. Use the signing helper from latest main; it will prompt when to connect and remove YubiKey."
+      - name: Report preparation failure
+        if: failure()
+        run: python3 scripts/renew-asb-apt.py notify --state error --detail 'Monthly preparation failed. Inspect this workflow before connecting YubiKey.'
+
+  monitor:
+    if: github.repository == 'ToppyMicroServices/agents-secure-binding' && github.ref == 'refs/heads/main' && (github.event.schedule == '37 0 * * *' || (github.event_name == 'workflow_dispatch' && inputs.operation == 'monitor'))
+    needs: checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Authenticate public metadata and report freshness
+        run: python3 scripts/renew-asb-apt.py monitor
+
+  submit:
+    if: github.repository == 'ToppyMicroServices/agents-secure-binding' && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.operation == 'submit'
+    needs: checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: write
+      issues: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: ${{ inputs.release_tag }}
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Verify signed return before dispatching production publication
+        run: python3 scripts/renew-asb-apt.py submit --release-tag "$RELEASE_TAG"
+      - name: Report rejected signed return
+        if: failure()
+        run: python3 scripts/renew-asb-apt.py notify --state error --detail 'The signed renewal release was not accepted for publication. Inspect this workflow; do not disable date or signature checks.'

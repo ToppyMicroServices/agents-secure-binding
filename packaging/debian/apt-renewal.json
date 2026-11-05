@@ -1,0 +1,12 @@
+{
+  "baseline_bytes": 53749760,
+  "baseline_release": "apt-preview-rc3-20261104",
+  "baseline_sha256": "22ea5e983692d1e4d16159850e700ae048b1c829ceae52c7ad40aaff75031ae1",
+  "notification_issue": 97,
+  "notify_assignee": "thinksyncs",
+  "payload_sha256": "d7bc24b00c3d26ba1b00585d5d23179c378c218601cbf7b5cdb29eae79cc4eb2",
+  "schema": "asb.apt-renewal-policy/v1",
+  "source_commit": "c7a30041882853a6642804a176f00591a5b6b6e8",
+  "validity_days": 45,
+  "version": "2.0.0~rc.3-1"
+}
