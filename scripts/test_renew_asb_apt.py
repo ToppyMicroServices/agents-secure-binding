@@ -186,21 +186,36 @@ class RenewalTest(unittest.TestCase):
     def test_notifications_are_bound_deduplicated_and_resolved(self):
         approved = {"notification_issue": 97, "notify_assignee": "fixture-owner"}
         issue = {"title": renewal.TITLE, "state": "open", "body": "initial"}
-        with patch.object(renewal, "api", side_effect=[issue, {}, {}]) as api:
+        with patch.object(renewal, "api", side_effect=[issue, {"id": 1}, {}]) as api:
             result = renewal.notify(approved, "urgent", "expiry", cycle="2026-11")
             self.assertEqual(result["notification"], "updated")
-            self.assertEqual(api.call_args_list[1].args[0], "issues/97")
-            body = api.call_args_list[1].args[1]["body"]
+            self.assertEqual(api.call_args_list[2].args[0], "issues/97")
+            body = api.call_args_list[2].args[1]["body"]
         issue["body"] = body
         with patch.object(renewal, "api", return_value=issue) as api:
             self.assertEqual(renewal.notify(approved, "urgent", "expiry", cycle="2026-11")["notification"], "unchanged")
             api.assert_called_once()
-        with patch.object(renewal, "api", side_effect=[issue, {}, {}]) as api:
+        with patch.object(renewal, "api", side_effect=[issue, {"id": 1}, {}]) as api:
             renewal.notify(approved, "healthy", "renewed", cycle="2026-11")
-            self.assertEqual(api.call_args_list[1].args[1]["state"], "closed")
+            self.assertEqual(api.call_args_list[2].args[1]["state"], "closed")
         with patch.object(renewal, "api", return_value=dict(issue, title="another issue")):
             with self.assertRaises(ValueError):
                 renewal.notify(approved, "urgent", "expiry")
+
+    def test_failed_notification_does_not_commit_deduplication_state(self):
+        approved = {"notification_issue": 97, "notify_assignee": "fixture-owner"}
+        issue = {"title": renewal.TITLE, "state": "open", "body": "initial"}
+        for result in (None, [], {}, {"id": True}):
+            with patch.object(renewal, "api", side_effect=[issue, result]) as api:
+                with self.assertRaisesRegex(ValueError, "not acknowledged"):
+                    renewal.notify(approved, "urgent", "expiry")
+                self.assertEqual(api.call_count, 2)
+                self.assertTrue(api.call_args.args[0].endswith("/comments"))
+        with patch.object(renewal, "gh", return_value=b"{}") as gh:
+            renewal.api("issues/97/comments", {"body": "notice"})
+            self.assertIn("POST", gh.call_args.args)
+            renewal.api("issues/97", {"state": "open"}, method="PATCH")
+            self.assertIn("PATCH", gh.call_args.args)
 
     def test_monitor_authenticates_dates_and_rejects_forged_manifest_or_transport(self):
         manifest, files, public = fixtures.fixture()

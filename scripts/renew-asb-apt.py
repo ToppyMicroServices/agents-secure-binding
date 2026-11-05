@@ -76,8 +76,7 @@ def gh(*args, payload=None):
 
 def api(path, payload=None, method=None):
     args = ["api", "repos/" + REPO + "/" + path]
-    if method:
-        args += ["--method", method]
+    args += ["--method", method or ("POST" if payload is not None else "GET")]
     if payload is not None:
         args += ["--input", "-"]
     output = gh(*args, payload=payload)
@@ -299,9 +298,13 @@ def notify(approved, state, detail, cycle=None):
     body = ("Monthly attended APT renewal; 45-day metadata validity.\n\nStatus: **" + state + "**\n\n"
             + detail + "\n\n" + run + "\n\nConnect YubiKey only when the signing helper prompts; remove it immediately afterward.\n"
             + "\n<!-- asb-apt-renewal-state: " + json.dumps(desired, sort_keys=True) + " -->\n")
+    posted = api(issue + "/comments", {"body": "APT renewal status: **" + state + "** (" + cycle + ").\n\n" + detail + "\n\n" + run})
+    require(isinstance(posted, dict) and type(posted.get("id")) is int and posted["id"] > 0,
+            "notification comment was not acknowledged")
+    # Commit deduplication state only after GitHub acknowledges the notice.
+    # An ambiguous response can cause a duplicate on retry, never silent loss.
     api(issue, {"body": body, "state": "closed" if state == "healthy" else "open",
                 "assignees": [approved["notify_assignee"]]}, method="PATCH")
-    api(issue + "/comments", {"body": "APT renewal status: **" + state + "** (" + cycle + ").\n\n" + detail + "\n\n" + run})
     return {"notification": "updated", **desired}
 
 

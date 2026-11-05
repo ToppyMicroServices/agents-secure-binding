@@ -182,7 +182,9 @@ assigned to `thinksyncs`, receives monthly signing requests and expiry notices a
 14 days, seven days, expiration, or authentication/transport failure. The monitor
 authenticates both public APT signatures and the signed manifest before trusting
 the expiry. Failures are reported as unknown freshness, never healthy. Repeated
-notices for the same state/month are suppressed. Successful renewed publication
+notices for the same state/month are suppressed after GitHub acknowledges the
+notice. An ambiguous API failure may cause a duplicate on retry; it does not
+record an undelivered notice as complete. Successful renewed publication
 closes the issue; a later monthly request reopens it. GitHub email/push delivery
 depends on the assignee's notification preferences; this workflow does not
 configure a separate mail provider.
@@ -230,6 +232,14 @@ If upload fails after signing, remove the YubiKey and retain the signed archive.
 `python3 scripts/renew-asb-apt.py upload --input "$PWD/asb-apt-site.tar"` can submit
 an existing verified archive without signing again. A failed upload may leave
 a draft release: inspect it before retrying; the helper never clobbers assets.
+If release publication succeeded but automatic dispatch failed, dispatch the
+existing release without another signature:
+
+```sh
+gh workflow run apt-renewal.yaml --ref main -f operation=submit \
+  -f release_tag="$SIGNED_RENEWAL_TAG"
+```
+
 The old published snapshot keeps its original expiry until successful delivery
 of the renewed archive. Changing this code or policy does not extend an
 already-published signature.
