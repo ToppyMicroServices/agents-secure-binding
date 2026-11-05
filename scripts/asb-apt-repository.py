@@ -24,7 +24,7 @@ DIST = Path("dists") / SUITE
 INDEX = "main/binary-amd64/Packages"
 MAX_METADATA = 4 * 1024 * 1024
 MAX_PACKAGE = 256 * 1024 * 1024
-MAX_VALIDITY = 7 * 86400
+MAX_VALIDITY = 45 * 86400
 PACKAGES = {"asb": "all", "asb-tools": "amd64", "asb-human": "amd64", "asb-s3": "amd64"}
 LIFECYCLE_CHECKS = {"apt_install", "local_command_smoke", "invalid_configuration_denied", "human_self_test",
                     "unpack_then_configure", "remove_preserves_state", "purge_preserves_state",
@@ -76,7 +76,7 @@ def fingerprint(value: str) -> str:
 
 def validate_dates(created: int, expires: int, now: int | None = None) -> None:
     if type(created) is not int or type(expires) is not int or not 0 < expires - created <= MAX_VALIDITY:
-        raise ValueError("metadata validity must be between one second and seven days")
+        raise ValueError("metadata validity must be between one second and 45 days")
     if now is not None and (created > now + 10 or expires <= now):
         raise ValueError("metadata is expired or dated in the future")
 
@@ -239,19 +239,19 @@ def prepare(args: argparse.Namespace) -> dict:
     return {"prepared": True, "signed": False, "published": False, "manifest_sha256": sha(encoded(manifest))}
 
 
-def verify(args: argparse.Namespace) -> dict:
-    allowed = {fingerprint(item) for item in args.signer}
+def verify_signatures(repository: Path, public_keyring: Path, signers: list[str]) -> tuple[str, bytes]:
+    allowed = {fingerprint(item) for item in signers}
     if not allowed:
         raise ValueError("provide an independently approved signer fingerprint")
-    keyring = read(args.keyring, 1024 * 1024)
-    release = read(args.repository / DIST / "Release")
+    keyring = read(public_keyring, 1024 * 1024)
+    release = read(repository / DIST / "Release")
     # gpgv receives only the supplied keyring, in a fresh home; no ambient trust.
     with tempfile.TemporaryDirectory(prefix="asb-apt-verify-") as temporary:
         home = Path(temporary)
         (home / "keyring.gpg").write_bytes(keyring)
         identities = []
         for signature, detached in (("InRelease", False), ("Release.gpg", True)):
-            (home / signature).write_bytes(read(args.repository / DIST / signature))
+            (home / signature).write_bytes(read(repository / DIST / signature))
             (home / "Release").write_bytes(release)
             command = ["gpgv", "--homedir", str(home), "--keyring", str(home / "keyring.gpg"), "--status-fd", "2"]
             if not detached:
@@ -275,11 +275,16 @@ def verify(args: argparse.Namespace) -> dict:
                 raise ValueError("InRelease and Release content differ")
         if identities[0] != identities[1]:
             raise ValueError("repository signatures use different keys")
+    return identities[0], release
+
+
+def verify(args: argparse.Namespace) -> dict:
+    identity, release = verify_signatures(args.repository, args.keyring, args.signer)
     manifest = inspect_repository(args.repository)
     if metadata(manifest)[str(DIST / "Release")] != release:
         raise ValueError("repository changed after signature verification: authenticated Release differs")
     validate_dates(manifest["created"], manifest["expires"], int(datetime.now(timezone.utc).timestamp()))
-    return {"schema": "asb.apt-verification/v1", "passed": True, "signer": identities[0],
+    return {"schema": "asb.apt-verification/v1", "passed": True, "signer": identity,
             "source_commit": manifest["source_commit"], "version": manifest["version"],
             "manifest_sha256": sha(encoded(manifest)), "packages": [{key: value for key, value in item.items() if key != "control"} for item in manifest["packages"]],
             "expires": manifest["expires"], "published": False}

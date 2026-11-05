@@ -9,6 +9,8 @@ on:
       - 'scripts/asb-apt-repository.py'
       - 'scripts/test_asb_apt_repository.py'
       - 'packaging/debian/archive-signers.json'
+      - 'packaging/debian/apt-renewal.json'
+      - 'scripts/renew-asb-apt.py'
   workflow_dispatch:
     inputs:
       release_tag:
@@ -81,6 +83,11 @@ jobs:
             --policy packaging/debian/archive-signers.json --source-commit "$SOURCE_COMMIT" \
             --archive "$RUNNER_TEMP/reviewed/asb-apt-site.tar" --sha256 "$ARCHIVE_SHA256" \
             --output "$RUNNER_TEMP/site"
+      - name: Bind automated renewals to the reviewed payload
+        run: |
+          if [[ "$RELEASE_TAG" == apt-preview-renewal-* ]]; then
+            python3 scripts/renew-asb-apt.py validate --input "$RUNNER_TEMP/site"
+          fi
       - uses: actions/upload-pages-artifact@v4
         with:
           path: ${{ runner.temp }}/site
@@ -107,6 +114,9 @@ jobs:
         uses: actions/deploy-pages@v4
 
   verify-publication:
+    permissions:
+      contents: read
+      issues: write
     needs: deploy
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -191,3 +201,8 @@ jobs:
           path: evidence/
           retention-days: 90
           if-no-files-found: error
+      - name: Confirm renewed freshness and resolve the signing request
+        if: success() && startsWith(inputs.release_tag, 'apt-preview-renewal-')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/renew-asb-apt.py monitor

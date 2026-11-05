@@ -35,6 +35,7 @@ class AptRepositoryTest(unittest.TestCase):
     def test_time_bounds_reject_expiry_future_and_excessive_validity(self):
         apt.validate_dates(100, 200, 100)
         apt.validate_dates(110, 200, 100)
+        apt.validate_dates(100, 100 + 45 * 86400, 100)
         for created, expires, now in ((100, 200, 200), (111, 200, 100), (200, 100, 100), (100, 100 + apt.MAX_VALIDITY + 1, 100), (True, 200, 100)):
             with self.subTest(created=created, expires=expires, now=now), self.assertRaises(ValueError):
                 apt.validate_dates(created, expires, now)

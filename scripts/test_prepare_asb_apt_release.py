@@ -204,7 +204,7 @@ class ReleasePreparationTests(unittest.TestCase):
             self.assertEqual(stored, report)
             self.assertFalse(stored["signed"])
             self.assertFalse(stored["published"])
-            self.assertEqual(stored["expires"] - stored["created"], 7 * 86400)
+            self.assertEqual(stored["expires"] - stored["created"], 45 * 86400)
             manifest = release.apt.inspect_repository(output / "repository")
             self.assertEqual(manifest["source_commit"], SOURCE)
             self.assertEqual(manifest["lifecycle_sha256"], stored["lifecycle_sha256"])
