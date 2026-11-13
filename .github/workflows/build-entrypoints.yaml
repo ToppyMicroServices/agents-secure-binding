@@ -1,0 +1,33 @@
+name: Local build entrypoints
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - Makefile
+      - cli/README.md
+      - scripts/igvmmeasure/**
+      - scripts/test_build_entrypoints.py
+      - .github/workflows/build-entrypoints.yaml
+  pull_request:
+    paths:
+      - Makefile
+      - cli/README.md
+      - scripts/igvmmeasure/**
+      - scripts/test_build_entrypoints.py
+      - .github/workflows/build-entrypoints.yaml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  routing:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Check native defaults and optional pinned IGVM builds without downloads
+        run: python3 -B scripts/test_build_entrypoints.py

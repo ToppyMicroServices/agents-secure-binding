@@ -10,20 +10,26 @@ From the project root:
 make cli
 ```
 
+This builds `build/agents-secure-binding-cli` for the current OS and CPU.
+Install the Go version required by the root `go.mod`; Rust and SVSM are needed
+only for the optional IGVM helper below. Override `GOOS` / `GOARCH` explicitly
+when cross-compiling. Local builds omit Git metadata; release builders can
+set `GO_BUILD_FLAGS=-buildvcs=true` and supply `VERSION` / `COMMIT` as needed.
+
 ## Usage
 
 #### Get attestation
 Retrieves attestation information from the SEV guest and saves it to a file.
 To retrieve attestation from agent, use the following command:
 ```bash
-./build/cocos-cli attestation get '<report_data>'
+./build/agents-secure-binding-cli attestation get '<report_data>'
 ```
 
 #### Validate attestation
 Validates the retrieved attestation information against a specified policy and checks its authenticity.
 To validate and verify attestation from agent, use the following command:
 ```bash
-./build/cocos-cli attestation validate '<attestation>' --report_data '<report_data>'
+./build/agents-secure-binding-cli attestation validate '<attestation>' --report_data '<report_data>'
 ```
 ##### Flags
 - --config: Path to a JSON file containing the validation configuration. This can be used to override individual flags.
@@ -62,7 +68,7 @@ To validate and verify attestation from agent, use the following command:
 To upload an algorithm, use the following command:
 
 ```bash
-./build/cocos-cli algo /path/to/algorithm <private_key_file_path>
+./build/agents-secure-binding-cli algo /path/to/algorithm <private_key_file_path>
 ```
 
 ##### Flags
@@ -76,7 +82,7 @@ To upload an algorithm, use the following command:
 To upload a dataset, use the following command:
 
 ```bash
-./build/cocos-cli data /path/to/dataset.csv <private_key_file_path>
+./build/agents-secure-binding-cli data /path/to/dataset.csv <private_key_file_path>
 ```
 
 Users can also upload directories which will be compressed on transit. Once received by agent they will be stored as compressed files or decompressed if the user passed the decompression argument.
@@ -91,26 +97,44 @@ Users can also upload directories which will be compressed on transit. Once rece
 To retrieve the computation result, use the following command:
 
 ```bash
-./build/cocos-cli result <private_key_file_path>
+./build/agents-secure-binding-cli result <private_key_file_path>
 ```
 
 #### Checksum
 When defining the manifest dataset and algorithm checksums are required. This can be done as below:
 
 ```bash
-./build/cocos-cli checksum <path_to_dataset_or_algorithm>
+./build/agents-secure-binding-cli checksum <path_to_dataset_or_algorithm>
 ```
 
 #### Measure IGVM file
-We assume that our current working directory is the root of the cocos repository, both on the host machine and in the VM.
+Run these commands from the ASB repository root, both on the host machine and in the VM.
 
 `igvmmeasure` calculates the launch measurement for an IGVM file and can generate a signed version. It ensures integrity by precomputing the expected launch digest, which can be verified against the attestation report. The tool parses IGVM directives, outputs the measurement as a hex string, or creates a signed file for verification at guest launch.
+
+This helper is optional and is not built by `make`, `make cli`, or `make manager`.
+Prepare a clean local [SVSM checkout](https://github.com/coconut-svsm/svsm) at an
+independently reviewed commit, including its pinned submodules and the Rust
+build prerequisites documented by that revision. Replace both values below:
+
+```bash
+make build-igvm \
+  IGVM_SOURCE_DIR=/absolute/path/to/reviewed-svsm \
+  IGVM_SOURCE_REVISION=REPLACE_WITH_REVIEWED_40_CHARACTER_COMMIT
+```
+
+The target requires the exact lowercase commit ID and rejects a mismatched or
+dirty checkout and missing or mismatched submodules. It does not clone, pull,
+or update source. No default SVSM revision is implied. The helper is installed
+as `build/igvmmeasure`; `IGVM_BINARY_PATH` can select an already built helper
+elsewhere. The upstream Rust build may need to download its declared build
+dependencies.
 
 ##### Example
 We measure an IGVM file using our measure command, run:
 
 ```bash
-./build/cocos-cli igvmmeasure /path/to/igvm/file
+./build/agents-secure-binding-cli igvmmeasure /path/to/igvm/file
 ```
 
 The tool will parse the directives in the IGVM file, calculate the launch measurement, and output the computed digest. If successful, it prints the measurement to standard output.

@@ -300,7 +300,11 @@ func inspectOpenedStoreArchive(ctx context.Context, file *os.File, databasePath 
 	return manifest, nil
 }
 
-func queryStoreCapacity(ctx context.Context, db *sql.DB) (StoreCapacity, error) {
+type capacityQueryer interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
+func queryStoreCapacity(ctx context.Context, db capacityQueryer) (StoreCapacity, error) {
 	capacity := StoreCapacity{OperationLimit: maxProposalRecords, CommandLimit: maxMutationRecords, ReplayLimit: maxReplayRecords}
 	if err := db.QueryRowContext(ctx, `SELECT count(*), coalesce(sum(json_extract(document, '$.state') = ?), 0) FROM operations`, StatePending).Scan(&capacity.Operations, &capacity.Pending); err != nil {
 		return StoreCapacity{}, storeError(err)

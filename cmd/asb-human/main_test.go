@@ -336,6 +336,24 @@ func TestInspectionDistinguishesMissingOperationFromUnavailableStatus(t *testing
 	}
 }
 
+func TestAgentCapacityRejectionPreservesReceiptWithoutUnknownOutcome(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "receipt.json")
+	command := proposalForTest("capacity", 0)
+	if err := saveReceipt(path, command); err != nil {
+		t.Fatal(err)
+	}
+	err := runAgent(t.Context(), agentOptions{receipt: path}, func(context.Context, humanapp.Command) ([]byte, error) {
+		return nil, humanapp.ErrCapacity
+	}, io.Discard)
+	if !errors.Is(err, humanapp.ErrCapacity) || strings.Contains(err.Error(), "outcome unknown") || !strings.Contains(err.Error(), "storage-status") || !strings.Contains(err.Error(), "rollover") {
+		t.Fatalf("capacity guidance = %v", err)
+	}
+	_, recovered, readErr := readReceipt(path)
+	if readErr != nil || recovered.CommandID != command.CommandID {
+		t.Fatalf("receipt not preserved: %v", readErr)
+	}
+}
+
 func TestReceiptNeverOverwritesAndRejectsConflictingFlags(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "receipt.json")
 	command := proposalForTest("exclusive", 4)

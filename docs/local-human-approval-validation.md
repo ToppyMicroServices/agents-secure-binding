@@ -272,6 +272,56 @@ reported. These were test decisions, not evidence of a person's identity.
 This entry records local macOS checks. Remote CI and Linux/Windows runtime
 checks were not run for this candidate at this checkpoint.
 
+## Usability and durable outcome recovery — 2026-11-14
+
+Checked this local source tree on macOS arm64 with Go 1.26.10, Node 24.22.1,
+and golangci-lint 2.11.1. Toolchains and caches were isolated in temporary
+directories. Go used a module proxy without VCS fallback, disabled VCS
+stamping, and did not use credential helpers or the user's Go configuration.
+
+The following checks passed:
+
+- Race-enabled tests and `go vet` for `internal/humanapp`, `cmd/asb-human`,
+  and `examples/protected-change-consumer`.
+- All 30 dependency-free Node UI tests. The regressions cover independent
+  history pages, results outside the inbox window, terminal-only recovery,
+  unresolved operation metadata across reloads, unavailable/corrupt browser
+  storage, session response races, and capacity warnings. Authentication
+  tokens and CSRF values are not stored with recovery metadata.
+- The pinned linter on those three package trees.
+- All nine build-entrypoint tests, plus shell syntax validation. The tests
+  use mocked build tools and reject mutable or mismatched optional IGVM input.
+  An actual native `make cli` also built the documented executable without
+  invoking Git or the optional IGVM/Rust build.
+- The compiled `asb-human self-test`: all four Human decisions, authenticated
+  loopback requests, and original result recovery after SQLite reopen.
+- CGO-disabled `asb-human` cross-builds for Linux amd64 and Windows amd64,
+  and Windows cross-compilation of the protected-change test binary.
+  Portable URI tests cover Windows drive paths and escaping.
+- YAML parsing of the local-approval and build-entrypoint workflows.
+
+The durable consumer recipe injects both a database acknowledgement failure
+and an HTTP response loss after commit. It verifies same-connection proof
+replay rejection, reopen recovery with a new authenticated read proof,
+read/write authorization separation, conflicting identity and tenant reuse,
+concurrent database handles, and transaction rollback. Its atomic effect is
+limited to the example's own SQLite setting.
+
+The local approval store still retains its 5,000-proposal/10,000-receipt
+boundaries. The UI now reports usage and warns at 80%; a definite capacity
+rejection is distinct from an unknown result. Export does not reclaim space.
+The documented rollover starts a separate instance while retaining the
+original directory for recovery; it does not silently migrate or delete
+identity, settings, approvals, or replay records.
+
+A fresh isolated headless browser could not launch because the macOS sandbox
+denied its Mach-port registration. Consequently this checkpoint has no new
+visual browser validation. Node tests cover browser logic and Go tests cover
+the HTTP/session boundary. Linux/Windows executables were compiled but not
+run locally, and the updated remote CI workflows have not been executed for
+this candidate. The normal local-approval workflow now includes native macOS
+runtime and artifact checks, retaining the explicit Linux-only label override.
+
 ## Remaining boundaries
 
 These results establish a local Developer Preview. They do not establish

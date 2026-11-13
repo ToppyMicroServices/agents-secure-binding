@@ -41,6 +41,12 @@ profile requirements.
 
 ## Quick start
 
+**Try a prepared executable:** the [binary quick start](docs/asb-human-binary-quickstart.md#get-an-executable)
+shows the matching macOS, Linux, and Windows artifacts, checksum verification,
+and the same self-test and browser demo below. This route does not require Go.
+
+**Build from source:**
+
 Install [Go 1.26.10](https://go.dev/doc/install) and run these commands from this source checkout. The local app
 below is an **experimental preview** included in `v2.0.0-rc.3`.
 The first run downloads Go dependencies and compiles the app; later runs reuse
@@ -81,9 +87,10 @@ request has not been confirmed and requires a status check.
 
 The Agent prints the result. Press Ctrl+C to stop the service; the decision,
 setting, and recovery receipts remain in `.asb-human`. The browser UI is shared
-across the macOS, Linux, and Windows builds. Native macOS checks in the
+across the macOS, Linux, and Windows builds. Native checks for all three run in the
 [runtime workflow](https://github.com/ToppyMicroServices/agents-secure-binding/actions/workflows/human-approval.yaml)
-run only when started manually. Check the results for the commit you use. This
+on relevant pushes and pull requests (a `ci:linux-only` PR label explicitly limits a run).
+Check the runtime and artifact results for the commit you use. This
 is a one-host, one-user preview, not a general TaskCoord production service.
 `demo` chooses free ports automatically; always use the link from the current run.
 

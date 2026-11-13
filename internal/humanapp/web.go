@@ -17,6 +17,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -152,7 +153,7 @@ func (h *webHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.mu.Unlock()
 		h.setCookie(w, "", time.Unix(1, 0), -1)
 		w.WriteHeader(http.StatusNoContent)
-	case "/api/inbox":
+	case "/api/inbox", "/api/operation":
 		if r.Method != http.MethodGet {
 			h.methodNotAllowed(w, "GET")
 			return
@@ -161,12 +162,12 @@ func (h *webHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			h.unauthorized(w)
 			return
 		}
-		id, err := uuid.NewRandom()
+		command, err := webReadCommand(r)
 		if err != nil {
-			webError(w, 500, "INTERNAL_ERROR", "要求を作成できませんでした。", false)
+			webError(w, 400, "INVALID_REQUEST", "一覧のページ番号、または操作IDと提案digestを確認してください。", false)
 			return
 		}
-		h.executeCommand(w, r, Command{CommandID: id.String(), Kind: KindInbox})
+		h.executeCommand(w, r, command)
 	case "/api/decision":
 		if r.Method != http.MethodPost {
 			h.methodNotAllowed(w, "POST")
@@ -179,6 +180,39 @@ func (h *webHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	default:
 		webError(w, http.StatusNotFound, "NOT_FOUND", "ページが見つかりません。", false)
 	}
+}
+
+// Read selectors become part of the exact ASB command context. They are never
+// used to bypass the authenticated gateway or read the store directly.
+func webReadCommand(r *http.Request) (Command, error) {
+	query, err := url.ParseQuery(r.URL.RawQuery)
+	if err != nil {
+		return Command{}, ErrInvalid
+	}
+	id, err := uuid.NewRandom()
+	if err != nil {
+		return Command{}, err
+	}
+	command := Command{CommandID: id.String(), Kind: KindInbox}
+	if r.URL.Path == "/api/operation" {
+		if len(query) != 2 || len(query["operation_id"]) != 1 || len(query["proposal_digest"]) != 1 {
+			return Command{}, ErrInvalid
+		}
+		command.Kind = KindStatus
+		command.OperationID = query.Get("operation_id")
+		command.ProposalDigest = query.Get("proposal_digest")
+	} else if len(query) != 0 {
+		if len(query) != 1 || len(query["history_offset"]) != 1 {
+			return Command{}, ErrInvalid
+		}
+		value := query.Get("history_offset")
+		offset, err := strconv.Atoi(value)
+		if err != nil || strconv.Itoa(offset) != value {
+			return Command{}, ErrInvalid
+		}
+		command.HistoryOffset = offset
+	}
+	return command, command.Validate()
 }
 
 func webJSONRequest(r *http.Request) bool {
@@ -329,6 +363,8 @@ func (h *webHandler) executeCommand(w http.ResponseWriter, r *http.Request, comm
 			webError(w, 404, "NOT_FOUND", "変更が見つかりません。最新の一覧を確認してください。", false)
 		case errors.Is(err, ErrUnauthorized):
 			webError(w, 403, "GATEWAY_NOT_AUTHORIZED", "Gatewayの認証に失敗しました。起動設定を確認してください。", false)
+		case errors.Is(err, ErrCapacity):
+			webError(w, http.StatusInsufficientStorage, "CAPACITY_EXCEEDED", "保存容量の上限に達したため、この要求は適用されませんでした。ターミナルで storage-status を確認してください。新しい提案を止め、既存の記録を保存してから別のデータディレクトリへの移行手順を確認してください。", false)
 		default:
 			webError(w, 503, "OUTCOME_UNKNOWN", "結果を確認できません。操作を繰り返さず、一覧を更新して状態を確認してください。", command.Mutation())
 		}

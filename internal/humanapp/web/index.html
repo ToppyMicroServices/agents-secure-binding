@@ -15,6 +15,7 @@
     <span class="environment"><span aria-hidden="true"></span>ローカル実験版</span>
   </header>
   <main id="main">
+    <p id="recovery-warning" class="notice error" role="alert" hidden></p>
     <section id="login-view" class="login-layout" aria-labelledby="login-heading">
       <div class="intro">
         <p class="eyebrow">AGENT → HUMAN → ACTION</p>
@@ -48,11 +49,25 @@
         </section>
         <section class="review-summary panel" aria-labelledby="queue-heading"><p class="eyebrow">YOUR QUEUE</p><div class="queue-count"><strong id="pending-count">—</strong><h2 id="queue-heading">確認待ち</h2></div><p id="last-updated" class="small muted">状態を取得しています</p></section>
       </div>
+      <aside id="storage-status" class="storage-status panel" aria-labelledby="storage-heading" hidden>
+        <h2 id="storage-heading">保存容量</h2><p id="storage-usage" class="small muted"></p>
+        <p id="capacity-warning" class="form-message" role="status" hidden></p>
+        <details><summary>容量の確認と記録の保管</summary><p class="small muted">ターミナルの <code>storage-status</code> で詳細を確認できます。<code>storage-export</code> と <code>storage-verify</code> で保管・検証しても、このデータディレクトリの容量は増えません。移行先は独立した新しい環境です。元のディレクトリとreceiptを残し、復旧には元の環境を使用してください。詳しくは配布物のlocal-human-approvalガイドを確認してください。</p></details>
+      </aside>
+      <section id="reviewed-section" aria-labelledby="reviewed-heading" hidden>
+        <div class="section-heading"><h2 id="reviewed-heading">直前の判断・結果確認</h2></div>
+        <p class="small muted">直前の判断と結果不明の操作を保持します。不明な操作のID・提案digest・確認した差分は、このタブの復旧用データとして保存します。認証トークンは保存しません。「一覧を更新」で個別照会し、判断済みの結果を確認できるまで再送を防ぎます。</p>
+        <div id="reviewed-list" class="operation-list"></div>
+      </section>
       <div class="section-heading"><h2>確認待ちの変更</h2><span class="small muted">自動更新は参照のみ。判断は自動送信しません。</span></div>
       <p id="inbox-window" class="small muted" hidden></p>
       <div id="pending-list" class="operation-list"></div>
       <div id="empty-state" class="empty-state panel" hidden><span class="empty-icon" aria-hidden="true">✓</span><h3>確認待ちの変更はありません</h3><p class="muted">Agentが新しい変更を提案すると、ここに表示されます。</p></div>
-      <section class="history-section" aria-labelledby="history-heading"><div class="section-heading"><h2 id="history-heading">これまでの判断</h2><span id="history-count" class="small muted"></span></div><div id="history-list" class="operation-list"></div><p id="empty-history" class="muted">判断の記録はまだありません。</p></section>
+      <section class="history-section" aria-labelledby="history-heading"><div class="section-heading"><h2 id="history-heading">これまでの判断</h2><span id="history-count" class="small muted" aria-live="polite"></span></div>
+        <p class="small muted">判断日時の新しい順です。新しい判断が増えるとページの内容も変わります。</p>
+        <nav class="history-navigation" aria-label="判断履歴のページ"><button id="history-latest" class="button secondary" type="button">最新の判断へ</button><button id="history-previous" class="button secondary" type="button">前の100件</button><button id="history-next" class="button secondary" type="button">次の100件</button></nav>
+        <div id="history-list" class="operation-list"></div><p id="empty-history" class="muted">判断の記録はまだありません。</p>
+      </section>
       <aside class="assurance-note"><strong>この画面の認証範囲</strong><p>Human Participant <code id="human-participant"></code> の操作を、Gateway Actor <code id="gateway-actor"></code> がASBへ送信します。保証レベルは <code id="assurance"></code> です。Human本人の鍵による署名や本人確認を証明するものではありません。</p><p>単一ホスト・software-onlyの実験用ワークフローです。SNP・TDXなどの実機証明や、本番運用のqualificationは含みません。</p></aside>
     </section>
   </main>
