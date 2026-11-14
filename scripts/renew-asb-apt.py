@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -27,6 +28,18 @@ MARKER = r"<!-- asb-apt-renewal-state: (\{[^\n]+\}) -->"
 def require(value, message):
     if not value:
         raise ValueError(message)
+
+
+def require_commands(*names):
+    missing = [name for name in names if shutil.which(name) is None]
+    require(not missing, "required commands not found on PATH: " + ", ".join(missing))
+
+
+def run_command(command, **kwargs):
+    try:
+        return subprocess.run(command, **kwargs)
+    except FileNotFoundError:
+        raise ValueError("required command not found on PATH: " + command[0]) from None
 
 
 def now():
@@ -69,8 +82,8 @@ def check_payload(manifest, approved, fresh=False):
 
 def gh(*args, payload=None):
     command = ["gh", *args]
-    result = subprocess.run(command, input=None if payload is None else json.dumps(payload).encode(),
-                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=180, check=True)
+    result = run_command(command, input=None if payload is None else json.dumps(payload).encode(),
+                         stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=180, check=True)
     return result.stdout
 
 
@@ -167,7 +180,7 @@ def hardware_sign(repository, home, identity, prompt=input, announce=print):
         def run(*args):
             timeout = deadline - time.monotonic()
             require(timeout > 0, "attended signing timed out")
-            return subprocess.run(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=timeout, check=True).stdout.decode()
+            return run_command(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=timeout, check=True).stdout.decode()
 
         listing = run("gpg", "--homedir", str(home), "--batch", "--with-colons", "--with-keygrip", "--list-keys", identity)
         current, grips = None, []
@@ -331,11 +344,16 @@ def main():
         if args.command == "sign":
             require(args.gnupg_home is not None, "--gnupg-home is required")
         if args.command == "prepare":
+            require_commands("gh", "gpg")
             release_asset(api("releases/tags/" + approved["baseline_release"]), approved["baseline_release"],
                           approved["baseline_sha256"], approved["baseline_bytes"])
             with tempfile.TemporaryDirectory(prefix="asb-renewal-download-") as temporary:
                 result = prepare(approved, public, download(approved["baseline_release"], Path(temporary)), args.output)
         elif args.command == "sign":
+            required = ("gpg", "gpgv", "gpg-connect-agent")
+            if args.publish:
+                required += ("gh",)
+            require_commands(*required)
             result = sign(args.input, args.output, args.gnupg_home, approved, public, args.signer or public["signers"][0])
             if args.publish:
                 result = result | upload(args.output, approved, public)
@@ -357,7 +375,10 @@ def main():
             result |= notify(approved, result["state"], "Authenticated metadata expiry: **" + expires + "**. Download the latest monthly preparation from the workflow before signing.")
         print(json.dumps(result, sort_keys=True))
     except (ValueError, OSError, TypeError, KeyError, EOFError, KeyboardInterrupt, subprocess.SubprocessError) as error:
-        detail = str(error) if type(error) is ValueError else type(error).__name__
+        if isinstance(error, FileNotFoundError):
+            detail = "required file or directory is missing"
+        else:
+            detail = str(error) if type(error) is ValueError else type(error).__name__
         print("APT renewal failed: " + detail, file=sys.stderr)
         return 2
     return 0

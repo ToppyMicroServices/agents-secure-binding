@@ -3,6 +3,7 @@
 import copy
 from datetime import datetime, timezone
 import importlib.util
+import io
 import json
 from pathlib import Path
 import shutil
@@ -39,6 +40,65 @@ def baseline(root, key=b"public fixture"):
 
 
 class RenewalTest(unittest.TestCase):
+    def test_missing_command_is_reported_before_any_signing_without_private_details(self):
+        failure = FileNotFoundError(2, "PRIVATE-DIAGNOSTIC", "gh")
+        with patch.object(renewal, "policy", return_value={"baseline_release": "apt-preview-fixture"}), \
+             patch.object(pages, "policy", return_value={}), \
+             patch.object(renewal.shutil, "which", return_value="/fixture/command"), \
+             patch.object(renewal.subprocess, "run", side_effect=failure) as run, \
+             patch.object(renewal, "hardware_sign") as sign, \
+             patch.object(sys, "argv", ["renew", "prepare", "--output", "unused"]), \
+             patch.object(sys, "stderr", new_callable=io.StringIO) as stderr:
+            self.assertEqual(renewal.main(), 2)
+            self.assertEqual(stderr.getvalue(), "APT renewal failed: required command not found on PATH: gh\n")
+            run.assert_called_once()
+            self.assertEqual(run.call_args.args[0][0], "gh")
+            sign.assert_not_called()
+
+    def test_signing_checks_verification_and_publication_tools_before_token_access(self):
+        tools = ("gpg", "gpgv", "gpg-connect-agent", "gh")
+        for missing in (("gpgv", "gpg-connect-agent"), ("gh",)):
+            with self.subTest(missing=missing), \
+                 patch.object(renewal, "policy", return_value={}), \
+                 patch.object(pages, "policy", return_value={}), \
+                 patch.object(renewal.shutil, "which", side_effect=lambda name: None if name in missing else "/fixture/" + name) as which, \
+                 patch.object(renewal, "sign") as sign, \
+                 patch.object(renewal, "upload") as upload, \
+                 patch.object(sys, "argv", ["renew", "sign", "--input", "unused", "--output", "unused",
+                                            "--gnupg-home", "/fixture/home", "--publish"]), \
+                 patch.object(sys, "stderr", new_callable=io.StringIO) as stderr:
+                self.assertEqual(renewal.main(), 2)
+                self.assertEqual(stderr.getvalue(), "APT renewal failed: required commands not found on PATH: " + ", ".join(missing) + "\n")
+                self.assertEqual([call.args[0] for call in which.call_args_list], list(tools))
+                sign.assert_not_called()
+                upload.assert_not_called()
+
+    def test_signing_without_publication_does_not_require_github_cli(self):
+        with patch.object(renewal, "policy", return_value={}), \
+             patch.object(pages, "policy", return_value={"signers": ["A" * 40]}), \
+             patch.object(renewal.shutil, "which", side_effect=lambda name: None if name == "gh" else "/fixture/" + name) as which, \
+             patch.object(renewal, "sign", return_value={"signed": True}) as sign, \
+             patch.object(renewal, "upload") as upload, \
+             patch.object(sys, "argv", ["renew", "sign", "--input", "unused", "--output", "unused",
+                                        "--gnupg-home", "/fixture/home"]), \
+             patch.object(sys, "stdout", new_callable=io.StringIO):
+            self.assertEqual(renewal.main(), 0)
+            self.assertEqual([call.args[0] for call in which.call_args_list], ["gpg", "gpgv", "gpg-connect-agent"])
+            sign.assert_called_once()
+            upload.assert_not_called()
+
+    def test_missing_input_does_not_disclose_paths_or_misidentify_a_command(self):
+        for filename in ("/private/PRIVATE-INPUT/gpg", "gh", "gpg", "gpgv", "gpg-connect-agent"):
+            failure = FileNotFoundError(2, "PRIVATE-DIAGNOSTIC", filename)
+            with self.subTest(filename=filename), \
+                 patch.object(renewal, "policy", side_effect=failure), \
+                 patch.object(renewal.subprocess, "run") as run, \
+                 patch.object(sys, "argv", ["renew", "prepare", "--output", "unused"]), \
+                 patch.object(sys, "stderr", new_callable=io.StringIO) as stderr:
+                self.assertEqual(renewal.main(), 2)
+                self.assertEqual(stderr.getvalue(), "APT renewal failed: required file or directory is missing\n")
+                run.assert_not_called()
+
     def test_policy_is_explicit_and_rejects_unknown_or_unbounded_values(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
@@ -140,7 +200,7 @@ class RenewalTest(unittest.TestCase):
             home.mkdir(mode=0o700)
             identity, grip = "A" * 40, "B" * 40
             listing = ("fpr:::::::::" + identity + ":\ngrp:::::::::" + grip + ":\n").encode()
-            for mode in ("success", "software", "sign-error", "timeout", "cancel"):
+            for mode in ("success", "software", "sign-error", "missing-command", "timeout", "cancel"):
                 calls, messages = [], []
                 def run(args, **kwargs):
                     calls.append(args)
@@ -148,6 +208,8 @@ class RenewalTest(unittest.TestCase):
                     if "--list-keys" in args:
                         return Mock(stdout=listing)
                     if args[0] == "gpg-connect-agent":
+                        if mode == "missing-command":
+                            raise FileNotFoundError(2, "PRIVATE-DIAGNOSTIC", "gpg-connect-agent")
                         kind = "D" if mode == "software" else "T"
                         return Mock(stdout=f"S KEYINFO {grip} {kind} serial OPENPGP.1 - - -\nOK\n".encode())
                     if mode == "sign-error":
@@ -165,7 +227,7 @@ class RenewalTest(unittest.TestCase):
                 self.assertEqual(len(messages), 1)
                 self.assertIn("REMOVE THE YUBIKEY NOW", messages[0])
                 signature_calls = [a for a in calls if "--clearsign" in a or "--detach-sign" in a]
-                self.assertEqual(len(signature_calls), 2 if mode == "success" else 0 if mode in ("software", "cancel") else 1)
+                self.assertEqual(len(signature_calls), 2 if mode == "success" else 0 if mode in ("software", "missing-command", "cancel") else 1)
                 for call in signature_calls:
                     self.assertIn(identity + "!", call)
                     self.assertNotIn("--passphrase", call)
