@@ -10,7 +10,7 @@ require (
 	github.com/ToppyMicroServices/agents-secure-binding/v2 v2.0.0-rc.2.0.20261029143530-abe9e145c0d2
 	github.com/caarlos0/env/v11 v11.4.1
 	github.com/fatih/color v1.19.0
-	github.com/fxamacker/cbor/v2 v2.9.2
+	github.com/fxamacker/cbor/v2 v2.10.0
 	github.com/go-kit/kit v0.13.0
 	github.com/google/gce-tcb-verifier v0.3.1
 	github.com/google/go-sev-guest v0.15.0
