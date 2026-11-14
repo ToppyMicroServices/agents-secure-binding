@@ -1,40 +1,41 @@
 #!/bin/bash
+set -euo pipefail
 
-REPO_URL="https://github.com/coconut-svsm/svsm.git"
-BUILD_DIR="$(cd "$(dirname "$0")/../.." && pwd)/build"
-
-
-mkdir -p "$BUILD_DIR"
-
-# Define the target directory for cloning inside the build directory
-TARGET_DIR="$BUILD_DIR/svsm"
-SUBDIR="tools/igvmmeasure"
-
-# Clone the repository if it doesn't exist
-if [ -d "$TARGET_DIR" ]; then
-    echo "Repository already exists in $TARGET_DIR. Pulling latest changes..."
-    cd "$TARGET_DIR" && git pull
-else
-    echo "Cloning repository into $TARGET_DIR..."
-    git clone --recurse-submodules "$REPO_URL" "$TARGET_DIR"
+# Optional integration build. The caller supplies an independently reviewed,
+# local SVSM checkout; normal ASB builds never fetch or update this source.
+if [[ -z "${IGVM_SOURCE_DIR:-}" || -z "${IGVM_SOURCE_REVISION:-}" ]]; then
+    echo "Set IGVM_SOURCE_DIR to a reviewed local SVSM checkout and IGVM_SOURCE_REVISION to its full 40-character commit ID." >&2
+    exit 2
+fi
+if [[ ! "$IGVM_SOURCE_REVISION" =~ ^[0-9a-f]{40}$ ]]; then
+    echo "IGVM_SOURCE_REVISION must be a full lowercase 40-character commit ID, not a branch or tag." >&2
+    exit 2
+fi
+if [[ "$IGVM_SOURCE_DIR" != /* || ! -d "$IGVM_SOURCE_DIR/tools/igvmmeasure" ]]; then
+    echo "IGVM_SOURCE_DIR must be an absolute local SVSM path containing tools/igvmmeasure." >&2
+    exit 2
 fi
 
-# Ensure submodules are up to date
-cd "$TARGET_DIR"
-git submodule update --init --recursive
-
-# Check if the required subdirectory exists
-if [ -d "$SUBDIR" ]; then
-    echo "Successfully cloned repository and found '$SUBDIR' directory."
-else
-    echo "Error: '$SUBDIR' directory not found inside '$TARGET_DIR'."
+actual_revision=$(git -C "$IGVM_SOURCE_DIR" rev-parse --verify HEAD)
+if [[ "$actual_revision" != "$IGVM_SOURCE_REVISION" ]]; then
+    echo "SVSM checkout does not match IGVM_SOURCE_REVISION; no build was started." >&2
     exit 1
 fi
+working_changes=$(git -C "$IGVM_SOURCE_DIR" status --porcelain --untracked-files=normal --ignore-submodules=none)
+if [[ -n "$working_changes" ]]; then
+    echo "SVSM checkout must be clean, including its submodules; no build was started." >&2
+    exit 1
+fi
+submodules=$(git -C "$IGVM_SOURCE_DIR" submodule status --recursive)
+while IFS= read -r entry; do
+    if [[ -n "$entry" && "${entry:0:1}" != " " ]]; then
+        echo "SVSM submodules must be initialized at their pinned revisions; no build was started." >&2
+        exit 1
+    fi
+done <<< "$submodules"
 
-echo "Building the Rust crate..."
-
-RELEASE=1 make bin/igvmmeasure BUILDDIR="$BUILD_DIR"
-
-mv bin/igvmmeasure "$BUILD_DIR/"
-
-echo "Binary stored in: $BUILD_DIR/igvmmeasure"
+output_dir=${IGVM_OUTPUT_DIR:-"$(cd "$(dirname "$0")/../.." && pwd)/build"}
+mkdir -p "$output_dir"
+make -C "$IGVM_SOURCE_DIR" bin/igvmmeasure RELEASE=1 BUILDDIR="$output_dir"
+install -m 755 "$IGVM_SOURCE_DIR/bin/igvmmeasure" "$output_dir/igvmmeasure"
+echo "Binary stored in: $output_dir/igvmmeasure (SVSM $IGVM_SOURCE_REVISION)"

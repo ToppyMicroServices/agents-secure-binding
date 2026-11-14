@@ -263,11 +263,17 @@ class Lab:
                     f"ExecStart=/usr/local/bin/asb-interaction --role {role} --config /etc/asb-vm/config.json --ready /evidence/ready.json --control-dir /evidence\n"
                     "ExecStopPost=+/usr/local/bin/asb-vm-exit-marker\n"
                     "Restart=no\n[Install]\nWantedBy=multi-user.target\n")
+            # First-boot cloud-init mounts run after device discovery. On later
+            # boots, fstab mount jobs must wait for the persistent 9p transport
+            # modules; x-systemd.requires adds both Requires= and After=.
+            mount_options = "trans=virtio,version=9p2000.L,x-systemd.requires=systemd-modules-load.service"
             cloud = {"users": [{"name": "asb", "system": True, "lock_passwd": True}], "ssh_pwauth": False,
                 "package_update": False, "package_upgrade": False,
-                "mounts": [["asb-input", "/mnt/asb-input", "9p", "trans=virtio,version=9p2000.L,ro", "0", "0"],
-                           ["asb-evidence", "/evidence", "9p", "trans=virtio,version=9p2000.L", "0", "0"]],
+                "mounts": [["asb-input", "/mnt/asb-input", "9p", mount_options + ",ro", "0", "0"],
+                           ["asb-evidence", "/evidence", "9p", mount_options, "0", "0"]],
                 "write_files": [{"path": "/etc/systemd/system/asb-vm.service", "permissions": "0644", "content": unit},
+                                {"path": "/etc/modules-load.d/asb-vm-9p.conf", "permissions": "0644", "owner": "root:root",
+                                 "content": "9p\n9pnet\n9pnet_virtio\n"},
                                 {"path": "/usr/local/bin/asb-vm-exit-marker", "permissions": "0755", "owner": "root:root", "content": EXIT_MARKER},
                                 {"path": "/usr/local/libexec/asb-vm-diagnostics.py", "permissions": "0644", "owner": "root:root",
                                  "content": Path(__file__).with_name("fixtures").joinpath("discovery-vm/guest-diagnostics.py").read_text()}],

@@ -2,7 +2,7 @@ module github.com/ToppyMicroServices/agents-secure-binding/v2
 
 go 1.26.0
 
-toolchain go1.26.10
+toolchain go1.26.11
 
 require (
 	github.com/caarlos0/env/v11 v11.4.1

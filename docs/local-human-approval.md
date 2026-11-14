@@ -12,7 +12,7 @@ TDX, a GPU, an LLM account, Docker, Node.js, or a separate SQLite installation.
 
 ## Start here
 
-Install Go 1.26.10 and open a terminal in the repository root. Check `go version`
+Install Go 1.26.11 and open a terminal in the repository root. Check `go version`
 if you are unsure which version is active. The first `go run` downloads
 dependencies and compiles the app, so allow for that initial setup. The same
 commands work in macOS/Linux terminals and Windows PowerShell.
@@ -89,10 +89,12 @@ below use `./asb-human`; use `.\asb-human.exe` in PowerShell, or substitute
 <details>
 <summary>Try a CI-built executable without installing Go</summary>
 
-After a successful [Local Human Approval workflow run](https://github.com/ToppyMicroServices/agents-secure-binding/actions/workflows/human-approval.yaml?query=branch%3Afeat%2Fhuman-coordination-product-v1),
-sign in to GitHub, open that run, and select its artifact for your OS and
-architecture. The artifact name includes the full source commit ID. Extract
-the archive and read `USAGE.md`; `SHA256SUMS` contains the binary checksum.
+Follow [Get an executable](asb-human-binary-quickstart.md#get-an-executable)
+for the current artifact names and download steps. After a successful
+[Local Human Approval workflow run on main](https://github.com/ToppyMicroServices/agents-secure-binding/actions/workflows/human-approval.yaml?query=branch%3Amain),
+sign in to GitHub and select the artifact for your OS and architecture. The
+artifact name includes the full source commit ID. Extract the archive and read
+`USAGE.md`; `SHA256SUMS` contains the binary checksum.
 
 These are 14-day CI artifacts, not signed or notarized releases. Downloading
 an artifact does not establish production readiness. On macOS and Linux,
@@ -113,6 +115,8 @@ restore the executable bit with `chmod +x asb-human` before running it.
 | An operation is `STALE` | Another approved change advanced the setting after this proposal was created. This proposal has no effect. Review the current state before intentionally creating a new one. |
 | A saved proposal is rejected with `CONFLICT` | Keep its receipt and inspect it. Repeating the same rejected command cannot resolve a revision or identifier conflict. See the recovery guidance below before creating a replacement. |
 | The response is unavailable or the outcome is unknown | Keep the receipt and follow the recovery steps below. Do not assume the change failed and submit a replacement. |
+| `CAPACITY_EXCEEDED` or `storage capacity reached` | This request was rejected before committing a change. Run `storage-status` with the same data directory. Repeating it does not free space; follow the capacity and rollover procedure below. |
+| A recently decided proposal is not on the current history page | Use **最新の判断へ**. History has its own pages; the last decision and unresolved requests also remain in **直前の判断・結果確認**. |
 
 `serve` defaults to `http://127.0.0.1:8090` for the browser and
 `127.0.0.1:8091` for the TLS 1.3/mTLS core. `demo` chooses free ports instead.
@@ -186,6 +190,13 @@ returns `Permit`, `Deny`, `Indeterminate`, or `NotApplicable`. Only `Permit`
 passes that policy check; the ASB proof and proposal binding are checked
 separately.
 
+The browser displays history independently of the pending queue, in decision
+time order, 100 records per page. **前の100件**, **次の100件**, and
+**最新の判断へ** navigate the saved decisions. Pages are live views: new
+decisions can move records between pages. The most recent decision made in
+the tab and every unresolved request remain in **直前の判断・結果確認**, even
+when neither list's current page contains them.
+
 The existing session, same-origin, and CSRF checks still apply. For older
 clients, `approve: true` or `approve: false` alone maps to `APPROVE` or `DECLINE`.
 A request containing both `decision` and `approve` is rejected, as are missing,
@@ -205,6 +216,42 @@ action, as described below.
 See the [related-check review](decision-semantics-review.md) for how these
 answers differ from proof verification, task acceptance, quorum approvals,
 and execution outcomes.
+
+## Recover an interrupted browser decision
+
+After a lost response, use **一覧を更新**. The gateway makes a fresh,
+authenticated `STATUS` request for each unresolved operation's exact ID and
+proposal digest. Only a matching terminal result clears its unknown warning.
+A successful list refresh, a missing result, or `PENDING_REVIEW` does not:
+the original request might still arrive after that read. All four decision
+buttons remain blocked for that operation while its outcome is unknown.
+
+Before sending a decision, the tab saves only its unresolved operation ID,
+proposal digest, and reviewed display metadata in `sessionStorage`. It never
+stores the login token, session cookie value, or CSRF value there. Reloading
+the tab or logging out does not clear unresolved decisions. Invalid or
+unreadable recovery metadata blocks decisions. A new decision is not sent if
+its recovery metadata cannot be saved; the browser explains that refusal.
+Keep the tab open until reconciliation finishes, especially if that warning
+appears. Closing a tab can discard its recovery metadata.
+
+If exact status stays pending because the original request never reached the
+service, use a controlled service restart instead of repeatedly submitting:
+
+1. Keep the operation ID and digest or its Agent receipt. Stop all ASB
+   `serve`/`demo` processes using this data directory with Ctrl+C and wait for
+   them to exit, so the old request cannot arrive later. This means stopping
+   this ASB service, not restarting the computer or changing networking.
+2. Start `serve` with the **same** data directory. Use `inspect` with the
+   original receipt, or operation ID and digest, to check its durable state.
+3. After confirming that the old service has exited, close the old tab and
+   open the newly printed private login URL in a new tab. If the original
+   operation is still pending, review it again before making a new decision.
+   An existing terminal result must remain unchanged.
+
+Reloading the page while the original service is running is not a substitute
+for stopping an unresolved request. Browser metadata is only a recovery aid;
+the authenticated service and its original database remain authoritative.
 
 ## Recover an interrupted proposal
 
@@ -317,9 +364,10 @@ or arbitrary power failure.
 <details>
 <summary>Capacity and retention</summary>
 
-The browser shows up to 100 operations, with pending work first so older
-requests do not disappear behind newer history. It also reports the total
-pending and saved operation counts when the list is truncated. The store
+The pending window shows up to 100 operations, oldest first. History has its
+own 100-record pages ordered by decision time, so pending work cannot hide a
+recent decision. The browser reports full counts and saved proposal/command
+usage, with a warning at 80% and a separate full-capacity message. The store
 accepts at most 5,000 proposals and reserves space for their terminal decisions
 within its 10,000 mutation-receipt limit. Original mutation results are
 retained without automatic deletion. STATUS and INBOX return current state,
@@ -353,6 +401,44 @@ the 5,000/10,000 limits remain a fail-closed boundary. Long-running deployments
 still need a selected retention policy and a tested compaction/tombstone design
 before they can reclaim online capacity.
 
+### Continue a trial in a new directory
+
+This is an explicit rollover to a **separate instance**, not compaction or
+automatic migration. It preserves the original data and does not increase
+the old instance's limits:
+
+1. Stop submitting new proposals. Resolve existing pending work where
+   possible, then stop every ASB process using the old directory. Retain the
+   complete private directory, including its credentials, database, sidecars,
+   and receipts; an exported SQLite snapshot alone cannot replace it.
+2. Export and verify a new archive path, using the old directory:
+
+   ```text
+   ./asb-human storage-status --data-dir ./.asb-human
+   ./asb-human storage-export --data-dir ./.asb-human --output ./.asb-human-archive/snapshot.sqlite
+   ./asb-human storage-verify --data-dir ./.asb-human --archive ./.asb-human-archive/snapshot.sqlite
+   ```
+
+3. Choose a new, unused private directory and start a separate trial:
+
+   ```text
+   ./asb-human serve --data-dir ./.asb-human-next
+   ```
+
+   It starts with `maintenance_mode=false`, revision 0, new credentials, and
+   empty history. Settings, identity keys, receipts, and approvals are **not**
+   migrated. If the new instance should start with an enabled setting, submit
+   a fresh proposal and obtain a fresh Human decision there.
+4. Keep old receipts associated with the old directory. To recover or inspect
+   one, run the old instance with its original directory and address (or
+   distinct loopback ports when both instances are running), then use
+   `inspect` against that instance. Do not submit old receipts into the new
+   instance or edit their revision/digest to make them fit.
+
+Do not delete old records, lower counters, or copy only selected database
+tables to evade the limit. Those records preserve immutable outcomes and
+replay protection. This preview still has a bounded lifetime per instance.
+
 </details>
 
 ## Developer checks
@@ -366,8 +452,10 @@ go vet ./internal/humanapp ./cmd/asb-human
 ```
 
 The [Local Human Approval workflow](../.github/workflows/human-approval.yaml)
-normally runs Ubuntu and Windows runtime tests and separate cross-builds.
-Native macOS runtime and artifact checks run only when started manually.
+normally runs native Ubuntu, macOS, and Windows runtime tests and matching
+artifact smoke checks on relevant pushes, pull requests, and manual runs,
+alongside separate cross-builds. An explicit `ci:linux-only` pull-request label
+limits those jobs to Linux.
 Check the results for your commit: a successful cross-build does not establish
 that the app ran on that OS. The
 [validation record](local-human-approval-validation.md) distinguishes local

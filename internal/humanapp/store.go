@@ -227,7 +227,7 @@ func (s *Store) Execute(ctx context.Context, command Command, authenticate Authe
 				return nil, storeError(err)
 			}
 			if count >= maxMutationRecords {
-				return nil, fmt.Errorf("%w: mutation record limit reached", ErrUnavailable)
+				return nil, fmt.Errorf("%w: mutation record limit reached", ErrCapacity)
 			}
 		default:
 			return nil, storeError(err)
@@ -303,7 +303,7 @@ func (r *transactionReplay) MarkUsed(key string, expiresAt time.Time) error {
 		return storeError(err)
 	}
 	if count >= maxReplayRecords {
-		return fmt.Errorf("%w: replay record limit reached", ErrUnavailable)
+		return fmt.Errorf("%w: replay record limit reached", ErrCapacity)
 	}
 	if _, err := r.tx.ExecContext(r.ctx, "INSERT INTO replay (replay_key, expires_at) VALUES (?, ?)", replayKey, expiresAt.UTC().UnixNano()); err != nil {
 		return storeError(err)
@@ -322,6 +322,17 @@ func executeCommand(ctx context.Context, tx *sql.Tx, command Command, actor stri
 	switch command.Kind {
 	case KindInbox:
 		response.Operations, response.Inbox, err = loadInbox(ctx, tx)
+		if err != nil {
+			return Response{}, err
+		}
+		response.History, err = loadHistory(ctx, tx, command.HistoryOffset)
+		if err != nil {
+			return Response{}, err
+		}
+		response.Inbox.HistoryOffset = command.HistoryOffset
+		response.Inbox.HistoryLimit = maxInboxOperations
+		capacity, err := queryStoreCapacity(ctx, tx)
+		response.Capacity = &capacity
 		return response, err
 	case KindPropose:
 		if command.ExpectedRevision != setting.Revision {
@@ -340,7 +351,7 @@ func executeCommand(ctx context.Context, tx *sql.Tx, command Command, actor stri
 			return Response{}, storeError(err)
 		}
 		if proposals >= maxProposalRecords {
-			return Response{}, fmt.Errorf("%w: proposal limit reached; existing proposals can still be decided", ErrUnavailable)
+			return Response{}, fmt.Errorf("%w: proposal limit reached; existing proposals can still be decided", ErrCapacity)
 		}
 		digest, err := CommandDigest(command)
 		if err != nil {
@@ -384,7 +395,7 @@ func executeCommand(ctx context.Context, tx *sql.Tx, command Command, actor stri
 			operation.State = StateStale
 		} else {
 			if setting.Revision >= maxSettingRevision {
-				return Response{}, fmt.Errorf("%w: setting revision limit reached", ErrUnavailable)
+				return Response{}, fmt.Errorf("%w: setting revision limit reached", ErrCapacity)
 			}
 			setting.Enabled = operation.Change.Enabled
 			setting.Revision++
@@ -444,23 +455,44 @@ func loadInbox(ctx context.Context, tx *sql.Tx) ([]Operation, *InboxSummary, err
 		return nil, nil, storeError(err)
 	}
 	defer func() { _ = rows.Close() }()
+	operations, err := decodeOperationRows(rows)
+	return operations, summary, err
+}
+
+// History has its own bounded window, independent of pending work. Dates are
+// UTC RFC3339Nano; normalize fractional seconds so their string order is exact.
+func loadHistory(ctx context.Context, tx *sql.Tx, offset int) ([]Operation, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT operation_id, proposal_digest, proposal, document FROM operations
+		WHERE json_extract(document, '$.state') != ?
+		ORDER BY substr(json_extract(document, '$.decided_at'), 1, 19) DESC,
+			substr(rtrim(substr(json_extract(document, '$.decided_at'), 21), 'Z') || '000000000', 1, 9) DESC,
+			created_at DESC, operation_id
+		LIMIT ? OFFSET ?`, StatePending, maxInboxOperations, offset)
+	if err != nil {
+		return nil, storeError(err)
+	}
+	defer func() { _ = rows.Close() }()
+	return decodeOperationRows(rows)
+}
+
+func decodeOperationRows(rows *sql.Rows) ([]Operation, error) {
 	operations := make([]Operation, 0)
 	for rows.Next() {
 		var operationID, digest string
 		var proposal, document []byte
 		if err := rows.Scan(&operationID, &digest, &proposal, &document); err != nil {
-			return nil, nil, storeError(err)
+			return nil, storeError(err)
 		}
 		operation, err := decodeStoredOperation(operationID, digest, proposal, document)
 		if err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 		operations = append(operations, operation)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, nil, storeError(err)
+		return nil, storeError(err)
 	}
-	return operations, summary, nil
+	return operations, nil
 }
 
 func decodeStoredOperation(operationID, digest string, proposal, document []byte) (Operation, error) {

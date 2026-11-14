@@ -54,11 +54,16 @@ and the latest v2 prerelease was `v2.0.0-rc.2`. That closeout did not create a n
 include current-branch features retroactively in either release.
 
 During closeout, a fresh required vulnerability scan reported `GO-2026-6809`
-in Go 1.26.9's `crypto/x509`. Current build, test and package toolchains have
-been updated to Go 1.26.10, whose [official release record](https://go.dev/doc/devel/release#go1.26)
+in Go 1.26.9's `crypto/x509`. At that closeout, build, test and package toolchains
+were updated to Go 1.26.10, whose [official release record](https://go.dev/doc/devel/release#go1.26)
 includes the certificate fix. Historical test records and qualified binary
 hashes retain their original toolchains. The final checks and merge are tracked
 in [PR #76](https://github.com/ToppyMicroServices/agents-secure-binding/pull/76).
+
+Current build, test and package toolchains use Go 1.26.11 to address
+`GO-2026-6859` in `net/http`, reported by the required vulnerability checks for
+[PR #103](https://github.com/ToppyMicroServices/agents-secure-binding/pull/103).
+The vulnerability gates remain enabled.
 
 The [Debian workflow](../.github/workflows/debian-distribution.yaml) checks the
 final packages from each candidate revision, including installation, upgrade

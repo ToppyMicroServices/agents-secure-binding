@@ -101,6 +101,16 @@ func (a Application) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	nonce, err := a.Nonces.ExpectedNonce(r.Context(), change)
+	if err == nil && strings.TrimSpace(nonce) == "" {
+		err = ErrMissingNonce
+	}
+	if err != nil {
+		a.audit(r.Context(), fmt.Errorf("nonce source: %w", err))
+		if !errors.Is(err, ErrMissingNonce) {
+			http.Error(w, "service unavailable", http.StatusServiceUnavailable)
+			return
+		}
+	}
 	if err != nil || strings.TrimSpace(nonce) == "" {
 		http.Error(w, "authentication failed", http.StatusUnauthorized)
 		return
@@ -124,13 +134,32 @@ func (a Application) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := a.Store.Apply(r.Context(), change, accepted); err != nil {
-		http.Error(w, "change not applied", http.StatusConflict)
+		a.audit(r.Context(), fmt.Errorf("apply change: %w", err))
+		if errors.Is(err, ErrChangeConflict) {
+			http.Error(w, "change identifier conflict", http.StatusConflict)
+			return
+		}
+		// A backend error can follow a successful commit. Never claim that the
+		// effect did not happen, and never invite a blind proof retry.
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = io.WriteString(w, `{"code":"OUTCOME_UNKNOWN","retryable":false}`+"\n")
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
 func (a Application) verifyIdentity(r *http.Request, change ChangeRequest, actionContext []byte, nonce string) (production.AcceptedIdentity, error) {
+	return a.verifyPolicy(r, actionContext, nonce, ExpectedPolicy(change, a.ExpectedAgent))
+}
+
+func (a Application) audit(ctx context.Context, err error) {
+	if a.AuditFailure != nil {
+		a.AuditFailure(ctx, err)
+	}
+}
+
+func (a Application) verifyPolicy(r *http.Request, actionContext []byte, nonce string, policy identitypolicy.Policy) (production.AcceptedIdentity, error) {
 	if a.SoftwareProfile != nil {
 		if hasAttestedProfileConfiguration(a.Profile) || r.Header.Get(AttestationHeader) != "" {
 			return production.AcceptedIdentity{}, production.ErrUnexpectedAttestationBinding
@@ -143,7 +172,7 @@ func (a Application) verifyIdentity(r *http.Request, change ChangeRequest, actio
 		if !usesProtectedChangeSigningAuthorities(profile.GrantAuthority, profile.BindingAuthority) {
 			return production.AcceptedIdentity{}, production.ErrInvalidAuthority
 		}
-		profile.IdentityPolicy = ExpectedPolicy(change, a.ExpectedAgent)
+		profile.IdentityPolicy = policy
 		return profile.Verify(r.Context(), production.SoftwareOnlyVerifyRequest{
 			GrantJWT:          r.Header.Get(IdentityGrantHeader),
 			SessionBindingJWT: r.Header.Get(SessionBindingHeader),
@@ -163,7 +192,7 @@ func (a Application) verifyIdentity(r *http.Request, change ChangeRequest, actio
 	if !usesProtectedChangeSigningAuthorities(profile.GrantAuthority, profile.BindingAuthority) {
 		return production.AcceptedIdentity{}, production.ErrInvalidAuthority
 	}
-	profile.IdentityPolicy = ExpectedPolicy(change, a.ExpectedAgent)
+	profile.IdentityPolicy = policy
 	return profile.Verify(r.Context(), production.VerifyRequest{
 		GrantJWT:          r.Header.Get(IdentityGrantHeader),
 		SessionBindingJWT: r.Header.Get(SessionBindingHeader),

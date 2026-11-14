@@ -516,6 +516,9 @@ func runAgent(ctx context.Context, cfg agentOptions, execute executeCommand, std
 	}
 	raw, err := execute(ctx, command)
 	if err != nil {
+		if errors.Is(err, humanapp.ErrCapacity) {
+			return fmt.Errorf("request rejected: storage capacity reached; this request committed no new change. Keep the saved receipt at %s; it may still identify an earlier submission. Run storage-status with the same --data-dir. For exhausted proposal or command capacity, export and verify the existing records and follow the documented new-directory rollover procedure; retrying this receipt does not reclaim capacity: %w", receiptArg, err)
+		}
 		if errors.Is(err, humanapp.ErrConflict) {
 			return fmt.Errorf("proposal submission rejected (conflict); saved receipt preserved at %s. Run inspect --receipt %s with the same --data-dir and --core-address. If no matching operation is found, review the current setting in the browser before intentionally creating a new proposal with a new --operation-id and a new receipt; resuming this receipt will not refresh its revision: %w", receiptArg, receiptArg, err)
 		}
