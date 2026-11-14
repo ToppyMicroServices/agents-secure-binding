@@ -90,7 +90,7 @@ class HumanPreviewPackageTest(unittest.TestCase):
             (SOURCE.encode(), b"b" * 40), (b"vcs.modified=false", b"vcs.modified=true"),
             (b"GOOS=linux", b"GOOS=windows"), (b"GOARCH=amd64", b"GOARCH=arm64"),
             (b"CGO_ENABLED=0", b"CGO_ENABLED=1"), (b"GOAMD64=v1", b"GOAMD64=v3"),
-            (b"-trimpath=true", b"-trimpath=false"), (b"go1.26.10", b"go1.26.9"),
+            (b"-trimpath=true", b"-trimpath=false"), (package.deb.TOOLCHAIN.encode(), b"go1.26.9"),
             (b"/cmd/asb-human", b"/cmd/asb-s3"),
         ):
             with self.subTest(change=after), self.assertRaises(ValueError):

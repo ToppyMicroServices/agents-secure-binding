@@ -2,7 +2,7 @@ module github.com/ToppyMicroServices/agents-secure-binding/modules/attestation/s
 
 go 1.26.0
 
-toolchain go1.26.10
+toolchain go1.26.11
 
 require (
 	github.com/google/go-sev-guest v0.15.0

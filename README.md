@@ -47,7 +47,7 @@ and the same self-test and browser demo below. This route does not require Go.
 
 **Build from source:**
 
-Install [Go 1.26.10](https://go.dev/doc/install) and run these commands from this source checkout. The local app
+Install [Go 1.26.11](https://go.dev/doc/install) and run these commands from this source checkout. The local app
 below is an **experimental preview** included in `v2.0.0-rc.3`.
 The first run downloads Go dependencies and compiles the app; later runs reuse
 the build cache. No TEE device, LLM account, Node.js, Docker, or separate
