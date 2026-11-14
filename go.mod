@@ -5,7 +5,7 @@ go 1.26.0
 toolchain go1.26.11
 
 require (
-	github.com/caarlos0/env/v11 v11.4.1
+	github.com/caarlos0/env/v11 v11.4.2
 	github.com/fatih/color v1.19.0
 	github.com/go-kit/kit v0.13.0
 	github.com/gofrs/uuid v4.4.0+incompatible
