@@ -18,13 +18,19 @@ import tarfile
 import tempfile
 import uuid
 
-spec = importlib.util.spec_from_file_location("asb_apt", Path(__file__).with_name("asb-apt-repository.py"))
-apt = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(apt)
+spec = importlib.util.spec_from_file_location("asb_pages", Path(__file__).with_name("asb-apt-pages.py"))
+pages = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(pages)
+apt = pages.apt
 
 spec = importlib.util.spec_from_file_location("asb_deb", Path(__file__).with_name("build-asb-deb.py"))
 deb = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(deb)
+
+# Historical input for existing rc.3-1 installations. Keep this pin independent
+# of the mutable monthly renewal policy when the next release becomes current.
+PUBLISHED_RC3_SHA256 = "22ea5e983692d1e4d16159850e700ae048b1c829ceae52c7ad40aaff75031ae1"
+PUBLISHED_RC3_VERSION = "2.0.0~rc.3-1"
 
 EXERCISE = r'''
 set -eu
@@ -152,6 +158,38 @@ mark final-installed-state
 test "$(dpkg-query -W -f='${Version}' asb-tools)" = "$ASB_VERSION_UPGRADE"
 test ! -e /etc/systemd/system/asb-s3.service
 test ! -e /usr/lib/systemd/system/asb-s3.service
+if test -n "$ASB_PUBLISHED_VERSION"; then
+  mark published-release-install
+  apt-get purge -y asb asb-tools asb-human asb-s3 >/tmp/asb-purge
+  dpkg -i /repositories/published/apt/pool/main/a/asb/*.deb
+  for package in asb asb-tools asb-human asb-s3; do
+    test "$(dpkg-query -W -f='${Version}' "$package")" = "$ASB_PUBLISHED_VERSION"
+  done
+  state=/tmp/asb-human-published-state
+  start_server
+  asb-human agent --data-dir "$state" --core-address "$address" --operation-id published-rc3 --enabled=false >/tmp/asb-proposal
+  receipt="$state/receipts/proposal-published-rc3.json"
+  sha256sum "$receipt" >/tmp/asb-published-receipt.sha256
+  stop_server
+  mark apt-upgrade-from-published
+  source_repo upgrade
+  update
+  apt-get -y upgrade
+  for package in asb asb-tools asb-human asb-s3; do
+    test "$(dpkg-query -W -f='${Version}' "$package")" = "$ASB_VERSION_UPGRADE"
+  done
+  printf '%s  /usr/bin/asb-human\n' "$ASB_HUMAN_UPGRADE_SHA256" | sha256sum --check --status
+  sha256sum --check --status /tmp/asb-published-receipt.sha256
+  start_server
+  asb-human inspect --data-dir "$state" --core-address "$address" --receipt "$receipt" >/tmp/asb-rc3-recovered
+  grep -q '"state":"PENDING_REVIEW"' /tmp/asb-rc3-recovered
+  mark resume-published-receipt
+  asb-human resume --data-dir "$state" --core-address "$address" --receipt "$receipt" >/tmp/asb-rc3-resumed
+  grep -q '"state":"PENDING_REVIEW"' /tmp/asb-rc3-resumed
+  grep -q '"operation_id":"published-rc3"' /tmp/asb-rc3-resumed
+  sha256sum --check --status /tmp/asb-published-receipt.sha256
+  stop_server
+fi
 printf 'ASB_APT_PASS\n'
 '''
 
@@ -480,12 +518,25 @@ def check(args: argparse.Namespace) -> dict:
             # enter the container or uploaded evidence and are destroyed below.
             for path in keys.iterdir():
                 path.chmod(0o644)
+            published = None
+            if args.published_rc3_archive is not None:
+                # Authenticate historical package bytes by the independently
+                # pinned archive; its expired repository metadata is never served.
+                pages.unpack(args.published_rc3_archive, PUBLISHED_RC3_SHA256, repositories / "published")
+                historical = apt.inspect_repository(repositories / "published/apt")
+                if historical["version"] != PUBLISHED_RC3_VERSION or {p["package"] for p in historical["packages"]} != set(apt.PACKAGES):
+                    raise ValueError("unexpected published rc.3-1 package set")
+                run("dpkg", "--compare-versions", historical["version"], "lt", results["upgrade"]["version"])
+                published = {"archive_sha256": PUBLISHED_RC3_SHA256, "initial_version": historical["version"],
+                             "initial_source": historical["source_commit"], "upgrade_version": results["upgrade"]["version"],
+                             "upgrade_go_version": human_packages["upgrade"]["embedded_build"]["go_version"]}
             checked = subprocess.run(
                 ["docker", "run", "--rm", "--interactive", "--name", name, "--network", "none",
                  "--mount", f"type=bind,src={repositories},dst=/repositories,readonly",
                  "--mount", f"type=bind,src={keys},dst=/keys,readonly",
                  "--mount", f"type=bind,src={probes},dst=/probes,readonly", "--env", "ASB_VERSION_INITIAL=" + results["initial"]["version"],
                  "--env", "ASB_VERSION_UPGRADE=" + results["upgrade"]["version"],
+                 "--env", "ASB_PUBLISHED_VERSION=" + (PUBLISHED_RC3_VERSION if published else ""),
                  "--env", "ASB_HUMAN_INITIAL_SHA256=" + human_packages["initial"]["binary_sha256"],
                  "--env", "ASB_HUMAN_UPGRADE_SHA256=" + human_packages["upgrade"]["binary_sha256"], "--entrypoint", "/bin/sh", image["Id"], "-s"],
                 input=EXERCISE.encode(), stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=600, check=False)
@@ -515,6 +566,7 @@ def check(args: argparse.Namespace) -> dict:
                                  for path in sorted(evidence_directory.rglob("*")) if path.is_file()}
             return {"schema": "asb.apt-lifecycle/v1", "passed": True, "repositories": results,
                     "source_transition": source_transition, "human_packages": human_packages,
+                    "published_release_upgrade": published,
                     "taskcoord_upgrade": {"builds": probe_builds, "runtime": taskcoord_evidence},
                     "checks": {phase: True for phase in phases} | {"deterministic_unsigned_metadata": True, "independent_verifier_rejects_all_negative_fixtures": True},
                     "image_requested": args.image, "image_id": image["Id"], "image_repo_digests": image.get("RepoDigests", []),
@@ -534,6 +586,8 @@ def main() -> int:
     for flag in ("initial", "initial-lifecycle", "upgrade", "upgrade-lifecycle", "output"):
         parser.add_argument("--" + flag, type=Path, required=True)
     parser.add_argument("--initial-source", required=True)
+    parser.add_argument("--published-rc3-archive", type=Path,
+                        help="also exercise apt-get upgrade from the pinned published rc.3-1 package bytes")
     parser.add_argument("--upgrade-source", required=True)
     parser.add_argument("--source-checkout", type=Path, required=True)
     parser.add_argument("--initial-checkout", type=Path, required=True)
