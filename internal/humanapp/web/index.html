@@ -26,12 +26,12 @@
       <form id="login-form" class="panel login-panel">
         <p class="eyebrow">LOCAL GATEWAY</p>
         <h2>レビュー画面を開く</h2>
-        <p class="muted">起動したターミナルの非公開ログインURLを、そのままブラウザーで開いてください。手動でログインする場合は、URLの <code>#login=</code> より後のトークンだけを入力します。</p>
+        <p class="muted">起動したターミナルに表示されるファイルをテキストエディターで開き、中のログインURLをブラウザーで開いてください。手動でログインする場合は、URLの <code>#login=</code> より後のトークンだけを入力します。</p>
         <label for="login-token">ログイントークン</label>
-        <input id="login-token" type="password" autocomplete="off" spellcheck="false" required maxlength="256" placeholder="起動したターミナルから貼り付け">
+        <input id="login-token" type="password" autocomplete="off" spellcheck="false" required maxlength="256" placeholder="ログインURLのトークンを貼り付け">
         <button class="button primary wide" id="login-button" type="submit">ログイン <span aria-hidden="true">→</span></button>
         <p id="login-message" class="form-message" role="status" aria-live="polite"></p>
-        <p class="small muted">ログインURLとトークンは共有しないでください。トークンはブラウザーに保存せず、セッションは最大8時間で終了します。</p>
+        <p class="small muted">ログインURLは1回限り、有効期限は5分です。期限が切れたらファイルを開き直してください。URLとトークンは共有しないでください。</p>
       </form>
     </section>
 
@@ -40,7 +40,7 @@
         <div><p class="eyebrow">HUMAN REVIEW INBOX</p><h1 id="dashboard-heading">変更を確認する</h1><p class="muted">許可した変更だけを、このアプリ内の練習用設定に適用します。該当なし・判断不明では変更しません。OSや外部サービスには影響しません。</p></div>
         <div class="toolbar"><button id="refresh-button" class="button secondary" type="button">一覧を更新</button><button id="logout-button" class="button quiet" type="button">ログアウト</button></div>
       </div>
-      <div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
+      <div id="notice" class="notice" role="status" aria-live="polite" tabindex="-1" hidden></div>
       <div class="overview">
         <section class="setting-panel panel" aria-labelledby="setting-heading">
           <p class="eyebrow">CURRENT SETTING</p><h2 id="setting-heading">メンテナンスモード</h2>

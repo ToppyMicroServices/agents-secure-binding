@@ -57,16 +57,17 @@ func runSelfTest(ctx context.Context, stdout io.Writer, temporaryParent string) 
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	dir, err := os.MkdirTemp(temporaryParent, "asb-human-self-test-")
+	parent, err := os.MkdirTemp(temporaryParent, "asb-human-self-test-")
 	if err != nil {
 		return fmt.Errorf("create isolated temporary directory: %w", err)
 	}
 	defer func() {
-		// dir is the exact, private directory created by this invocation.
-		if cleanupErr := os.RemoveAll(dir); cleanupErr != nil {
-			err = errors.Join(err, fmt.Errorf("remove self-test data at %q: %w", dir, cleanupErr))
+		// parent is the temporary directory created by this invocation.
+		if cleanupErr := os.RemoveAll(parent); cleanupErr != nil {
+			err = errors.Join(err, fmt.Errorf("remove self-test data at %q: %w", parent, cleanupErr))
 		}
 	}()
+	dir := filepath.Join(parent, "state")
 	if err := humanapp.Initialize(dir); err != nil {
 		return fmt.Errorf("initialize temporary credentials: %w", err)
 	}

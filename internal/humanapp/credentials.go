@@ -17,7 +17,6 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"time"
 )
@@ -30,15 +29,11 @@ func Initialize(dir string) error {
 	if strings.TrimSpace(dir) == "" {
 		return ErrInvalid
 	}
-	if err := os.MkdirAll(dir, 0o700); err != nil {
+	if err := makeDataDirectory(dir); err != nil {
 		return err
 	}
-	info, err := os.Lstat(dir)
-	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
-		return fmt.Errorf("data directory must be a real directory")
-	}
-	if runtime.GOOS != "windows" && info.Mode().Perm()&0o077 != 0 {
-		return fmt.Errorf("data directory must be private (mode 0700)")
+	if err := validatePrivateDirectory(dir); err != nil {
+		return err
 	}
 	if marker, err := os.ReadFile(filepath.Join(dir, "initialized")); err == nil {
 		if string(marker) != credentialsVersion {

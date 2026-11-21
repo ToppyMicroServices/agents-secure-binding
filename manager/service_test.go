@@ -8,10 +8,10 @@ import (
 	"log/slog"
 	"net"
 	"os"
-	"os/exec"
 	"path"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/ToppyMicroServices/agents-secure-binding/v2/internal/errors"
 	mglog "github.com/ToppyMicroServices/agents-secure-binding/v2/internal/runtime/logging"
@@ -99,7 +99,7 @@ func TestRun(t *testing.T) {
 			}
 
 			vmMock.On("SendAgentConfig", mock.Anything).Return(nil)
-			vmMock.On("GetProcess").Return(1234)
+			vmMock.On("GetProcess").Return(os.Getpid())
 			vmMock.On("Transition", mock.Anything).Return(nil)
 
 			persistence.On("SaveVM", mock.Anything).Return(nil)
@@ -128,6 +128,7 @@ func TestRun(t *testing.T) {
 				ttlManager:                  NewTTLManager(),
 			}
 
+			t.Cleanup(ms.ttlManager.CancelAll)
 			if tt.name == "with exceeded max vms" {
 				ms.maxVMs = 1
 				ms.vms["existing-vm"] = vmMock // Simulate an existing VM
@@ -268,58 +269,135 @@ func TestDecodeRange(t *testing.T) {
 	}
 }
 
-func TestRestoreVMs(t *testing.T) {
-	mockPersistence := new(persistenceMocks.Persistence)
-	vmf := new(mocks.Provider)
-	vmMock := new(mocks.VM)
-	vmf.On("Execute", mock.Anything, mock.Anything, mock.Anything).Return(vmMock)
-	vmMock.On("SetProcess", mock.Anything).Return(nil)
-	vmMock.On("Transition", mock.Anything).Return(nil)
-	ms := &managerService{
-		persistence: mockPersistence,
-		vms:         make(map[string]vm.VM),
-		vmFactory:   vmf.Execute,
-		logger:      mglog.NewMock(),
-	}
-
-	cmd := exec.Command("echo", "test")
-	err := cmd.Start()
-	assert.NoError(t, err)
-
-	cmd2 := exec.Command("echo", "test")
-	err = cmd2.Run()
-	assert.NoError(t, err)
-
-	mockPersistence.On("LoadVMs").Return([]qemu.VMState{
-		{ID: "vm1", PID: cmd.Process.Pid},
-		{ID: "vm2", PID: cmd2.Process.Pid},
-		{ID: "vm3", PID: cmd2.Process.Pid},
-	}, nil)
-
-	mockPersistence.On("DeleteVM", "vm2").Return(nil)
-	mockPersistence.On("DeleteVM", "vm3").Return(errors.New("failed to delete"))
-
-	err = ms.restoreVMs()
-	assert.NoError(t, err)
-
-	assert.Len(t, ms.vms, 1)
-	assert.Contains(t, ms.vms, "vm1")
-
-	mockPersistence.AssertExpectations(t)
+type restorableVM struct {
+	*mocks.VM
+	process *os.Process
 }
 
-func TestProcessExists(t *testing.T) {
-	ms := &managerService{}
+func (v *restorableVM) SetVerifiedProcess(p *os.Process) error {
+	v.process = p
+	return nil
+}
 
-	assert.False(t, ms.processExists(0))
-	assert.False(t, ms.processExists(-1))
-	assert.True(t, ms.processExists(os.Getpid()))
-
-	assert.False(t, ms.processExists(99999))
-
-	if os.Getuid() != 0 { // Skip this test if running as root.
-		assert.False(t, ms.processExists(1)) // PID 1 is usually the init process.
+func TestRestoreVMs(t *testing.T) {
+	identity, err := qemu.CaptureProcessIdentity(os.Getpid())
+	require.NoError(t, err)
+	persist := persistenceMocks.NewPersistence(t)
+	machine := &restorableVM{VM: mocks.NewVM(t)}
+	machine.On("Transition", mock.Anything).Return(nil).Once()
+	service := &managerService{
+		persistence: persist,
+		vms:         make(map[string]vm.VM),
+		vmFactory:   func(any, string, *slog.Logger) vm.VM { return machine },
+		logger:      mglog.NewMock(),
+		ttlManager:  NewTTLManager(),
 	}
+	persist.On("LoadVMs").Return([]qemu.VMState{
+		{ID: "current", PID: os.Getpid(), ProcessIdentity: identity},
+		{ID: "legacy", PID: os.Getpid()},
+	}, nil)
+	require.NoError(t, service.restoreVMs())
+	require.Contains(t, service.vms, "current")
+	require.NotContains(t, service.vms, "legacy")
+	require.NotNil(t, machine.process)
+	require.NoError(t, machine.process.Release())
+}
+
+func TestVMDeadlineSurvivesRestart(t *testing.T) {
+	// Simulate downtime across an absolute deadline. Only the test provider
+	// receives Stop; the test process is used solely to verify identity.
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	require.NoError(t, err)
+	dir = filepath.Join(dir, "private-state")
+	identity, err := qemu.CaptureProcessIdentity(os.Getpid())
+	require.NoError(t, err)
+	persist, err := qemu.NewFilePersistence(dir)
+	require.NoError(t, err)
+	state := qemu.VMState{ID: "expired-vm", PID: os.Getpid(), ProcessIdentity: identity, ExpiresAt: time.Now().UTC().Add(-time.Minute)}
+	require.NoError(t, persist.SaveVM(state))
+	require.NoError(t, persist.(*qemu.FilePersistence).Close())
+	persist, err = qemu.NewFilePersistence(dir)
+	require.NoError(t, err)
+	defer persist.(*qemu.FilePersistence).Close()
+	machine := &restorableVM{VM: mocks.NewVM(t)}
+	machine.On("Transition", mock.Anything).Return(nil).Once()
+	machine.On("Stop").Return(nil).Once()
+	service := &managerService{
+		persistence: persist,
+		vms:         make(map[string]vm.VM),
+		vmFactory:   func(any, string, *slog.Logger) vm.VM { return machine },
+		logger:      mglog.NewMock(),
+		ttlManager:  NewTTLManager(),
+	}
+	require.NoError(t, service.restoreVMs())
+	require.Eventually(t, func() bool {
+		states, err := persist.LoadVMs()
+		return err == nil && len(states) == 0
+	}, time.Second*5, time.Millisecond*5)
+	require.NoError(t, machine.process.Release())
+}
+
+func TestCreateVMArmsDeadlineAfterDurableCreate(t *testing.T) {
+	persist := persistenceMocks.NewPersistence(t)
+	machine := mocks.NewVM(t)
+	service := &managerService{
+		persistence: persist, vms: make(map[string]vm.VM), ttlManager: NewTTLManager(),
+		vmFactory: func(any, string, *slog.Logger) vm.VM { return machine },
+		logger:    mglog.NewMock(),
+	}
+	removed := make(chan struct{})
+	machine.On("Start").Return(nil).Once()
+	machine.On("GetProcess").Return(os.Getpid()).Once()
+	machine.On("Transition", mock.Anything).Return(nil).Once()
+	machine.On("Stop").Return(nil).Once()
+	persist.On("SaveVM", mock.Anything).Run(func(args mock.Arguments) {
+		state := args.Get(0).(qemu.VMState)
+		require.False(t, state.ExpiresAt.IsZero())
+		require.NotZero(t, state.ProcessIdentity)
+		require.Empty(t, service.ttlManager.timers)
+	}).Return(nil).Once()
+	persist.On("DeleteVM", mock.Anything).Run(func(mock.Arguments) { close(removed) }).Return(nil).Once()
+
+	_, id, err := service.CreateVM(context.Background(), &CreateReq{Ttl: "1ns"})
+	t.Cleanup(func() {
+		mounts, _ := filepath.Glob(filepath.Join("/tmp", id+"*"))
+		for _, mount := range mounts {
+			_ = os.RemoveAll(mount)
+		}
+	})
+	require.NoError(t, err)
+	select {
+	case <-removed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("VM did not expire after create")
+	}
+	service.mu.Lock()
+	defer service.mu.Unlock()
+	require.Empty(t, service.vms)
+}
+
+func TestCreateVMRollsBackOnPersistenceFailure(t *testing.T) {
+	persist := persistenceMocks.NewPersistence(t)
+	machine := mocks.NewVM(t)
+	service := &managerService{
+		persistence: persist, vms: make(map[string]vm.VM), ttlManager: NewTTLManager(),
+		vmFactory: func(any, string, *slog.Logger) vm.VM { return machine },
+		logger:    mglog.NewMock(),
+	}
+	machine.On("Start").Return(nil).Once()
+	machine.On("GetProcess").Return(os.Getpid()).Once()
+	machine.On("Stop").Return(nil).Once()
+	persist.On("SaveVM", mock.Anything).Return(assert.AnError).Once()
+	_, id, err := service.CreateVM(context.Background(), &CreateReq{Ttl: "1h"})
+	t.Cleanup(func() {
+		mounts, _ := filepath.Glob(filepath.Join("/tmp", id+"*"))
+		for _, mount := range mounts {
+			_ = os.RemoveAll(mount)
+		}
+	})
+	require.ErrorIs(t, err, assert.AnError)
+	require.Empty(t, service.vms)
+	require.Empty(t, service.ttlManager.timers)
 }
 
 func TestTmpEnvironmentWithAWSCredentials(t *testing.T) {
@@ -559,7 +637,7 @@ func TestCreateVMWithAaKbsParams(t *testing.T) {
 					Return(vmMock).Once()
 
 				vmMock.On("Start").Return(nil).Once()
-				vmMock.On("GetProcess").Return(1234).Once()
+				vmMock.On("GetProcess").Return(os.Getpid()).Once()
 				vmMock.On("Transition", mock.Anything).Return(nil).Once()
 				persistence.On("SaveVM", mock.Anything).Return(nil).Once()
 			}

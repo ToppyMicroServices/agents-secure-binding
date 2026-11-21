@@ -50,10 +50,19 @@ components; on macOS this means `/private/tmp` or `/private/var` rather than the
 directory. For an unprivileged manual run, set `MANAGER_STATE_DIR` to a private
 directory owned by the service user.
 
-The legacy `/tmp/agents-secure-binding` directory is no longer loaded. Migration
-is manual: stop the Manager, establish the provenance of each legacy record and
-its live VM process, and copy only verified records into the new private state
-directory with the service user's ownership and mode `0600`. Do not adopt or
-change permissions on an untrusted directory to make it pass validation. A
-positive PID is required, but state validation does not prove process identity
-or prevent PID reuse; verify live processes before restoring legacy records.
+VM creation records the process identity in the service's private state before
+returning success. The Linux Manager requires accessible procfs and kernel
+support for pidfds. On restart it matches the boot ID, process start time and
+process inode, and keeps the verified process handle for subsequent signals.
+A missing identity in an older record or an identity mismatch requires manual
+reconciliation. The Manager logs the VM ID and retains the record. Drain
+running VMs before upgrading from a release that stores only PIDs.
+
+VMs created with a TTL store an absolute UTC expiry. Restarting the Manager
+with a verified surviving VM resumes the remaining time. If the deadline
+passed while the Manager was offline, it schedules removal immediately on
+recovery.
+
+The legacy `/tmp/agents-secure-binding` directory is no longer loaded. To
+migrate, stop the old Manager, reconcile its running VMs and recreate them
+under the new Manager. Preserve unverified records separately for investigation.

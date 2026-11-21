@@ -26,7 +26,7 @@ class Element {
   dispatch(type) { return this.listeners.get(type)({preventDefault() {}}); }
   showModal() { this.open = true; }
   close() { this.open = false; }
-  focus() {}
+  focus() { this.focused = true; }
   querySelector() { return this.details; }
   get lastElementChild() { return this.children.at(-1); }
   insertBefore(child, before) {
@@ -79,7 +79,11 @@ function application({realCards = false, storage = memoryStorage()} = {}) {
   };
   const context = vm.createContext({
     URLSearchParams, Intl, Date, setInterval() {},
-    window: {location: {hash: ""}, sessionStorage:storage},
+    window: Object.assign(new Element(), {
+      location: {hash: "", pathname: "/", search: ""},
+      history: {replaceState() { context.window.location.hash = ""; }},
+      sessionStorage: storage,
+    }),
     document: {getElementById: element, addEventListener() {}},
     makeCard: () => new Element(),
   });
@@ -90,7 +94,7 @@ function application({realCards = false, storage = memoryStorage()} = {}) {
   vm.runInContext(source.replace(/\nstart\(\);\s*$/, "\n"), context);
   if (!realCards) vm.runInContext("operationCard = () => makeCard();", context);
   vm.runInContext("loggedIn = true;", context);
-  const api = vm.runInContext("({operationCard, renderOperationLists, refreshInbox, openDecision, showLogin, activateSession, unknownOperations})", context);
+  const api = vm.runInContext("({operationCard, renderOperationLists, refreshInbox, openDecision, showLogin, activateSession, unknownOperations, start})", context);
   return {element, context, ...api};
 }
 
@@ -164,6 +168,77 @@ function deferred() {
 }
 
 const response = (body, status = 200) => ({ok: status < 400, status, json: async () => body});
+
+test("same-tab login during startup clears the fragment at once and uses only one token exchange", async () => {
+  const app = application();
+  const restore = deferred();
+  const login = deferred();
+  const submitted = [];
+  app.context.fetch = async (path, options) => {
+    if (path === "/api/inbox") return response({operations: []});
+    assert.equal(path, "/api/session");
+    if (!options.method) return restore.promise;
+    assert.equal(app.context.window.location.hash, "");
+    submitted.push(JSON.parse(options.body).token);
+    return login.promise;
+  };
+  const starting = app.start();
+  const win = app.context.window;
+  win.location.hash = "#login=example";
+  const opening = win.dispatch("hashchange");
+  assert.equal(win.location.hash, "");
+  win.location.hash = "#login=example";
+  const duplicate = win.dispatch("hashchange");
+  restore.resolve(response({}, 401));
+  await starting;
+  login.resolve(response({csrf_token: "session"}));
+  await Promise.all([opening, duplicate]);
+  assert.deepEqual(submitted, ["example"]);
+  assert.equal(app.element("dashboard").hidden, false);
+});
+
+test("a valid existing session and an ordinary anchor never redeem a login link", async () => {
+  const app = application();
+  const win = app.context.window;
+  const calls = [];
+  app.context.fetch = async (path, options) => {
+    calls.push([path, options.method || "GET"]);
+    return response(path === "/api/session" ? {csrf_token:"already-active"} : {operations:[]});
+  };
+  win.location.hash = "#login=initial";
+  const starting = app.start();
+  assert.equal(win.location.hash, "");
+  await starting;
+  win.location.hash = "#login=same-tab";
+  await win.dispatch("hashchange");
+  assert.equal(win.location.hash, "");
+  win.location.hash = "#main";
+  await win.dispatch("hashchange");
+  assert.equal(win.location.hash, "#main");
+  assert.deepEqual(calls, [["/api/session","GET"], ["/api/inbox","GET"]]);
+});
+
+test("a used initial link gives recovery instructions; opening the current link succeeds", async () => {
+  const app = application();
+  const win = app.context.window;
+  const submitted = [];
+  app.context.fetch = async (path, options) => {
+    if (path === "/api/inbox") return response({operations: []});
+    if (!options.method) return response({}, 401);
+    const {token} = JSON.parse(options.body);
+    submitted.push(token);
+    return token === "fresh" ? response({csrf_token:"session"}) : response({}, 401);
+  };
+  win.location.hash = "#login=spent";
+  await app.start();
+  assert.equal(win.location.hash, "");
+  assert.match(app.element("login-message").textContent, /ファイルを開き直し/);
+  win.location.hash = "#login=fresh";
+  await win.dispatch("hashchange");
+  assert.deepEqual(submitted, ["spent", "fresh"]);
+  assert.equal(app.element("login-message").textContent, "");
+  assert.equal(app.element("login-view").hidden, true);
+});
 const reviewedOperation = {
   ...pending("reviewed"), proposal_digest: "sha256:" + "a".repeat(64),
   before: {enabled: false, revision: 0}, change: {enabled: true},
@@ -214,6 +289,7 @@ for (const choice of decisions) {
     assert.equal(app.element("current-setting").textContent, choice.decision === "APPROVE" ? "ON · 有効" : "OFF · 無効");
     assert.equal(app.element("current-revision").textContent, choice.decision === "APPROVE" ? "revision 1" : "revision 0");
     assert.match(app.element("notice").textContent, new RegExp(choice.label));
+    assert.equal(app.element("notice").focused, true);
   });
 
   test(`an uncertain ${choice.decision} submission blocks all four choices until exact terminal status`, async () => {
@@ -562,7 +638,7 @@ for (const status of [200, 401]) {
   test(`a late initial session GET (${status}) cannot replace a successful manual login`, async () => {
     const app = application();
     const initial = deferred();
-    const api = vm.runInContext("({start, login})", app.context);
+    app.showLogin();
     app.context.fetch = async (path, options) => {
       if (path === "/api/session") {
         if (options.method === "POST") return response({csrf_token:"new-csrf", human_participant:"human:local-owner", gateway_actor:"gateway:local-human", assurance:"gateway-asserted-for-human"});
@@ -571,8 +647,9 @@ for (const status of [200, 401]) {
       assert.equal(path, "/api/inbox");
       return response({operations:[], history:[]});
     };
-    const starting = api.start();
-    await api.login("synthetic-login-token");
+    const starting = app.start();
+    app.element("login-token").value = "synthetic-login-token";
+    await app.element("login-form").dispatch("submit");
     initial.resolve(response(status === 200 ? {csrf_token:"stale-csrf"} : {message:"stale session"}, status));
     await starting;
     assert.equal(vm.runInContext("csrf", app.context), "new-csrf");

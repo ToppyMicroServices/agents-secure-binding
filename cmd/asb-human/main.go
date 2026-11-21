@@ -18,7 +18,6 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
-	"net/url"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -90,7 +89,7 @@ func defaultDataDir() (string, error) {
 
 func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if len(args) == 0 {
-		return errors.New("usage: asb-human <self-test|demo|init|serve|agent|resume|inspect|credentials-status|credentials-rotate|token-rotate|storage-status|storage-export|storage-verify> [flags]")
+		return errors.New("try 'asb-human self-test' to check the installation, or 'asb-human demo' to review a proposal in your browser. Run 'asb-human --help' for all commands")
 	}
 	if args[0] == "help" || args[0] == "--help" || args[0] == "-h" {
 		_, err := fmt.Fprintln(stdout, "usage: asb-human <self-test|demo|init|serve|agent|resume|inspect|credentials-status|credentials-rotate|token-rotate|storage-status|storage-export|storage-verify> [flags]\nTry self-test for an automatic local check, or demo for a browser review.\nUse a command with --help for its options.")
@@ -665,10 +664,11 @@ func inspectionCommand(dir, receiptPath, operationID, digest string) (humanapp.C
 func writeJSON(w io.Writer, value any) error { return json.NewEncoder(w).Encode(value) }
 
 type runningServers struct {
-	coreAddress, webOrigin, loginURL string
-	core, web                        *http.Server
-	store                            *humanapp.Store
-	errors                           chan error
+	coreAddress, webOrigin string
+	browser                *humanapp.WebHandler
+	core, web              *http.Server
+	store                  *humanapp.Store
+	errors                 chan error
 }
 
 func startServers(ctx context.Context, cfg serveOptions) (*runningServers, error) {
@@ -717,18 +717,19 @@ func startServers(ctx context.Context, cfg serveOptions) (*runningServers, error
 	if err != nil {
 		return nil, err
 	}
-	token, err := humanapp.LoginToken(cfg.dir)
-	if err != nil {
-		return nil, err
-	}
 	origin := "http://" + webListener.Addr().String()
-	webHandler, err := humanapp.NewWebHandler(humanapp.WebConfig{Origin: origin, LoginToken: token, Execute: client.Execute})
+	webHandler, err := humanapp.NewWebHandler(humanapp.WebConfig{Origin: origin, LoginDirectory: cfg.dir, Execute: client.Execute})
 	if err != nil {
 		return nil, err
 	}
+	defer func() {
+		if failed {
+			_ = webHandler.Close()
+		}
+	}()
 	running := &runningServers{
 		coreAddress: coreListener.Addr().String(), webOrigin: origin,
-		loginURL: origin + "/#login=" + url.QueryEscape(token), store: store,
+		browser: webHandler, store: store,
 		core:   &http.Server{Handler: core.Handler(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 32 << 10},
 		web:    &http.Server{Handler: webHandler, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 32 << 10},
 		errors: make(chan error, 2),
@@ -755,6 +756,7 @@ func (s *runningServers) close(ctx context.Context) {
 	if s.core.Shutdown(ctx) != nil {
 		_ = s.core.Close()
 	}
+	_ = s.browser.Close()
 	_ = s.store.Close()
 }
 
@@ -768,11 +770,11 @@ func serve(ctx context.Context, cfg serveOptions, stdout, stderr io.Writer) erro
 		Event       string `json:"event"`
 		CoreAddress string `json:"core_address"`
 		WebOrigin   string `json:"web_origin"`
-		LoginURL    string `json:"login_url"`
-	}{"ready", running.coreAddress, running.webOrigin, running.loginURL}); err != nil {
+		LoginFile   string `json:"login_file"`
+	}{"ready", running.coreAddress, running.webOrigin, running.browser.LoginFile()}); err != nil {
 		return err
 	}
-	if _, err := fmt.Fprintf(stderr, "\nASB local Human approval is ready.\nOpen this private link in a browser on this computer:\n\n  %s\n\nData directory: %s\nOnly this application's maintenance_mode setting can change; no system setting is modified.\nThe server stays open after a decision. Press Ctrl+C to stop it.\nDo not share the login link or the private data directory.\n\n", running.loginURL, cfg.dir); err != nil {
+	if _, err := fmt.Fprintf(stderr, "\nASB local Human approval is ready.\nOpen this private file in a text editor and copy its current link into a browser on this computer:\n\n  %s\n\nData directory: %s\nOnly this application's maintenance_mode setting can change; no system setting is modified.\nThe server stays open after a decision. Press Ctrl+C to stop it.\nThe link is valid for one login and expires after five minutes. Reopen the file for a fresh link. Keep its contents private.\n\n", running.browser.LoginFile(), cfg.dir); err != nil {
 		return err
 	}
 	childCtx, cancel := context.WithCancel(ctx)

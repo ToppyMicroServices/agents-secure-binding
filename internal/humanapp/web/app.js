@@ -1,13 +1,17 @@
 "use strict";
 
-// A fragment never reaches the HTTP server. Clear it before any request and
-// keep the login token only until its one POST; never persist it in storage.
-let fragmentToken = new URLSearchParams(window.location.hash.slice(1)).get("login");
-if (window.location.hash) window.history.replaceState(null, "", window.location.pathname + window.location.search);
+// A link can open a new document or change the fragment of this one.
+function takeLoginToken() {
+  const token = new URLSearchParams(window.location.hash.slice(1)).get("login");
+  if (token !== null) window.history.replaceState(null, "", window.location.pathname + window.location.search);
+  return token;
+}
 
 const element = (id) => document.getElementById(id);
 let csrf = "";
 let loggedIn = false;
+let sessionRestoration;
+let authentication = Promise.resolve();
 let loading = false;
 let inboxGeneration = 0;
 let authenticationAttempt = 0;
@@ -126,8 +130,8 @@ async function request(path, options = {}) {
     throw {message: "結果を読み取れません。一覧を更新して状態を確認してください。", outcome_unknown: options.method === "POST"};
   }
   if (!response.ok) {
-    if (response.status === 401 && generation === inboxGeneration) showLogin("セッションが終了しました。再度ログインしてください。");
-    throw body;
+    if (response.status === 401 && path !== "/api/session" && generation === inboxGeneration) showLogin("セッションが終了しました。再度ログインしてください。");
+    throw {...body, status: response.status};
   }
   return body;
 }
@@ -164,7 +168,10 @@ async function login(token) {
     await activateSession(session);
     element("login-message").textContent = "";
   } catch (error) {
-    if (attempt === authenticationAttempt) element("login-message").textContent = error.message || "ログインできませんでした。";
+    if (attempt !== authenticationAttempt) return;
+    element("login-message").textContent = error.status === 401
+      ? "このリンクを使用できません。起動時に案内されたファイルを開き直し、最新のURLを開いてください。"
+      : (error.status && error.message) || "ログインを確認できません。接続を確認して画面を再読み込みしてください。";
   } finally {
     token = "";
     element("login-token").value = "";
@@ -437,7 +444,18 @@ function openDecision(operation, decision) {
   element("cancel-decision").focus();
 }
 
-element("login-form").addEventListener("submit", async (event) => { event.preventDefault(); await login(element("login-token").value); });
+function queueLogin(token) {
+  // Only redeem another link if the preceding login did not establish a session.
+  if (token) authentication = authentication.then(() => { if (!loggedIn) return login(token); });
+  return authentication;
+}
+element("login-form").addEventListener("submit", (event) => {
+  event.preventDefault();
+  const input = element("login-token");
+  const pending = queueLogin(input.value);
+  input.value = "";
+  return pending;
+});
 element("refresh-button").addEventListener("click", () => refreshInbox(true));
 for (const [id, offset] of [["history-previous", () => Math.max(0, historyOffset - historyLimit)], ["history-next", () => historyOffset + historyLimit], ["history-latest", () => 0]]) {
   element(id).addEventListener("click", async () => {
@@ -492,6 +510,7 @@ element("decision-form").addEventListener("submit", async (event) => {
     element("cancel-decision").disabled = false;
     element("decision-dialog").close();
     renderReviewedOperations();
+    element(loggedIn ? "notice" : "login-token").focus();
     await refreshInbox();
   }
 });
@@ -501,23 +520,27 @@ element("logout-button").addEventListener("click", async () => {
   catch (error) { setNotice(error.message || "ログアウトできませんでした。", true); }
 });
 
-async function start() {
-  if (fragmentToken) {
-    const token = fragmentToken;
-    fragmentToken = null;
-    await login(token);
-    return;
-  }
-  fragmentToken = null;
+async function restoreSession() {
   const attempt = ++authenticationAttempt;
   const generation = inboxGeneration;
   try {
     const session = await request("/api/session");
     if (attempt === authenticationAttempt && generation === inboxGeneration) await activateSession(session);
-  } catch (_) {
-    if (attempt === authenticationAttempt && generation === inboxGeneration) showLogin();
+  } catch (error) {
+    if (attempt === authenticationAttempt && generation === inboxGeneration) {
+      showLogin(error.status === 401 ? "" : "接続を確認して画面を再読み込みしてください。");
+    }
   }
 }
+function start() {
+  const token = takeLoginToken();
+  sessionRestoration = restoreSession();
+  return sessionRestoration.then(() => queueLogin(token));
+}
+window.addEventListener("hashchange", () => {
+  const token = takeLoginToken();
+  return sessionRestoration.then(() => queueLogin(token));
+});
 setInterval(() => { if (!document.hidden) refreshInbox(); }, 10000);
 document.addEventListener("visibilitychange", () => { if (!document.hidden) refreshInbox(); });
 start();

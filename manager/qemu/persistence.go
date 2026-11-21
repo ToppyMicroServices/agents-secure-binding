@@ -13,14 +13,17 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 )
 
 const jsonExt = ".json"
 
 type VMState struct {
-	ID     string
-	VMinfo VMInfo
-	PID    int
+	ID              string
+	VMinfo          VMInfo
+	PID             int
+	ProcessIdentity ProcessIdentity `json:",omitzero"`
+	ExpiresAt       time.Time       `json:",omitzero"`
 }
 
 type FilePersistence struct {

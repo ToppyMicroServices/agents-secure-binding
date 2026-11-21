@@ -6,16 +6,18 @@ SQLite database. Declining, marking a proposal not applicable, or being unable
 to decide leaves that setting unchanged. Nothing is sent to
 an external service, and no real server configuration is changed.
 
-This is an experimental preview for one trusted computer and OS user. It is
-available in this source branch, not in `v2.0.0-rc.2`. It does not require SNP,
-TDX, a GPU, an LLM account, Docker, Node.js, or a separate SQLite installation.
+The local approval app is an experimental preview for one trusted computer and
+OS user. It first shipped in `v2.0.0-rc.3`. These instructions describe the
+current source. In the published v2.0.0-rc.3 executable, the terminal prints
+the private login URL directly. For that build, follow its bundled `USAGE.md`.
 
 ## Start here
 
-Install Go 1.26.11 and open a terminal in the repository root. Check `go version`
-if you are unsure which version is active. The first `go run` downloads
-dependencies and compiles the app, so allow for that initial setup. The same
-commands work in macOS/Linux terminals and Windows PowerShell.
+You can [download and verify a prebuilt preview](asb-human-binary-quickstart.md#get-an-executable)
+on Linux x64, Windows x64 or Apple Silicon. To build from source, follow the
+[README quick start](../README.md#quick-start) to install Go 1.26.11 and open
+the repository in a terminal. The first run downloads the Go dependencies.
+The following source commands work on Linux, macOS and Windows PowerShell.
 
 First, check the local workflow without opening a browser:
 
@@ -39,11 +41,13 @@ default runtime limit is 30 seconds after compilation; use
 
 Now make a decision yourself:
 
-```text
-go run ./cmd/asb-human demo --data-dir ./.asb-human
-```
+| Platform | Command |
+| --- | --- |
+| macOS or Linux | `go run ./cmd/asb-human demo --data-dir ./.asb-human` |
+| Windows PowerShell | `go run ./cmd/asb-human demo` |
 
-1. Open the private login link printed in the terminal, on the same computer.
+1. On the same computer, open the login file named in the terminal in a text
+   editor. Copy the link into your browser.
 2. Review the pending proposal and its before/after values. The separate Agent
    process requests `maintenance_mode=true` by default.
 3. Choose 「許可する」 (approve), 「拒否する」 (decline), 「該当なし」 (not applicable),
@@ -51,12 +55,12 @@ go run ./cmd/asb-human demo --data-dir ./.asb-human
 4. Press Ctrl+C when you are finished. The service stays running after the
    Agent receives its result.
 
-The app creates `.asb-human` for its keys, database, and recovery receipts.
-Let it create this private directory rather than using an existing shared
-folder. Keep both the directory and login link private. The link uses a URL
-fragment (`#login=...`), not a query parameter; the command does not launch a
-browser for you. `demo` chooses free ports automatically, so use the printed
-link rather than a fixed address.
+The app keeps its keys, database and recovery receipts in `.asb-human` for the
+macOS/Linux example and in the per-user `%AppData%\asb-human` directory on
+Windows. The terminal shows the login file path. Each link in that file can be
+used once and expires within five minutes. Reopen the file for a fresh link
+after use or expiry. Keep the directory and its links private. `demo` chooses
+free ports each time.
 
 Running `demo` again keeps earlier decisions and starts a new proposal. To
 request the opposite value, add `--enabled=false`. Use the
@@ -79,28 +83,15 @@ On Windows PowerShell:
 ```text
 go build -o asb-human.exe ./cmd/asb-human
 .\asb-human.exe self-test
-.\asb-human.exe demo --data-dir ./.asb-human
+.\asb-human.exe demo
 ```
 
 The executable includes the browser UI and SQLite implementation. Examples
 below use `./asb-human`; use `.\asb-human.exe` in PowerShell, or substitute
 `go run ./cmd/asb-human` when running from source. Each command supports `--help`.
-
-<details>
-<summary>Try a CI-built executable without installing Go</summary>
-
-Follow [Get an executable](asb-human-binary-quickstart.md#get-an-executable)
-for the current artifact names and download steps. After a successful
-[Local Human Approval workflow run on main](https://github.com/ToppyMicroServices/agents-secure-binding/actions/workflows/human-approval.yaml?query=branch%3Amain),
-sign in to GitHub and select the artifact for your OS and architecture. The
-artifact name includes the full source commit ID. Extract the archive and read
-`USAGE.md`; `SHA256SUMS` contains the binary checksum.
-
-These are 14-day CI artifacts, not signed or notarized releases. Downloading
-an artifact does not establish production readiness. On macOS and Linux,
-restore the executable bit with `chmod +x asb-human` before running it.
-
-</details>
+On Windows, omit `--data-dir ./.asb-human` in the examples below to keep using
+your per-user state. When a command takes a receipt path, use the path printed
+when you submitted the proposal.
 
 ## If something does not work
 
@@ -108,8 +99,8 @@ restore the executable bit with `chmod +x asb-human` before running it.
 | --- | --- |
 | `go` is not found, or dependency downloads fail | Check the Go installation and network access. Downloads are needed for the first source build; no LLM credentials are needed. |
 | `address already in use` | A chosen port is occupied. `demo` uses free ports by default. For `serve`, choose unused ports with `--core-listen` and `--web-listen`, then pass the core address to the Agent as shown below. |
-| The browser cannot connect | Keep `demo` or `serve` running and use the exact printed link on the same computer. The browser connects to the web port, not the core TLS port. |
-| The login no longer works after a restart | Open the newly printed login link. Browser sessions are not retained across service restarts; saved decisions are. |
+| The browser cannot connect | Keep `demo` or `serve` running and use the current link from its login file on the same computer. The browser connects to the web port, not the core TLS port. |
+| The login no longer works after a restart | Open the login file named by the current process and use its latest link. Restarting the service ends old browser sessions and preserves saved decisions. |
 | The data directory is not private, or initialization is incomplete | For a new trial, choose a new, unused `--data-dir` path. Do not delete an existing directory to repair it: it may contain keys, decisions, and receipts. |
 | The Agent is still waiting | A person must choose one of the four decisions in the browser. `self-test` is the unattended check; `demo` does not decide on your behalf. |
 | An operation is `STALE` | Another approved change advanced the setting after this proposal was created. This proposal has no effect. Review the current state before intentionally creating a new one. |
@@ -145,8 +136,8 @@ without starting the service. In another terminal, submit a named proposal:
 ./asb-human agent --data-dir ./.asb-human --operation-id change-001 --enabled=true --wait
 ```
 
-Open the login link from the service terminal to decide. Without `--wait`, the
-Agent returns after the proposal acknowledgement. With `--wait`, it polls
+Use the login file named in the service terminal to open the inbox. Without
+`--wait`, the Agent returns after the proposal acknowledgement. With `--wait`, it polls
 using fresh authentication until the operation reaches a terminal state:
 
 | `operation.state` | Meaning |
@@ -161,7 +152,8 @@ using fresh authentication until the operation reaches a terminal state:
 A successful command exit alone does not mean approval. Read
 `operation.state` in the result. JSON events are written to standard output
 for scripts, including the `ready` event's actual `core_address` and
-`web_origin`. If you choose a different core port, pass the same address to
+`web_origin`. The `login_file` field gives the path to the private login file.
+If you choose a different core port, pass the same address to
 both `agent` and `inspect`:
 
 ```text
@@ -245,7 +237,7 @@ service, use a controlled service restart instead of repeatedly submitting:
 2. Start `serve` with the **same** data directory. Use `inspect` with the
    original receipt, or operation ID and digest, to check its durable state.
 3. After confirming that the old service has exited, close the old tab and
-   open the newly printed private login URL in a new tab. If the original
+   open the current link from the new private login file in a new tab. If the original
    operation is still pending, review it again before making a new decision.
    An existing terminal result must remain unchanged.
 
@@ -326,16 +318,30 @@ the response, including `sha256:`. If only `--operation-id` is supplied,
 ## Trust and storage limits
 
 The browser gateway asserts `human:local-owner` on behalf of the person using
-the private login link. ASB authenticates the gateway key; the person does not
-hold an independent signing key. This preview is not multi-user isolation,
+the private login file to start a browser session. ASB authenticates the
+gateway key. The person does not hold an independent signing key. This preview is not multi-user isolation,
 hardware attestation, or a production storage adapter for generic TaskCoord.
 
 One SQLite transaction records the local decision, setting change, replay
 state, and command outcome. Recovery covers that database effect, not an
 external action. Keep the state on a local filesystem owned by the same
 trusted OS user. Receipts are created exclusively, flushed before submission,
-and restricted to their owner on Unix. Windows access depends on the user's
-directory permissions; Unix file modes do not establish Windows ACLs.
+and restricted to their owner on Unix.
+
+On Windows, the app creates its state directory with a protected discretionary
+access control list (DACL). Its permissions for the current user, SYSTEM and
+Administrators are inherited by files and folders inside it. An existing state
+directory with broader access is rejected. Use the default `%AppData%\asb-human`
+in a private user profile. For a custom `--data-dir`, choose a local path whose
+parent directories are trusted and writable only by you or system administrators.
+Choose a path without junctions or other directory links along it. To keep existing decisions and
+receipts, stop the app, restrict the existing directory **and its contents** to
+those accounts, then rotate any credentials that others could have read.
+Keep the existing database and receipts during this change.
+
+If you save a new receipt with `agent --save-receipt` or export an archive with
+`storage-export --output` outside the state directory, use a private destination.
+Apply suitable permissions to those files and to any backup copies.
 
 Local credentials expire one year after initialization. Stop every process
 using the data directory, inspect the non-secret status, and rotate the complete
@@ -354,19 +360,20 @@ supported rollback or automatic cleanup command yet. The data-directory lock rej
 rotation while `serve`, `demo`, `agent`, `inspect`, or a storage operation is
 active.
 
-Rotate the bootstrap token independently after stopping the service, then
-restart it so the old in-memory browser sessions are gone:
+Older data directories can contain a bootstrap token. Current servers use
+single-use login links. If you need to rotate the legacy token, stop the service
+and run:
 
 ```text
 asb-human token-rotate --data-dir ./.asb-human
 ```
 
-The command never prints the new token. The next `serve` or `demo` invocation
-prints the new private login URL. Rotation cannot remediate keys or tokens that
-were already copied from a compromised host.
+The legacy token cannot start a browser session on the current server. On
+restart, use the login file named by `serve` or `demo`.
 
 For a simple backup, stop the service and copy the **complete private
-directory**, including keys, receipts, and database sidecars. Do not copy only
+directory**, including keys, receipts, and database sidecars. Protect backups
+with the same access controls as the working directory. Do not copy only
 the main database while the service is running. SQLite uses WAL and FULL
 synchronous commits; process-restart tests do not prove survival of disk loss
 or arbitrary power failure.

@@ -10,7 +10,6 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
@@ -29,7 +28,7 @@ type liveApp struct {
 func privateFixtureDir(t *testing.T) string {
 	t.Helper()
 	dir := filepath.Join(t.TempDir(), "private")
-	if err := os.Mkdir(dir, 0o700); err != nil {
+	if err := makeDataDirectory(dir); err != nil {
 		t.Fatal(err)
 	}
 	return dir
