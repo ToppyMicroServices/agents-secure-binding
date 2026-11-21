@@ -49,9 +49,9 @@ type proposalReceipt struct {
 }
 
 type agentOptions struct {
-	dir, address, operationID, receipt string
-	enabled, enabledSet, wait          bool
-	poll, timeout                      time.Duration
+	dir, address, operationID, receipt, saveReceipt string
+	enabled, enabledSet, wait                       bool
+	poll, timeout                                   time.Duration
 }
 
 type serveOptions struct {
@@ -63,6 +63,7 @@ const (
 	commandAgent         = "agent"
 	commandDemo          = "demo"
 	commandInspect       = "inspect"
+	commandResume        = "resume"
 	commandServe         = "serve"
 	commandStorageExport = "storage-export"
 	commandStorageStatus = "storage-status"
@@ -89,10 +90,10 @@ func defaultDataDir() (string, error) {
 
 func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if len(args) == 0 {
-		return errors.New("usage: asb-human <self-test|demo|init|serve|agent|inspect|credentials-status|credentials-rotate|token-rotate|storage-status|storage-export|storage-verify> [flags]")
+		return errors.New("usage: asb-human <self-test|demo|init|serve|agent|resume|inspect|credentials-status|credentials-rotate|token-rotate|storage-status|storage-export|storage-verify> [flags]")
 	}
 	if args[0] == "help" || args[0] == "--help" || args[0] == "-h" {
-		_, err := fmt.Fprintln(stdout, "usage: asb-human <self-test|demo|init|serve|agent|inspect|credentials-status|credentials-rotate|token-rotate|storage-status|storage-export|storage-verify> [flags]\nTry self-test for an automatic local check, or demo for a browser review.\nUse a command with --help for its options.")
+		_, err := fmt.Fprintln(stdout, "usage: asb-human <self-test|demo|init|serve|agent|resume|inspect|credentials-status|credentials-rotate|token-rotate|storage-status|storage-export|storage-verify> [flags]\nTry self-test for an automatic local check, or demo for a browser review.\nUse a command with --help for its options.")
 		return err
 	}
 	if args[0] == "self-test" {
@@ -123,11 +124,16 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		if serveCfg.demo {
 			flags.BoolVar(&serveCfg.enabled, "enabled", true, "propose the local maintenance_mode value")
 		}
-	case commandAgent:
+	case commandAgent, commandResume:
 		flags.StringVar(&agentCfg.address, "core-address", defaultCoreAddress, "core address: explicit loopback IP and port")
-		flags.StringVar(&agentCfg.operationID, "operation-id", "", "proposal identifier; generated when omitted")
-		flags.StringVar(&agentCfg.receipt, "receipt", "", "save or resume an immutable proposal receipt")
-		flags.BoolVar(&agentCfg.enabled, "enabled", true, "requested local maintenance_mode value (use --enabled=false to disable)")
+		if args[0] == commandResume {
+			flags.StringVar(&agentCfg.receipt, "receipt", "", "existing receipt of the proposal to resume (required)")
+		} else {
+			flags.StringVar(&agentCfg.operationID, "operation-id", "", "proposal identifier; generated when omitted")
+			flags.StringVar(&agentCfg.receipt, "receipt", "", "read an existing receipt; with --operation-id, create it if missing")
+			flags.StringVar(&agentCfg.saveReceipt, "save-receipt", "", "create a new proposal and save its receipt to an unused path")
+			flags.BoolVar(&agentCfg.enabled, "enabled", true, "requested local maintenance_mode value (use --enabled=false to disable)")
+		}
 		flags.BoolVar(&agentCfg.wait, "wait", false, "poll until the proposal reaches a terminal state")
 		flags.DurationVar(&agentCfg.poll, "poll-interval", time.Second, "interval between freshly authenticated status requests")
 		flags.DurationVar(&agentCfg.timeout, "timeout", 0, "stop waiting after this duration; zero waits until interrupted")
@@ -153,6 +159,28 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if flags.NArg() != 0 || dir == "" {
 		return errors.New("provide --data-dir and use named flags only")
 	}
+	if args[0] == commandResume && agentCfg.receipt == "" {
+		return errors.New("resume requires --receipt with the path to an existing receipt")
+	}
+	if args[0] == commandAgent {
+		var emptyPath string
+		flags.Visit(func(f *flag.Flag) {
+			switch f.Name {
+			case "enabled":
+				agentCfg.enabledSet = true
+			case "receipt", "save-receipt":
+				if f.Value.String() == "" {
+					emptyPath = f.Name
+				}
+			}
+		})
+		if emptyPath != "" {
+			return fmt.Errorf("--%s requires a receipt path", emptyPath)
+		}
+		if agentCfg.receipt != "" && agentCfg.saveReceipt != "" {
+			return errors.New("use either --receipt or --save-receipt")
+		}
+	}
 	dir, err = filepath.Abs(dir)
 	if err != nil {
 		return err
@@ -162,7 +190,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 			return err
 		}
 	}
-	if args[0] == commandServe || args[0] == commandDemo || args[0] == commandAgent || args[0] == commandInspect || args[0] == commandStorageStatus || args[0] == commandStorageExport {
+	if args[0] == commandServe || args[0] == commandDemo || args[0] == commandAgent || args[0] == commandResume || args[0] == commandInspect || args[0] == commandStorageStatus || args[0] == commandStorageExport {
 		lock, err := humanapp.HoldDataDirectory(dir)
 		if err != nil {
 			return err
@@ -247,12 +275,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	case commandServe, commandDemo:
 		serveCfg.dir = dir
 		return serve(ctx, serveCfg, stdout, stderr)
-	case commandAgent:
-		flags.Visit(func(f *flag.Flag) {
-			if f.Name == "enabled" {
-				agentCfg.enabledSet = true
-			}
-		})
+	case commandAgent, commandResume:
 		agentCfg.dir = dir
 		if agentCfg.poll < 50*time.Millisecond || agentCfg.timeout < 0 {
 			return errors.New("poll interval must be at least 50ms and timeout cannot be negative")
@@ -429,6 +452,9 @@ func saveReceipt(path string, command humanapp.Command) error {
 
 func prepareProposal(ctx context.Context, cfg agentOptions, execute executeCommand) (string, proposalReceipt, humanapp.Command, error) {
 	path := cfg.receipt
+	if cfg.saveReceipt != "" {
+		path = cfg.saveReceipt
+	}
 	var err error
 	if path == "" {
 		if cfg.operationID == "" {
@@ -453,8 +479,20 @@ func prepareProposal(ctx context.Context, cfg agentOptions, execute executeComma
 		}
 		return path, receipt, command, err
 	}
-	if path, receipt, command, err := load(); !errors.Is(err, os.ErrNotExist) {
-		return path, receipt, command, err
+	if cfg.saveReceipt != "" {
+		if _, err := os.Lstat(path); err == nil {
+			return "", proposalReceipt{}, humanapp.Command{}, fmt.Errorf("receipt %q already exists; use resume --receipt to resume it", path)
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return "", proposalReceipt{}, humanapp.Command{}, err
+		}
+	} else {
+		path, receipt, command, err := load()
+		if !errors.Is(err, os.ErrNotExist) {
+			return path, receipt, command, err
+		}
+		if cfg.receipt != "" && cfg.operationID == "" {
+			return "", proposalReceipt{}, humanapp.Command{}, fmt.Errorf("saved receipt not found; check the path in the original proposal_saved event; no proposal submitted: %w", err)
+		}
 	}
 	if cfg.operationID == "" {
 		cfg.operationID, err = newID("op-")
@@ -486,7 +524,7 @@ func prepareProposal(ctx context.Context, cfg agentOptions, execute executeComma
 	if err := command.Validate(); err != nil {
 		return "", proposalReceipt{}, humanapp.Command{}, err
 	}
-	if err := saveReceipt(path, command); err != nil && !errors.Is(err, os.ErrExist) {
+	if err := saveReceipt(path, command); err != nil && (cfg.saveReceipt != "" || !errors.Is(err, os.ErrExist)) {
 		return "", proposalReceipt{}, humanapp.Command{}, fmt.Errorf("could not save receipt; no proposal submitted: %w", err)
 	}
 	return load()
@@ -512,7 +550,7 @@ func runAgent(ctx context.Context, cfg agentOptions, execute executeCommand, std
 	}
 	receiptArg := quoteReceiptPath(path, runtime.GOOS)
 	unknown := func(err error) error {
-		return fmt.Errorf("outcome unknown; run inspect --receipt %s, or resume agent --receipt %s --wait with the same --data-dir and --core-address: %w", receiptArg, receiptArg, err)
+		return fmt.Errorf("outcome unknown; run inspect --receipt %s, or resume --receipt %s --wait with the same --data-dir and --core-address: %w", receiptArg, receiptArg, err)
 	}
 	raw, err := execute(ctx, command)
 	if err != nil {

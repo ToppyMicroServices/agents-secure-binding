@@ -38,12 +38,12 @@ on:
       package_version:
         description: Debian Preview package version to qualify
         required: true
-        default: '0.1.0~preview.1-2'
+        default: '2.0.0~rc.3-2'
         type: string
       package_maintainer:
         description: Responsible package maintainer name and email
         required: true
-        default: 'ASB CI <ci@example.invalid>'
+        default: 'Akira <okutomi@pm.me>'
         type: string
 
 permissions:
@@ -57,8 +57,8 @@ jobs:
       GOWORK: 'off'
       PYTHONDONTWRITEBYTECODE: '1'
       ASB_UPGRADE_BASE: 'b8fd28939a7385a1dab66317d085d58755df0209'
-      ASB_CANDIDATE_VERSION: ${{ inputs.package_version || '0.1.0~preview.1-2' }}
-      ASB_CANDIDATE_MAINTAINER: ${{ inputs.package_maintainer || 'ASB CI <ci@example.invalid>' }}
+      ASB_CANDIDATE_VERSION: ${{ inputs.package_version || '2.0.0~rc.3-2' }}
+      ASB_CANDIDATE_MAINTAINER: ${{ inputs.package_maintainer || 'Akira <okutomi@pm.me>' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -105,14 +105,26 @@ jobs:
           python3 scripts/check-asb-deb-lifecycle.py \
             --artifacts build/debian-upgrade \
             --output build/debian-upgrade-lifecycle.json --image ubuntu:24.04
+      - name: Fetch the immutable rc.3-1 packages for the installed-user upgrade check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if dpkg --compare-versions "$ASB_CANDIDATE_VERSION" gt '2.0.0~rc.3-1'; then
+            gh release download apt-preview-rc3-20261104 --repo ToppyMicroServices/agents-secure-binding \
+              --pattern asb-apt-site.tar --dir "$RUNNER_TEMP/published-rc3"
+          fi
       - name: Check signed apt delivery and key rotation with ephemeral keys
         run: |
+          published_args=()
+          if dpkg --compare-versions "$ASB_CANDIDATE_VERSION" gt '2.0.0~rc.3-1'; then
+            published_args=(--published-rc3-archive "$RUNNER_TEMP/published-rc3/asb-apt-site.tar")
+          fi
           python3 scripts/check-asb-apt.py \
             --initial build/debian-candidates --initial-lifecycle build/debian-lifecycle.json \
             --upgrade build/debian-upgrade --upgrade-lifecycle build/debian-upgrade-lifecycle.json \
             --initial-source "$ASB_UPGRADE_BASE" --upgrade-source "$(git rev-parse HEAD)" \
             --source-checkout "$GITHUB_WORKSPACE" --initial-checkout "$GITHUB_WORKSPACE/build/upgrade-baseline" \
-            --output build/apt-lifecycle.json --image ubuntu:24.04
+            --output build/apt-lifecycle.json --image ubuntu:24.04 "${published_args[@]}"
       - name: Inspect the final Pages archive with the ephemeral CI public key
         run: python3 scripts/check-asb-apt-pages.py --build build
       - name: Save candidate packages and Linux evidence
