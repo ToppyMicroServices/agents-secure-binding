@@ -274,13 +274,17 @@ inspect the saved proposal:
 ./asb-human inspect --data-dir ./.asb-human --receipt ./.asb-human/receipts/proposal-change-001.json
 ```
 
-To resume submission and wait for its decision:
+To resume submission and wait for its decision, use a build that lists
+`resume` in `asb-human --help`. Older builds may create a new proposal if a
+receipt path is mistyped. Keep the receipt and use an updated build for recovery.
 
 ```text
-./asb-human agent --data-dir ./.asb-human --receipt ./.asb-human/receipts/proposal-change-001.json --wait
+./asb-human resume --data-dir ./.asb-human --receipt ./.asb-human/receipts/proposal-change-001.json --wait
 ```
 
-The app reuses the exact saved command with fresh authentication. If the
+Use the existing path from the original `proposal_saved` event. If the file
+is missing, `resume` stops before sending any request. The app reuses the
+exact saved command with fresh authentication. If the
 first submission committed, it returns the original command result; live
 status then shows any later decision. It never silently updates a saved
 proposal to a newer setting revision. A malformed or partial receipt is
@@ -296,9 +300,15 @@ want the change, deliberately submit a new proposal with a new operation ID
 and receipt. Keep the original receipt; do not edit its revision or reuse its ID.
 
 Use the same `--core-address` if the service uses a nondefault port.
-`agent --timeout 2m` limits waiting to two minutes and leaves the receipt
-available. `--receipt` can also select an explicit path when creating a new
-proposal; existing receipts are never overwritten.
+`resume --receipt PATH --wait --timeout 2m` limits waiting to two minutes
+and leaves the receipt available. For a new proposal, `agent --save-receipt PATH`
+selects an unused receipt path. The default `agent` command still chooses
+a path automatically.
+
+Existing scripts using `agent --receipt PATH` can read a saved receipt. On a
+missing path they must use `--save-receipt PATH` to request creation, or use
+the existing explicit-ID form `agent --operation-id ID --receipt PATH`, which
+creates the receipt if missing and checks its operation ID if present.
 
 <details>
 <summary>Inspect by operation ID and digest</summary>

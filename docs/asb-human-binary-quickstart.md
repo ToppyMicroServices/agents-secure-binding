@@ -95,8 +95,9 @@ has not been confirmed and needs a status check.
 
 Press Ctrl+C to stop the service. `demo` keeps keys, decisions, and recovery
 receipts in `.asb-human`; protect that directory and the login link. Each new
-`demo` run keeps the history and creates a new proposal. Use the recovery
-instructions in the guide below if you need to resume an interrupted proposal.
+`demo` run keeps the history and creates a new proposal. To resume an
+interrupted proposal, use the original receipt path printed by the Agent
+and follow [Recover an interrupted proposal](https://github.com/ToppyMicroServices/agents-secure-binding/blob/main/docs/local-human-approval.md#recover-an-interrupted-proposal).
 
 ## Preview limits
 
