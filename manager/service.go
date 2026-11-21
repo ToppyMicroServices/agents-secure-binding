@@ -282,13 +282,17 @@ func (ms *managerService) armExpiry(state qemu.VMState) {
 		return
 	}
 	ms.ttlManager.SetTTL(state.ID, time.Until(state.ExpiresAt), func() {
-		if err := ms.RemoveVM(context.Background(), state.ID); err != nil && !stderrors.Is(err, ErrNotFound) {
+		if err := ms.removeVM(state.ID); err != nil && !stderrors.Is(err, ErrNotFound) {
 			ms.logger.Error("Failed to remove VM after TTL expiry", "vmID", state.ID, "error", err)
 		}
 	})
 }
 
-func (ms *managerService) RemoveVM(ctx context.Context, computationID string) error {
+func (ms *managerService) RemoveVM(_ context.Context, computationID string) error {
+	return ms.removeVM(computationID)
+}
+
+func (ms *managerService) removeVM(computationID string) error {
 	ms.mu.Lock()
 	defer ms.mu.Unlock()
 

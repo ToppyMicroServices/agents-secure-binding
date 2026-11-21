@@ -4,6 +4,7 @@
 package qemu
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"os"
@@ -68,7 +69,7 @@ func processIdentityFromFD(pid, fd int) (ProcessIdentity, error) {
 	}
 	// The second field, comm, can contain spaces and parentheses. Everything
 	// following its last closing parenthesis starts at field 3 (state).
-	end := strings.LastIndexByte(string(stat), ')')
+	end := bytes.LastIndexByte(stat, ')')
 	if end < 0 {
 		return ProcessIdentity{}, errors.New("malformed proc stat record")
 	}
