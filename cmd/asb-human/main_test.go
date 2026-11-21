@@ -177,8 +177,11 @@ func TestResumeRequiresExistingReceipt(t *testing.T) {
 		})
 	}
 	for _, args := range [][]string{
-		{commandResume}, {commandResume, "--receipt="}, {commandAgent, "--receipt="},
-		{commandAgent, "--save-receipt="}, {commandAgent, "--receipt", path, "--save-receipt", path},
+		{commandResume},
+		{commandResume, "--receipt="},
+		{commandAgent, "--receipt="},
+		{commandAgent, "--save-receipt="},
+		{commandAgent, "--receipt", path, "--save-receipt", path},
 	} {
 		if err := run(t.Context(), append(args, "--data-dir", dir), io.Discard, io.Discard); err == nil {
 			t.Fatalf("invalid receipt flags accepted: %q", args)
