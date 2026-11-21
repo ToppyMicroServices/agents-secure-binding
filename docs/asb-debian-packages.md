@@ -198,7 +198,14 @@ not protect a fresh client from such a replay.
 
 The Debian workflow builds `0.1.0~preview.1-1` from the previous merged revision
 `b8fd28939a7385a1dab66317d085d58755df0209`, using that revision's builder in a
-separate clean checkout. It builds `0.1.0~preview.1-2` from the candidate checkout.
+separate clean checkout. It builds the requested Debian version from the
+candidate checkout, with `2.0.0~rc.3-2` as the default for the Go 1.26.11 update.
+For versions newer than the published `2.0.0~rc.3-1`, CI also installs the
+four packages from that release's SHA-256-pinned archive, submits an OFF
+proposal and runs `apt-get upgrade`. The upgraded executable must resume
+the same pending proposal using its original receipt. To run this check
+locally, add `--published-rc3-archive /path/to/asb-apt-site.tar` to the
+command below.
 The gate requires the initial commit to be an ancestor of the candidate, distinct
 source trees, matching package provenance and different Human executable hashes.
 Both candidates must pass their Linux package lifecycle checks before the

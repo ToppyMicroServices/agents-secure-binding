@@ -359,6 +359,10 @@ func newSoftwareOnlyE2EFixture(t *testing.T) *e2eFixture {
 }
 
 func newE2EFixtureForMode(t *testing.T, softwareOnly bool) *e2eFixture {
+	return newE2EFixtureWithHandler(t, softwareOnly, nil)
+}
+
+func newE2EFixtureWithHandler(t *testing.T, softwareOnly bool, configure func(Application) http.Handler) *e2eFixture {
 	t.Helper()
 	now := time.Date(2026, time.August, 3, 3, 0, 0, 0, time.UTC)
 	managerPublic, managerPrivate := generateEd25519(t)
@@ -419,7 +423,11 @@ func newE2EFixtureForMode(t *testing.T, softwareOnly bool) *e2eFixture {
 	} else {
 		app.Profile = profile
 	}
-	server := httptest.NewUnstartedServer(app)
+	var handler http.Handler = app
+	if configure != nil {
+		handler = configure(app)
+	}
+	server := httptest.NewUnstartedServer(handler)
 	server.TLS = &tls.Config{
 		ClientAuth: tls.RequireAndVerifyClientCert,
 		ClientCAs:  clientCAPool,
@@ -462,8 +470,19 @@ func (f *e2eFixture) dial(t *testing.T) *e2eSession {
 }
 
 func (f *e2eFixture) headers(t *testing.T, session *e2eSession, change ChangeRequest, mutateAttestation func(*production.AttestationResult)) http.Header {
+	return f.actionHeaders(t, session, change, false, mutateAttestation)
+}
+
+func (f *e2eFixture) actionHeaders(t *testing.T, session *e2eSession, change ChangeRequest, outcome bool, mutateAttestation func(*production.AttestationResult)) http.Header {
 	t.Helper()
 	actionContext, err := CanonicalActionContext(change)
+	policy := ExpectedPolicy(change, e2eExpectedAgent)
+	grantID := "grant-change-0001"
+	if outcome {
+		actionContext, err = CanonicalOutcomeContext(change)
+		policy = ExpectedOutcomePolicy(change, e2eExpectedAgent)
+		grantID = "grant-outcome-0001"
+	}
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -479,25 +498,24 @@ func (f *e2eFixture) headers(t *testing.T, session *e2eSession, change ChangeReq
 	}
 	binding.IssuedAt = f.now.Add(-30 * time.Second)
 	binding.ExpiresAt = f.now.Add(90 * time.Second)
-	resource := "config://" + change.Tenant + "/" + change.Setting
 	grant := signE2EJWT(t, f.managerPrivate, e2eManagerKeyID, jwt.MapClaims{
 		"iss":                   e2eManagerIssuer,
 		"sub":                   e2eExpectedAgent,
 		"aud":                   e2eAudience,
-		"jti":                   "grant-change-0001",
+		"jti":                   grantID,
 		"iat":                   f.now.Add(-time.Minute).Unix(),
 		"exp":                   f.now.Add(5 * time.Minute).Unix(),
 		"profile_type":          clients.TokenTypeIdentityGrant,
 		"profile_version":       clients.ProfileVersion,
 		"cnf":                   map[string]string{"kid": e2eAgentKeyID},
-		"service":               "protected-change",
-		"agent":                 e2eExpectedAgent,
-		"task_id":               change.ChangeID,
-		"intent_ref":            "change:intent:apply",
-		"capability_ref":        "change:capability:write",
-		"scopes":                []string{"change.write"},
-		"resources":             []string{resource},
-		"authorization_details": []string{"change:set-enabled"},
+		"service":               policy.Expected.Service,
+		"agent":                 policy.Expected.Agent,
+		"task_id":               policy.Expected.TaskID,
+		"intent_ref":            policy.Expected.IntentRef,
+		"capability_ref":        policy.Expected.CapabilityRef,
+		"scopes":                policy.Expected.Scopes,
+		"resources":             policy.Expected.Resources,
+		"authorization_details": policy.Expected.AuthorizationDetails,
 	})
 	sessionClaims := jwt.MapClaims{
 		"iss":                    e2eAgentIssuer,

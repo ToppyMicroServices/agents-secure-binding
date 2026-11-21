@@ -87,8 +87,9 @@ func requireSetting(t *testing.T, response Response, enabled bool, revision uint
 }
 
 func TestInboxKeepsOldPendingVisibleAndReportsFullQueue(t *testing.T) {
+	const oldestID = "oldest"
 	store := openTestStore(t, filepath.Join(t.TempDir(), "state.sqlite"))
-	_, oldest := executeStore(t, store, testProposal("oldest", true, 0), ActorAgent, "oldest")
+	_, oldest := executeStore(t, store, testProposal(oldestID, true, 0), ActorAgent, oldestID)
 	for i := 0; i <= maxInboxOperations; i++ {
 		id := fmt.Sprintf("history-%03d", i)
 		created := storeTestTime.Add(time.Duration(i+1) * time.Millisecond)
@@ -104,7 +105,7 @@ func TestInboxKeepsOldPendingVisibleAndReportsFullQueue(t *testing.T) {
 		return response
 	}
 	response := inbox("inbox-history")
-	if response.Inbox.Pending != 1 || response.Inbox.Total != maxInboxOperations+2 || response.Operations[0].OperationID != "oldest" || response.Operations[1].OperationID != "history-100" {
+	if response.Inbox.Pending != 1 || response.Inbox.Total != maxInboxOperations+2 || response.Operations[0].OperationID != oldestID || response.Operations[1].OperationID != "history-100" {
 		t.Fatalf("new history hid pending work or counts are wrong: %+v", response.Inbox)
 	}
 	for i := 0; i < maxInboxOperations; i++ {
@@ -114,13 +115,34 @@ func TestInboxKeepsOldPendingVisibleAndReportsFullQueue(t *testing.T) {
 		executeStore(t, store, testProposal(id, true, 0), ActorAgent, id)
 	}
 	response = inbox("inbox-backlog")
-	if response.Inbox.Pending != maxInboxOperations+1 || response.Operations[0].OperationID != "oldest" || response.Operations[maxInboxOperations-1].OperationID != "pending-098" {
+	if response.Inbox.Pending != maxInboxOperations+1 || response.Operations[0].OperationID != oldestID || response.Operations[maxInboxOperations-1].OperationID != "pending-098" {
 		t.Fatal("pending queue must expose its oldest items and full count")
 	}
 	executeStore(t, store, testDecision("deny-oldest", KindDecline, *oldest.Operation), ActorGateway, "deny-oldest")
 	response = inbox("inbox-drained")
 	if response.Inbox.Pending != maxInboxOperations || response.Operations[0].OperationID != "pending-000" || response.Operations[maxInboxOperations-1].OperationID != "pending-099" {
 		t.Fatal("reviewing the oldest proposal must expose the next pending item")
+	}
+	if len(response.History) != maxInboxOperations || response.History[0].OperationID != oldestID || response.History[0].State != StateDenied {
+		t.Fatal("the newly decided oldest proposal must remain visible despite a full pending window")
+	}
+	if response.Capacity == nil || response.Capacity.Operations != 2*maxInboxOperations+2 || response.Capacity.Pending != maxInboxOperations || response.Capacity.OperationLimit != maxProposalRecords {
+		t.Fatalf("inbox capacity = %+v", response.Capacity)
+	}
+	_, page := executeStore(t, store, Command{CommandID: "history-page-two", Kind: KindInbox, HistoryOffset: maxInboxOperations}, ActorGateway, "history-page-two")
+	if len(page.History) != 2 || page.Inbox.HistoryOffset != maxInboxOperations || page.Inbox.HistoryLimit != maxInboxOperations {
+		t.Fatalf("older history page = %+v, records=%d", page.Inbox, len(page.History))
+	}
+	seen := map[string]bool{}
+	for _, operation := range append(response.History, page.History...) {
+		if seen[operation.OperationID] {
+			t.Fatal("history pagination repeated an operation")
+		}
+		seen[operation.OperationID] = true
+	}
+	_, exact := executeStore(t, store, testStatus(*oldest.Operation), ActorGateway, "oldest-exact")
+	if exact.Operation.State != StateDenied {
+		t.Fatal("exact lookup did not preserve the decision")
 	}
 }
 
@@ -553,7 +575,7 @@ func TestStoreProposalLimitReservesDecisionsAndAllowsRecovery(t *testing.T) {
 		}
 	}
 	_, err := store.Execute(context.Background(), testProposal("over-limit", true, 0), testStoreAuth(ActorAgent, "over-limit-proof"))
-	if !errors.Is(err, ErrUnavailable) {
+	if !errors.Is(err, ErrCapacity) {
 		t.Fatalf("proposal admission limit error = %v", err)
 	}
 	// Exercise the ordinary command path at the actual configured limit. Every

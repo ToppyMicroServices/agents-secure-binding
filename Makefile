@@ -7,12 +7,16 @@ HUMAN_COORDINATION_REDTEAM_PKGS = ./internal/strictjson ./pkg/actionlifecycle ./
 HUMAN_COORDINATION_PKGS = $(HUMAN_COORDINATION_REDTEAM_PKGS) ./examples/human-coordination-e2e
 HUMAN_COORDINATION_FUZZTIME ?= 2m
 CGO_ENABLED ?= 0
-GOARCH ?= amd64
+GOOS ?= $(shell go env GOOS)
+GOARCH ?= $(shell go env GOARCH)
 A2A_GOOS ?= $(shell go env GOOS)
 A2A_GOARCH ?= $(shell go env GOARCH)
-VERSION ?= $(shell git describe --abbrev=0 --tags --always)
-A2A_VERSION ?= $(shell git describe --tags --always --dirty)
-COMMIT ?= $(shell git rev-parse HEAD)
+# Local builds need no Git metadata. Release callers can supply these values
+# and opt into Go's VCS stamping with GO_BUILD_FLAGS=-buildvcs=true.
+VERSION ?= dev
+A2A_VERSION ?= $(VERSION)
+COMMIT ?= unknown
+GO_BUILD_FLAGS ?= -buildvcs=false
 TIME ?= $(shell date +%F_%T)
 EMBED_ENABLED ?= 0
 INSTALL_DIR ?= /usr/local/bin
@@ -25,12 +29,12 @@ GOVULNCHECK ?= go run golang.org/x/vuln/cmd/govulncheck@latest
 
 define compile_service
 	CGO_ENABLED=$(CGO_ENABLED) GOOS=$(GOOS) GOARCH=$(GOARCH) GOARM=$(GOARM) \
-	go build -ldflags "-s -w" \
+	go build $(GO_BUILD_FLAGS) -ldflags "-s -w" \
 	$(if $(filter 1,$(EMBED_ENABLED)),-tags "embed",) \
 	-o ${BUILD_DIR}/agents-secure-binding-$(1) ./cmd/$(1)
 endef
 
-.PHONY: all $(SERVICES) a2a-test mac-debug-a2a install install-a2a-test clean product-security-gate fuzz-smoke \
+.PHONY: all $(SERVICES) build-igvm a2a-test mac-debug-a2a install install-a2a-test clean product-security-gate fuzz-smoke \
 	test-asb-core test-attestation-modules check-asb-core-boundary \
 	check-attestation-v2-boundary check-attestation-v2-release \
 	check-attestation-release check-cocos-release human-coordination-gate \
@@ -40,12 +44,11 @@ all: $(SERVICES)
 
 $(SERVICES): 
 	$(call compile_service,$@)
-	@if [ "$@" = "cli" ] || [ "$@" = "manager" ]; then $(MAKE) build-igvm; fi
 
 a2a-test:
 	@mkdir -p $(BUILD_DIR)
 	CGO_ENABLED=$(CGO_ENABLED) GOOS=$(A2A_GOOS) GOARCH=$(A2A_GOARCH) \
-	go build -ldflags "-s -w -X main.version=$(A2A_VERSION) -X main.commit=$(COMMIT)" \
+	go build $(GO_BUILD_FLAGS) -ldflags "-s -w -X main.version=$(A2A_VERSION) -X main.commit=$(COMMIT)" \
 	-o $(BUILD_DIR)/asb-a2a-test ./examples/a2a-multiprocess
 
 mac-debug-a2a: a2a-test
@@ -53,7 +56,7 @@ mac-debug-a2a: a2a-test
 
 mac-human-coordination-e2e:
 	@mkdir -p build/human-coordination-e2e
-	GOWORK=off go run ./examples/human-coordination-e2e --debug-simple --report build/human-coordination-e2e/evidence.json
+	GOWORK=off go run $(GO_BUILD_FLAGS) ./examples/human-coordination-e2e --debug-simple --report build/human-coordination-e2e/evidence.json
 
 protoc:
 	protoc -I. --go_out=. --go_opt=paths=source_relative --go-grpc_out=. --go-grpc_opt=paths=source_relative agent/agent.proto
@@ -93,8 +96,8 @@ install_service:
 	sudo systemctl daemon-reload
 
 build-igvm:
-	@echo "Running build script for igvmmeasure..."
-	@$(IGVM_BUILD_SCRIPT)
+	@IGVM_SOURCE_DIR="$(IGVM_SOURCE_DIR)" IGVM_SOURCE_REVISION="$(IGVM_SOURCE_REVISION)" \
+		IGVM_OUTPUT_DIR="$(abspath $(BUILD_DIR))" $(IGVM_BUILD_SCRIPT)
 
 product-security-gate:
 	go mod verify

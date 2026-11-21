@@ -67,6 +67,14 @@ and revocation lifecycle. The current approval does not assert a tested backup.
 
 ## Prepare and review
 
+For the Go 1.26.11 update, qualify Debian version `2.0.0~rc.3-2` from the
+merged source. The published `2.0.0~rc.3-1` Human executable was built with
+Go 1.26.10. Monthly signing preserves its package bytes, so use the new-payload
+procedure below. On the release commit, run **ASB Debian distribution** with
+`package_version=2.0.0~rc.3-2` and the existing package maintainer. Check the
+upgrade from the published packages and the candidate executable inventories
+in the successful Linux run before selecting its run ID.
+
 Use the manual **ASB unsigned apt release preparation** workflow on `main` to
 prepare fresh metadata from an existing successful **ASB Debian distribution**
 run. Supply that run's numeric ID and its full source commit:
@@ -146,6 +154,18 @@ After HTTPS byte verification, an isolated APT client fetches the published
 index using the generated source and verifies the four expected package
 versions. It preserves APT's signature and date checks, installs no packages,
 and records its log and result with the publication evidence.
+
+When adopting a new package version, give the signed site archive a new
+`apt-preview-...` Preview release tag outside the `apt-preview-renewal-...`
+namespace. For monthly renewals to serve the new binaries, review a change to
+`packaging/debian/apt-renewal.json` using that immutable release's tag, asset
+size and SHA-256, the qualified source commit, the Debian version, and the
+payload digest of the verified manifest (`payload_digest` in
+`scripts/renew-asb-apt.py`). The payload digest excludes `created` and
+`expires`; the full manifest hash is a different value. Coordinate the policy
+change and Pages deployment before signing any further monthly requests.
+After both land, run `renew-asb-apt.py prepare` into a fresh directory and
+confirm its signing plan names the new version, source and payload digest.
 
 Finally, inspect the rendered page and retain the workflow ID, archive hash,
 public fingerprint, source commit and HTTPS evidence. The workflow does not

@@ -91,7 +91,7 @@ func TestListenerConflictNamesThePortAndRecoveryFlag(t *testing.T) {
 func TestReceiptPreservesProposalAcrossLostResponse(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "proposal.json")
-	cfg := agentOptions{dir: dir, receipt: path, operationID: "restart-case", enabled: true, poll: 50 * time.Millisecond}
+	cfg := agentOptions{dir: dir, saveReceipt: path, enabled: false, poll: 50 * time.Millisecond}
 	var initial []byte
 	var firstCalls []string
 	first := func(_ context.Context, command humanapp.Command) ([]byte, error) {
@@ -114,7 +114,7 @@ func TestReceiptPreservesProposalAcrossLostResponse(t *testing.T) {
 		return nil, errors.New("response connection lost")
 	}
 	err := runAgent(context.Background(), cfg, first, io.Discard)
-	if err == nil || !strings.Contains(err.Error(), "outcome unknown") || !strings.Contains(err.Error(), "inspect --receipt "+quoteReceiptPath(path, runtime.GOOS)) {
+	if err == nil || !strings.Contains(err.Error(), "outcome unknown") || !strings.Contains(err.Error(), "inspect --receipt "+quoteReceiptPath(path, runtime.GOOS)) || !strings.Contains(err.Error(), "resume --receipt "+quoteReceiptPath(path, runtime.GOOS)) {
 		t.Fatalf("missing recovery direction: %v", err)
 	}
 	if strings.Join(firstCalls, ",") != "INBOX,PROPOSE" {
@@ -145,7 +145,7 @@ func TestReceiptPreservesProposalAcrossLostResponse(t *testing.T) {
 		}
 		return responseForTest(t, command, digest, state), nil
 	}
-	cfg.operationID, cfg.wait = "", true
+	cfg = agentOptions{receipt: path, enabled: true, wait: true, poll: 50 * time.Millisecond}
 	if err := runAgent(context.Background(), cfg, retry, io.Discard); err != nil {
 		t.Fatal(err)
 	}
@@ -155,6 +155,68 @@ func TestReceiptPreservesProposalAcrossLostResponse(t *testing.T) {
 	after, _, err := readReceipt(path)
 	if err != nil || !bytes.Equal(initial, after.Command) {
 		t.Fatal("recovery modified the receipt")
+	}
+}
+
+func TestResumeRequiresExistingReceipt(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "private-state")
+	if err := humanapp.Initialize(dir); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "mistyped.json")
+	for _, name := range []string{commandResume, commandAgent} {
+		t.Run(name, func(t *testing.T) {
+			var out bytes.Buffer
+			err := run(t.Context(), []string{name, "--data-dir", dir, "--receipt", path, "--wait"}, &out, io.Discard)
+			if !errors.Is(err, os.ErrNotExist) || !strings.Contains(err.Error(), "no proposal submitted") || out.Len() != 0 {
+				t.Fatalf("missing receipt: err=%v, stdout=%q", err, out.String())
+			}
+			if _, err := os.Lstat(path); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("unexpected receipt after recovery: %v", err)
+			}
+		})
+	}
+	for _, args := range [][]string{
+		{commandResume},
+		{commandResume, "--receipt="},
+		{commandAgent, "--receipt="},
+		{commandAgent, "--save-receipt="},
+		{commandAgent, "--receipt", path, "--save-receipt", path},
+	} {
+		if err := run(t.Context(), append(args, "--data-dir", dir), io.Discard, io.Discard); err == nil {
+			t.Fatalf("invalid receipt flags accepted: %q", args)
+		}
+	}
+}
+
+func TestSaveReceiptDoesNotSubmitAnotherProposalAtSamePath(t *testing.T) {
+	for _, alreadyExists := range []bool{false, true} {
+		t.Run(fmt.Sprintf("exists-before-start=%t", alreadyExists), func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "receipt.json")
+			other := proposalForTest("another-proposal", 7)
+			if alreadyExists {
+				if err := saveReceipt(path, other); err != nil {
+					t.Fatal(err)
+				}
+			}
+			err := runAgent(t.Context(), agentOptions{saveReceipt: path}, func(_ context.Context, command humanapp.Command) ([]byte, error) {
+				if alreadyExists || command.Kind != humanapp.KindInbox {
+					t.Fatalf("unexpected request: %v", command.Kind)
+				}
+				// A concurrent creator saves its proposal after the initial path check.
+				if err := saveReceipt(path, other); err != nil {
+					t.Fatal(err)
+				}
+				return responseForTest(t, command, "", ""), nil
+			}, io.Discard)
+			if err == nil {
+				t.Fatal("expected a new-path conflict")
+			}
+			_, saved, err := readReceipt(path)
+			if err != nil || saved.CommandID != other.CommandID {
+				t.Fatalf("original receipt changed: %v", err)
+			}
+		})
 	}
 }
 
@@ -336,6 +398,24 @@ func TestInspectionDistinguishesMissingOperationFromUnavailableStatus(t *testing
 	}
 }
 
+func TestAgentCapacityRejectionPreservesReceiptWithoutUnknownOutcome(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "receipt.json")
+	command := proposalForTest("capacity", 0)
+	if err := saveReceipt(path, command); err != nil {
+		t.Fatal(err)
+	}
+	err := runAgent(t.Context(), agentOptions{receipt: path}, func(context.Context, humanapp.Command) ([]byte, error) {
+		return nil, humanapp.ErrCapacity
+	}, io.Discard)
+	if !errors.Is(err, humanapp.ErrCapacity) || strings.Contains(err.Error(), "outcome unknown") || !strings.Contains(err.Error(), "storage-status") || !strings.Contains(err.Error(), "rollover") {
+		t.Fatalf("capacity guidance = %v", err)
+	}
+	_, recovered, readErr := readReceipt(path)
+	if readErr != nil || recovered.CommandID != command.CommandID {
+		t.Fatalf("receipt not preserved: %v", readErr)
+	}
+}
+
 func TestReceiptNeverOverwritesAndRejectsConflictingFlags(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "receipt.json")
 	command := proposalForTest("exclusive", 4)
@@ -421,7 +501,7 @@ func TestCanceledWaitLeavesRecoverableReceipt(t *testing.T) {
 		cancel()
 		return responseForTest(t, command, digest, humanapp.StatePending), nil
 	}
-	err := runAgent(ctx, agentOptions{dir: dir, receipt: path, enabled: true, wait: true, poll: 50 * time.Millisecond}, execute, io.Discard)
+	err := runAgent(ctx, agentOptions{dir: dir, saveReceipt: path, enabled: true, wait: true, poll: 50 * time.Millisecond}, execute, io.Discard)
 	if err == nil || !strings.Contains(err.Error(), "outcome unknown") {
 		t.Fatalf("wait error: %v", err)
 	}
@@ -596,7 +676,7 @@ func TestCommandProcessesRecoverApprovalAfterRestart(t *testing.T) {
 	server.cancel()
 	server.wait(t, false)
 	_, address = startServer()
-	resumed := startCommand(t, executable, "agent", "--data-dir", dir, "--core-address", address, "--receipt", path, "--wait", "--poll-interval", "50ms")
+	resumed := startCommand(t, executable, "resume", "--data-dir", dir, "--core-address", address, "--receipt", path, "--wait", "--poll-interval", "50ms")
 	resumed.next(t, "proposal_saved")
 	resumed.next(t, "operation")
 	receipt, original, err := readReceipt(path)

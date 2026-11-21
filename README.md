@@ -44,7 +44,7 @@ profile requirements.
 | What do you want to do? | Where to start |
 | --- | --- |
 | Integrate the supported Direct-Agent verifier in a Go service | Use the [v1.1.1 release](https://github.com/ToppyMicroServices/agents-secure-binding/releases/tag/v1.1.1) and its [supported APIs](docs/API_COMPATIBILITY.md). |
-| Try the local approval app | `asb-human` is an experimental preview introduced in v2.0.0-rc.3. [Download and verify a build for your computer](docs/asb-human-binary-quickstart.md), or build the current source below. |
+| Try the local approval app | `asb-human` is an experimental preview introduced in v2.0.0-rc.3. [Download and verify a release or CI build for your computer](docs/asb-human-binary-quickstart.md#get-an-executable), or build the current source below. |
 
 To build from source, install [Go 1.26.11](https://go.dev/doc/install).
 If you already have this source checkout, open a terminal in its root. To get
@@ -57,6 +57,7 @@ cd agents-secure-binding
 
 The first run downloads Go dependencies and compiles the app. Later runs reuse
 the build cache. The browser UI and SQLite are included in the executable.
+You can use the demo without Docker, dedicated hardware or a model account.
 
 ### Check that it works
 
@@ -78,8 +79,9 @@ assurance or a person's identity.
 | macOS or Linux | `go run ./cmd/asb-human demo --data-dir ./.asb-human` |
 | Windows PowerShell | `go run ./cmd/asb-human demo` |
 
-Open the login file named in the terminal. Copy its single-use link into a browser
-on the same computer. A separate Agent process
+In this source version, open the login file named in the terminal and copy its
+single-use link into a browser on the same computer. The released v2.0.0-rc.3
+executable prints its private link directly. A separate Agent process
 proposes changing the app's own `maintenance_mode` setting. Review the before
 and after values in the browser, then choose a decision:
 
@@ -95,9 +97,10 @@ request has not been confirmed and requires a status check.
 The Agent prints the result. Press Ctrl+C to stop the service; the decision,
 setting, and recovery receipts remain in the data directory shown at startup.
 The Windows command uses your per-user `%AppData%\asb-human` directory. The browser UI is shared
-across the macOS, Linux, and Windows builds. Native macOS checks in the
+across the macOS, Linux, and Windows builds. All three platforms run in the
 [runtime workflow](https://github.com/ToppyMicroServices/agents-secure-binding/actions/workflows/human-approval.yaml)
-run only when started manually. Check the results for the commit you use. This
+on relevant pushes and pull requests (a `ci:linux-only` PR label explicitly limits a run).
+Check the runtime and artifact results for the commit you use. This
 is a one-host, one-user preview, not a general TaskCoord production service.
 `demo` chooses free ports automatically; always use the link from the current run.
 

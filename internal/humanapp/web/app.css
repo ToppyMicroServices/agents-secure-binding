@@ -5,3 +5,4 @@
 @media(prefers-reduced-motion:reduce){*{transition:none!important;scroll-behavior:auto!important}}
 .state-tag.no-change{background:#edf0f3;color:#526574}.operation-actions>div{flex-wrap:wrap;justify-content:flex-end;flex-shrink:0}.operation-actions>p{max-width:380px}
 @media(max-width:800px){.operation-actions{align-items:stretch;flex-direction:column}.operation-actions>p{max-width:none}}
+.storage-status{padding:20px 24px;margin-bottom:24px}.storage-status h2{font-size:1rem}.storage-status summary{cursor:pointer;font-size:.78rem;margin-top:10px}.storage-status details p{margin-top:9px}.history-navigation{display:flex;flex-wrap:wrap;gap:9px;margin:13px 0 18px}#reviewed-list{margin-top:14px}

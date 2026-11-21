@@ -225,6 +225,9 @@ func (s *CoreServer) execute(r *http.Request, actor string, envelope executeEnve
 		}
 		accepted, err := profile.Verify(ctx, production.SoftwareOnlyVerifyRequest{GrantJWT: envelope.GrantJWT, SessionBindingJWT: envelope.SessionJWT, ExpectedBinding: binding})
 		if err != nil {
+			if errors.Is(err, ErrCapacity) {
+				return production.AcceptedIdentity{}, ErrCapacity
+			}
 			if errors.Is(err, ErrUnavailable) {
 				return production.AcceptedIdentity{}, ErrUnavailable
 			}
@@ -255,6 +258,8 @@ func writeAPIError(w http.ResponseWriter, err error) {
 		status, code, message = http.StatusNotFound, "NOT_FOUND", ErrNotFound.Error()
 	case errors.Is(err, ErrConflict):
 		status, code, message = http.StatusConflict, "CONFLICT", ErrConflict.Error()
+	case errors.Is(err, ErrCapacity):
+		status, code, message = http.StatusInsufficientStorage, "CAPACITY_EXCEEDED", ErrCapacity.Error()
 	}
 	writeJSONResponse(w, status, struct {
 		Code    string `json:"code"`
@@ -406,6 +411,14 @@ func (c *Client) exchange(conn net.Conn, reader *bufio.Reader, path string, payl
 			return nil, ErrNotFound
 		case http.StatusConflict:
 			return nil, ErrConflict
+		case http.StatusInsufficientStorage:
+			var failure struct {
+				Code string `json:"code"`
+			}
+			if json.Unmarshal(body, &failure) == nil && failure.Code == "CAPACITY_EXCEEDED" {
+				return nil, ErrCapacity
+			}
+			return nil, ErrUnavailable
 		default:
 			return nil, ErrUnavailable
 		}

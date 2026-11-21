@@ -43,6 +43,43 @@ class VMHarnessGuards(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     vm.read_json(path)
 
+    def test_generated_guests_load_9p_before_required_mounts_on_every_boot(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            binary = root / "synthetic-binary"
+            binary.write_bytes(b"test fixture, never executed\n")
+            with patch.object(vm.os, "access", return_value=False):
+                lab = vm.Lab(root, binary)
+            # Generate the actual cloud-config without host network changes,
+            # external files, credentials, image creation, or guest execution.
+            with patch.object(lab, "run", return_value=b""), \
+                 patch.object(vm.shutil, "copy2"), patch.object(vm.shutil, "copyfile"), \
+                 patch.object(vm.subprocess, "Popen", side_effect=AssertionError("must not start a guest")), \
+                 patch.object(vm.subprocess, "check_output", side_effect=AssertionError("must not run host commands")):
+                lab.prepare_guests()
+            for role in vm.ROLES:
+                with self.subTest(role=role):
+                    cloud = json.loads((root / role / "user-data").read_text().split("\n", 1)[1])
+                    files = {entry["path"]: entry for entry in cloud["write_files"]}
+                    self.assertEqual(len(files), len(cloud["write_files"]))
+                    modules = files["/etc/modules-load.d/asb-vm-9p.conf"]
+                    self.assertEqual(modules["owner"], "root:root")
+                    self.assertEqual(modules["permissions"], "0644")
+                    self.assertEqual(modules["content"].splitlines(), ["9p", "9pnet", "9pnet_virtio"])
+                    mounts = {entry[1]: entry for entry in cloud["mounts"]}
+                    self.assertEqual(set(mounts), {"/mnt/asb-input", "/evidence"})
+                    for target, source, readonly in (("/mnt/asb-input", "asb-input", True), ("/evidence", "asb-evidence", False)):
+                        entry = mounts[target]
+                        self.assertEqual((entry[0], entry[2], entry[4:]), (source, "9p", ["0", "0"]))
+                        options = set(entry[3].split(","))
+                        self.assertTrue({"trans=virtio", "version=9p2000.L", "x-systemd.requires=systemd-modules-load.service"} <= options)
+                        self.assertEqual("ro" in options, readonly)
+                        self.assertFalse(options & {"nofail", "noauto", "x-systemd.automount"})
+                    unit = files["/etc/systemd/system/asb-vm.service"]["content"]
+                    self.assertIn("RequiresMountsFor=/evidence\n", unit)
+                    self.assertIn("Restart=no\n", unit)
+                    self.assertIn("bootstrap --sha256 " + vm.digest(binary), cloud["runcmd"][0][-1])
+
     def test_cleanup_continues_after_one_guest_fails_to_exit(self):
         lab = vm.Lab(Path("/nonexistent"), Path("/nonexistent/binary"))
         process = Mock()

@@ -57,6 +57,7 @@ var (
 	ErrNotFound       = errors.New("operation not found")
 	ErrUnauthorized   = errors.New("authentication or authorization failed")
 	ErrUnavailable    = errors.New("outcome unknown; inspect before retrying")
+	ErrCapacity       = errors.New("storage capacity reached; no change committed")
 	identifierPattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$`)
 	digestPattern     = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 )
@@ -71,6 +72,7 @@ type Command struct {
 	Change           *protectedchange.ChangeRequest `json:"change,omitempty"`
 	ExpectedRevision uint64                         `json:"expected_revision"`
 	ProposalDigest   string                         `json:"proposal_digest,omitempty"`
+	HistoryOffset    int                            `json:"history_offset,omitempty"`
 }
 
 type Setting struct {
@@ -96,20 +98,24 @@ type Operation struct {
 }
 
 type Response struct {
-	CommandID  string        `json:"command_id"`
-	Operation  *Operation    `json:"operation,omitempty"`
-	Operations []Operation   `json:"operations,omitempty"`
-	Setting    *Setting      `json:"setting,omitempty"`
-	Inbox      *InboxSummary `json:"inbox,omitempty"`
+	CommandID  string         `json:"command_id"`
+	Operation  *Operation     `json:"operation,omitempty"`
+	Operations []Operation    `json:"operations,omitempty"`
+	Setting    *Setting       `json:"setting,omitempty"`
+	Inbox      *InboxSummary  `json:"inbox,omitempty"`
+	History    []Operation    `json:"history"`
+	Capacity   *StoreCapacity `json:"capacity,omitempty"`
 }
 
 // InboxSummary distinguishes the whole queue from its bounded display window.
 // Pending operations take priority, oldest first, so newer history cannot hide
 // work still awaiting review. These fields are local application metadata.
 type InboxSummary struct {
-	Pending int `json:"pending"`
-	Total   int `json:"total"`
-	Limit   int `json:"limit"`
+	Pending       int `json:"pending"`
+	Total         int `json:"total"`
+	Limit         int `json:"limit"`
+	HistoryOffset int `json:"history_offset"`
+	HistoryLimit  int `json:"history_limit"`
 }
 
 // Authenticator must verify fresh, exact ASB evidence using the supplied
@@ -121,10 +127,13 @@ func (c Command) Validate() error {
 		return ErrInvalid
 	}
 	if c.Kind == KindInbox {
-		if c.OperationID != "" || c.Change != nil || c.ExpectedRevision != 0 || c.ProposalDigest != "" {
+		if c.OperationID != "" || c.Change != nil || c.ExpectedRevision != 0 || c.ProposalDigest != "" || c.HistoryOffset < 0 || c.HistoryOffset > maxProposalRecords {
 			return ErrInvalid
 		}
 		return nil
+	}
+	if c.HistoryOffset != 0 {
+		return ErrInvalid
 	}
 	if !identifierPattern.MatchString(c.OperationID) {
 		return ErrInvalid
