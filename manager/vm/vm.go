@@ -4,6 +4,7 @@ package vm
 
 import (
 	"log/slog"
+	"os"
 
 	pkgmanager "github.com/ToppyMicroServices/agents-secure-binding/v2/pkg/manager"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -18,6 +19,12 @@ type VM interface {
 	Transition(newState pkgmanager.ManagerState) error
 	State() string
 	GetConfig() any
+}
+
+// Restorable takes ownership of a verified kernel process handle on success.
+type Restorable interface {
+	VM
+	SetVerifiedProcess(*os.Process) error
 }
 
 type Provider func(config any, computationId string, logger *slog.Logger) VM

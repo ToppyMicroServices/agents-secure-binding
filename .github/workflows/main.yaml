@@ -32,7 +32,7 @@ jobs:
       - name: Install Go
         uses: actions/setup-go@v5
         with:
-          go-version: 1.26.10
+          go-version: 1.26.11
 
       - name: Verify module downloads
         run: go mod verify
@@ -57,10 +57,10 @@ jobs:
       - name: Install Go
         uses: actions/setup-go@v5
         with:
-          go-version: 1.26.10
+          go-version: 1.26.11
 
       - name: Run macOS debug A2A integration
-        run: GOTOOLCHAIN=go1.26.10+auto make mac-debug-a2a
+        run: GOTOOLCHAIN=go1.26.11+auto make mac-debug-a2a
 
   mac-human-coordination-e2e:
     if: ${{ github.event_name == 'workflow_dispatch' && !inputs.linux_only }}
@@ -74,10 +74,10 @@ jobs:
       - name: Install Go
         uses: actions/setup-go@v5
         with:
-          go-version: 1.26.10
+          go-version: 1.26.11
 
       - name: Run macOS Human Coordination E2E
-        run: GOTOOLCHAIN=go1.26.10+auto make mac-human-coordination-e2e
+        run: GOTOOLCHAIN=go1.26.11+auto make mac-human-coordination-e2e
 
       - name: Validate Human Coordination evidence
         run: |
@@ -120,7 +120,7 @@ jobs:
       - name: Install Go
         uses: actions/setup-go@v5
         with:
-          go-version: 1.26.10
+          go-version: 1.26.11
 
       - name: Create coverage directory
         run: mkdir -p coverage
@@ -132,16 +132,16 @@ jobs:
       - name: Qualify nested PID namespace teardown
         if: matrix.module == 'agent'
         run: |
-          GOTOOLCHAIN=go1.26.10+auto go test -race -c -o /tmp/asb-process-containment.test ./agent/algorithm
+          GOTOOLCHAIN=go1.26.11+auto go test -race -c -o /tmp/asb-process-containment.test ./agent/algorithm
           sudo ASB_REQUIRE_NESTED_PID_NAMESPACE=1 /tmp/asb-process-containment.test \
             -test.v -test.timeout=60s -test.run '^TestContainedCommandDescendantLifetime$/^nested$/^(success|error|stop)$'
 
       - name: Run tests for ${{ matrix.module }}
         run: |
           if [[ "${{ matrix.module }}" == "manager" ]]; then
-            sudo GOTOOLCHAIN=go1.26.10+auto go test -v --race -covermode=atomic -coverprofile coverage/${{ matrix.module }}.out ./${{ matrix.module }}/...
+            sudo GOTOOLCHAIN=go1.26.11+auto go test -v --race -covermode=atomic -coverprofile coverage/${{ matrix.module }}.out ./${{ matrix.module }}/...
           else
-            GOTOOLCHAIN=go1.26.10+auto go test -v --race -covermode=atomic -coverprofile coverage/${{ matrix.module }}.out ./${{ matrix.module }}/...
+            GOTOOLCHAIN=go1.26.11+auto go test -v --race -covermode=atomic -coverprofile coverage/${{ matrix.module }}.out ./${{ matrix.module }}/...
           fi
 
       - name: Upload coverage artifact
@@ -183,7 +183,7 @@ jobs:
       - name: Install Go
         uses: actions/setup-go@v5
         with:
-          go-version: 1.26.10
+          go-version: 1.26.11
           cache-dependency-path: go.sum
 
       - name: Verify modules
@@ -191,7 +191,7 @@ jobs:
 
       - name: Run Direct-Agent security red-team tests
         run: |
-          GOTOOLCHAIN=go1.26.10+auto go test -v -race -count=1 \
+          GOTOOLCHAIN=go1.26.11+auto go test -v -race -count=1 \
             ./pkg/atls/identitypolicy \
             ./pkg/clients \
             ./pkg/production \
@@ -223,27 +223,27 @@ jobs:
           ASB_DISCOVERY_SOAK: "1"
           ASB_DISCOVERY_SOAK_DURATION: "30s"
         run: |
-          GOTOOLCHAIN=go1.26.10+auto go test -v -race -count=1 \
+          GOTOOLCHAIN=go1.26.11+auto go test -v -race -count=1 \
             ./pkg/agtp/discovery/peer -run '^TestPeerServiceSoak$'
 
       - name: Run protected-change consumer integration
         run: |
-          GOTOOLCHAIN=go1.26.10+auto go test -v -race -count=1 \
+          GOTOOLCHAIN=go1.26.11+auto go test -v -race -count=1 \
             ./examples/protected-change-consumer
 
       - name: Run discovery-backed agent interaction
         run: |
-          GOWORK=off GOTOOLCHAIN=go1.26.10+auto go test -v -race -count=1 \
+          GOWORK=off GOTOOLCHAIN=go1.26.11+auto go test -v -race -count=1 \
             ./examples/agtp-agent-interaction
 
       - name: Run v1 and draft-06 v2 A2A negative integration
         run: |
-          GOTOOLCHAIN=go1.26.10+auto go test -v -race -count=1 \
+          GOTOOLCHAIN=go1.26.11+auto go test -v -race -count=1 \
             ./examples/a2a-multiprocess
 
       - name: Run bounded fuzz smoke
         run: |
-          GOTOOLCHAIN=go1.26.10+auto go test -run '^$' \
+          GOTOOLCHAIN=go1.26.11+auto go test -run '^$' \
             -fuzz=FuzzVerifySessionIdentityJWTRejectsMalformedCompactTokens \
             -fuzztime=10s ./pkg/agtp
 

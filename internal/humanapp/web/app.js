@@ -1,13 +1,16 @@
 "use strict";
 
-// A fragment never reaches the HTTP server. Clear it before any request and
-// keep the login token only until its one POST; never persist it in storage.
-let fragmentToken = new URLSearchParams(window.location.hash.slice(1)).get("login");
-if (window.location.hash) window.history.replaceState(null, "", window.location.pathname + window.location.search);
+// A link can open a new document or change the fragment of this one.
+function takeLoginToken() {
+  const token = new URLSearchParams(window.location.hash.slice(1)).get("login");
+  if (token !== null) window.history.replaceState(null, "", window.location.pathname + window.location.search);
+  return token;
+}
 
 const element = (id) => document.getElementById(id);
 let csrf = "";
 let loggedIn = false;
+let authentication;
 let loading = false;
 let inboxGeneration = 0;
 let refreshQueued = false;
@@ -51,8 +54,8 @@ async function request(path, options = {}) {
     throw {message: "結果を読み取れません。一覧を更新して状態を確認してください。", outcome_unknown: options.method === "POST"};
   }
   if (!response.ok) {
-    if (response.status === 401 && generation === inboxGeneration) showLogin("セッションが終了しました。再度ログインしてください。");
-    throw body;
+    if (response.status === 401 && path !== "/api/session" && generation === inboxGeneration) showLogin("セッションが終了しました。再度ログインしてください。");
+    throw {...body, status: response.status};
   }
   return body;
 }
@@ -85,7 +88,9 @@ async function login(token) {
     await activateSession(await pending);
     element("login-message").textContent = "";
   } catch (error) {
-    element("login-message").textContent = error.message || "ログインできませんでした。";
+    element("login-message").textContent = error.status === 401
+      ? "このリンクを使用できません。起動時に案内されたファイルを開き直し、最新のURLを開いてください。"
+      : (error.status && error.message) || "ログインを確認できません。接続を確認して画面を再読み込みしてください。";
   } finally {
     token = "";
     element("login-token").value = "";
@@ -269,7 +274,19 @@ function openDecision(operation, decision) {
   element("cancel-decision").focus();
 }
 
-element("login-form").addEventListener("submit", async (event) => { event.preventDefault(); await login(element("login-token").value); });
+function queueLogin(token) {
+  // Session restoration and login both update the cookie-backed UI. Serialize
+  // them so a late response cannot replace a newer session or consume a link twice.
+  if (token) authentication = authentication.then(() => { if (!loggedIn) return login(token); });
+  return authentication;
+}
+element("login-form").addEventListener("submit", (event) => {
+  event.preventDefault();
+  const input = element("login-token");
+  const pending = queueLogin(input.value);
+  input.value = "";
+  return pending;
+});
 element("refresh-button").addEventListener("click", () => refreshInbox(true));
 element("cancel-decision").addEventListener("click", () => { if (!deciding) element("decision-dialog").close(); });
 element("decision-dialog").addEventListener("cancel", (event) => { if (deciding) event.preventDefault(); });
@@ -301,6 +318,7 @@ element("decision-form").addEventListener("submit", async (event) => {
     element("confirm-decision").disabled = false;
     element("cancel-decision").disabled = false;
     element("decision-dialog").close();
+    element(loggedIn ? "notice" : "login-token").focus();
     await refreshInbox();
   }
 });
@@ -310,17 +328,16 @@ element("logout-button").addEventListener("click", async () => {
   catch (error) { setNotice(error.message || "ログアウトできませんでした。", true); }
 });
 
-async function start() {
-  if (fragmentToken) {
-    const token = fragmentToken;
-    fragmentToken = null;
-    await login(token);
-    return;
-  }
-  fragmentToken = null;
+async function restoreSession() {
   try { await activateSession(await request("/api/session")); }
-  catch (_) { showLogin(); }
+  catch (error) { showLogin(error.status === 401 ? "" : "接続を確認して画面を再読み込みしてください。"); }
 }
+function start() {
+  const token = takeLoginToken();
+  authentication = restoreSession();
+  return queueLogin(token);
+}
+window.addEventListener("hashchange", () => queueLogin(takeLoginToken()));
 setInterval(() => { if (!document.hidden) refreshInbox(); }, 10000);
 document.addEventListener("visibilitychange", () => { if (!document.hidden) refreshInbox(); });
 start();

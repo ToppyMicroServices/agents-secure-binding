@@ -41,11 +41,22 @@ profile requirements.
 
 ## Quick start
 
-Install [Go 1.26.10](https://go.dev/doc/install) and run these commands from this source checkout. The local app
-below is an **experimental preview** included in `v2.0.0-rc.3`.
-The first run downloads Go dependencies and compiles the app; later runs reuse
-the build cache. No TEE device, LLM account, Node.js, Docker, or separate
-SQLite installation is needed.
+| What do you want to do? | Where to start |
+| --- | --- |
+| Integrate the supported Direct-Agent verifier in a Go service | Use the [v1.1.1 release](https://github.com/ToppyMicroServices/agents-secure-binding/releases/tag/v1.1.1) and its [supported APIs](docs/API_COMPATIBILITY.md). |
+| Try the local approval app | `asb-human` is an experimental preview introduced in v2.0.0-rc.3. [Download and verify a build for your computer](docs/asb-human-binary-quickstart.md), or build the current source below. |
+
+To build from source, install [Go 1.26.11](https://go.dev/doc/install).
+If you already have this source checkout, open a terminal in its root. To get
+the default branch in a new directory, run:
+
+```sh
+git clone https://github.com/ToppyMicroServices/agents-secure-binding.git
+cd agents-secure-binding
+```
+
+The first run downloads Go dependencies and compiles the app. Later runs reuse
+the build cache. The browser UI and SQLite are included in the executable.
 
 ### Check that it works
 
@@ -62,11 +73,13 @@ assurance or a person's identity.
 
 ### Make the decision yourself
 
-```text
-go run ./cmd/asb-human demo --data-dir ./.asb-human
-```
+| Platform | Command |
+| --- | --- |
+| macOS or Linux | `go run ./cmd/asb-human demo --data-dir ./.asb-human` |
+| Windows PowerShell | `go run ./cmd/asb-human demo` |
 
-Open the private login link printed in the terminal. A separate Agent process
+Open the login file named in the terminal. Copy its single-use link into a browser
+on the same computer. A separate Agent process
 proposes changing the app's own `maintenance_mode` setting. Review the before
 and after values in the browser, then choose a decision:
 
@@ -80,7 +93,8 @@ and after values in the browser, then choose a decision:
 request has not been confirmed and requires a status check.
 
 The Agent prints the result. Press Ctrl+C to stop the service; the decision,
-setting, and recovery receipts remain in `.asb-human`. The browser UI is shared
+setting, and recovery receipts remain in the data directory shown at startup.
+The Windows command uses your per-user `%AppData%\asb-human` directory. The browser UI is shared
 across the macOS, Linux, and Windows builds. Native macOS checks in the
 [runtime workflow](https://github.com/ToppyMicroServices/agents-secure-binding/actions/workflows/human-approval.yaml)
 run only when started manually. Check the results for the commit you use. This

@@ -558,7 +558,14 @@ func TestCommandProcessesRecoverApprovalAfterRestart(t *testing.T) {
 	startServer := func() (*commandProcess, string) {
 		p := startCommand(t, executable, "serve", "--data-dir", dir, "--core-listen", "127.0.0.1:0", "--web-listen", "127.0.0.1:0")
 		event := p.next(t, "ready")
-		login, err := url.Parse(fieldString(t, event, "login_url"))
+		if _, ok := event["login_url"]; ok {
+			t.Fatal("login URL in readiness JSON")
+		}
+		file, err := os.ReadFile(fieldString(t, event, "login_file"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		login, err := url.Parse(strings.TrimSpace(string(file)))
 		if err != nil || login.RawQuery != "" || !strings.HasPrefix(login.Fragment, "login=") {
 			t.Fatal("login token must appear only in the fragment")
 		}
@@ -655,7 +662,10 @@ func TestCommandProcessesRecoverApprovalAfterRestart(t *testing.T) {
 			t.Fatal(err)
 		}
 		terminal := demo.next(t, "operation")
-		for _, want := range []string{"Open this private link", fieldString(t, ready, "login_url"), demoDir, "no system setting is modified", "Press Ctrl+C"} {
+		if strings.Contains(demo.stderr.String(), "#login=") {
+			t.Fatal("secret link in stderr")
+		}
+		for _, want := range []string{"Open this private file", fieldString(t, ready, "login_file"), demoDir, "no system setting is modified", "Press Ctrl+C"} {
 			if !strings.Contains(demo.stderr.String(), want) {
 				t.Errorf("missing startup guidance %q in %s", want, demo.stderr.String())
 			}

@@ -12,8 +12,10 @@ import (
 	"net/http/cookiejar"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -22,8 +24,7 @@ import (
 )
 
 const (
-	testWebOrigin     = "http://127.0.0.1:43117"
-	testWebLoginToken = "test-only-private-token-000000000000000000000000"
+	testWebOrigin = "http://127.0.0.1:43117"
 )
 
 const (
@@ -36,14 +37,15 @@ func TestWebSessionsCoexistOnDifferentLocalPorts(t *testing.T) {
 		t.Fatal(err)
 	}
 	origins := []string{testWebOrigin, "http://127.0.0.1:43118"}
-	handlers := make([]http.Handler, len(origins))
+	handlers := make([]*WebHandler, len(origins))
 	for i, origin := range origins {
-		handlers[i], err = NewWebHandler(WebConfig{Origin: origin, LoginToken: testWebLoginToken, Execute: func(context.Context, Command) ([]byte, error) { return []byte(`{}`), nil }})
+		handlers[i], err = NewWebHandler(WebConfig{Origin: origin, LoginDirectory: privateFixtureDir(t), Execute: func(context.Context, Command) ([]byte, error) { return []byte(`{}`), nil }})
 		if err != nil {
 			t.Fatal(err)
 		}
+		t.Cleanup(func() { _ = handlers[i].Close() })
 		u, _ := url.Parse(origin)
-		req := httptest.NewRequest("POST", origin+"/api/session", strings.NewReader(`{"token":"`+testWebLoginToken+`"}`))
+		req := httptest.NewRequest("POST", origin+"/api/session", strings.NewReader(`{"token":"`+currentLoginToken(t, handlers[i])+`"}`))
 		req.RemoteAddr = testRemoteAddress
 		req.Header.Set("Origin", origin)
 		req.Header.Set("Content-Type", "application/json")
@@ -72,18 +74,86 @@ func TestWebSessionsCoexistOnDifferentLocalPorts(t *testing.T) {
 	}
 }
 
+func currentLoginToken(t *testing.T, h *WebHandler) string {
+	t.Helper()
+	raw, err := os.ReadFile(h.LoginFile())
+	if err != nil {
+		t.Fatal(err)
+	}
+	token, found := strings.CutPrefix(strings.TrimSpace(string(raw)), h.origin+"/#login=")
+	if !found || len(token) != 43 {
+		t.Fatal("invalid private login file")
+	}
+	return token
+}
+
+func TestLoginLinkRotatesWithoutInvalidatingSessions(t *testing.T) {
+	h := newTestWebHandler(t, func(context.Context, Command) ([]byte, error) { return nil, nil })
+	token := currentLoginToken(t, h)
+	// Two clients opening the same link can obtain at most one session.
+	var wg sync.WaitGroup
+	results := make(chan string, 2)
+	for range 2 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			id, _, err := h.createSession(token, "")
+			if err == nil {
+				results <- id
+			} else if !errors.Is(err, ErrUnauthorized) {
+				t.Errorf("unexpected login error: %v", err)
+			}
+		}()
+	}
+	wg.Wait()
+	close(results)
+	if len(results) != 1 {
+		t.Fatal("one link must authorize exactly one session")
+	}
+	firstCookie := &http.Cookie{Name: h.cookieName, Value: <-results}
+	second := loginWebTest(t, h)
+	if second.cookie.Value == firstCookie.Value {
+		t.Fatal("independent logins shared a session")
+	}
+	if res := webTestRequest(t, h, "GET", "/api/session", nil, testWebSession{cookie: firstCookie}); res.Code != http.StatusOK {
+		t.Fatal("issuing a new link invalidated another browser")
+	}
+	current := currentLoginToken(t, h)
+	h.mu.Lock()
+	h.loginExpires = time.Now().Add(-time.Second)
+	h.mu.Unlock()
+	if _, _, err := h.createSession(current, ""); !errors.Is(err, ErrUnauthorized) {
+		t.Fatal("expired link accepted")
+	}
+	h.refreshExpiredLink()
+	if _, _, err := h.createSession(current, ""); !errors.Is(err, ErrUnauthorized) {
+		t.Fatal("retired link accepted")
+	}
+	if _, _, err := h.createSession(currentLoginToken(t, h), ""); err != nil {
+		t.Fatal(err)
+	}
+	path := h.LoginFile()
+	if err := h.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("login file remained after shutdown")
+	}
+}
+
 type testWebSession struct {
 	cookie *http.Cookie
 	csrf   string
 }
 
-func newTestWebHandler(t *testing.T, execute func(context.Context, Command) ([]byte, error)) *webHandler {
+func newTestWebHandler(t *testing.T, execute func(context.Context, Command) ([]byte, error)) *WebHandler {
 	t.Helper()
-	handler, err := NewWebHandler(WebConfig{Origin: testWebOrigin, LoginToken: testWebLoginToken, Execute: execute})
+	handler, err := NewWebHandler(WebConfig{Origin: testWebOrigin, LoginDirectory: privateFixtureDir(t), Execute: execute})
 	if err != nil {
 		t.Fatal(err)
 	}
-	return handler.(*webHandler)
+	t.Cleanup(func() { _ = handler.Close() })
+	return handler
 }
 
 func webTestRequest(t *testing.T, handler http.Handler, method, path string, input any, session testWebSession) *httptest.ResponseRecorder {
@@ -113,9 +183,9 @@ func webTestRequest(t *testing.T, handler http.Handler, method, path string, inp
 	return response
 }
 
-func loginWebTest(t *testing.T, handler http.Handler) testWebSession {
+func loginWebTest(t *testing.T, handler *WebHandler) testWebSession {
 	t.Helper()
-	response := webTestRequest(t, handler, http.MethodPost, "/api/session", map[string]string{"token": testWebLoginToken}, testWebSession{})
+	response := webTestRequest(t, handler, http.MethodPost, "/api/session", map[string]string{"token": currentLoginToken(t, handler)}, testWebSession{})
 	if response.Code != http.StatusOK {
 		t.Fatalf("login: %d %s", response.Code, response.Body.String())
 	}
@@ -162,11 +232,12 @@ func TestWebSessionInboxDecisionAndLogout(t *testing.T) {
 	if page.Code != 200 || !strings.Contains(page.Body.String(), `id="dashboard" hidden`) || strings.Contains(page.Body.String(), op.OperationID) {
 		t.Fatal("unauthenticated page must contain only the empty login application")
 	}
+	originalToken := currentLoginToken(t, handler)
 	session := loginWebTest(t, handler)
 	if !session.cookie.HttpOnly || session.cookie.SameSite != http.SameSiteStrictMode || session.cookie.Path != "/" || session.cookie.Secure || session.cookie.MaxAge > 8*60*60 {
 		t.Fatal("unexpected browser session cookie")
 	}
-	if session.csrf == session.cookie.Value || session.cookie.Value == testWebLoginToken {
+	if session.csrf == session.cookie.Value || session.cookie.Value == originalToken {
 		t.Fatal("session, login, and CSRF secrets must differ")
 	}
 	restored := webTestRequest(t, handler, "GET", "/api/session", nil, session)
@@ -224,11 +295,12 @@ func TestWebSessionExpiresAndHTTPSCookieIsSecure(t *testing.T) {
 	if response := webTestRequest(t, handler, "GET", "/api/session", nil, session); response.Code != 401 {
 		t.Fatal("expired session was accepted")
 	}
-	secureHandler, err := NewWebHandler(WebConfig{Origin: "https://127.0.0.1:43117", LoginToken: testWebLoginToken, Execute: handler.execute})
+	secureHandler, err := NewWebHandler(WebConfig{Origin: "https://127.0.0.1:43117", LoginDirectory: privateFixtureDir(t), Execute: handler.execute})
 	if err != nil {
 		t.Fatal(err)
 	}
-	request := httptest.NewRequest("POST", "https://127.0.0.1:43117/api/session", strings.NewReader(`{"token":"`+testWebLoginToken+`"}`))
+	t.Cleanup(func() { _ = secureHandler.Close() })
+	request := httptest.NewRequest("POST", "https://127.0.0.1:43117/api/session", strings.NewReader(`{"token":"`+currentLoginToken(t, secureHandler)+`"}`))
 	request.RemoteAddr = testRemoteAddress
 	request.Header.Set("Origin", "https://127.0.0.1:43117")
 	request.Header.Set("Content-Type", "application/json")
@@ -407,12 +479,12 @@ func TestWebUnknownOutcomeIsNotRetriedAndDetailsAreRedacted(t *testing.T) {
 func TestWebConfigAndLoginRequireLocalPrivateConfiguration(t *testing.T) {
 	execute := func(context.Context, Command) ([]byte, error) { return []byte(`{}`), nil }
 	for _, origin := range []string{"https://example.invalid", "http://127.0.0.1:43117/path", "http://127.0.0.1:43117?token=x"} {
-		if _, err := NewWebHandler(WebConfig{Origin: origin, LoginToken: testWebLoginToken, Execute: execute}); err == nil {
+		if _, err := NewWebHandler(WebConfig{Origin: origin, LoginDirectory: privateFixtureDir(t), Execute: execute}); err == nil {
 			t.Fatalf("accepted origin %s", origin)
 		}
 	}
-	if _, err := NewWebHandler(WebConfig{Origin: testWebOrigin, LoginToken: "short", Execute: execute}); err == nil {
-		t.Fatal("accepted short login token")
+	if _, err := NewWebHandler(WebConfig{Origin: testWebOrigin, LoginDirectory: "", Execute: execute}); err == nil {
+		t.Fatal("accepted missing login directory")
 	}
 	handler := newTestWebHandler(t, execute)
 	response := webTestRequest(t, handler, "POST", "/api/session", map[string]string{"token": "incorrect-local-token"}, testWebSession{})

@@ -3,6 +3,7 @@
 package qemu
 
 import (
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -22,7 +23,6 @@ const (
 	KernelFile      = "bzImage"
 	rootfsFile      = "rootfs.cpio"
 	tmpDir          = "/tmp"
-	interval        = 5 * time.Second
 	shutdownTimeout = 30 * time.Second
 )
 
@@ -32,10 +32,11 @@ type VMInfo struct {
 }
 
 type qemuVM struct {
-	vmi    VMInfo
-	cmd    *exec.Cmd
-	cvmId  string
-	logger *slog.Logger
+	vmi      VMInfo
+	cmd      *exec.Cmd
+	restored bool
+	cvmId    string
+	logger   *slog.Logger
 	vm.StateMachine
 }
 
@@ -48,12 +49,7 @@ func NewVM(config any, cvmId string, logger *slog.Logger) vm.VM {
 	}
 }
 
-func (v *qemuVM) Start() (err error) {
-	defer func() {
-		if err == nil {
-			go v.checkVMProcessPeriodically()
-		}
-	}()
+func (v *qemuVM) Start() error {
 	// Create unique qemu device identifiers
 	id, err := uuid.NewV4()
 	if err != nil {
@@ -95,7 +91,7 @@ func (v *qemuVM) Stop() error {
 		}
 	}()
 	err := v.cmd.Process.Signal(syscall.SIGTERM)
-	if err != nil {
+	if err != nil && !(v.restored && errors.Is(err, os.ErrProcessDone)) {
 		return fmt.Errorf("failed to send SIGTERM: %v", err)
 	}
 
@@ -111,6 +107,9 @@ func (v *qemuVM) Stop() error {
 		}
 	}
 
+	if v.restored {
+		return stopRestored(v.cmd.Process)
+	}
 	done := make(chan error, 1)
 	go func() {
 		_, err := v.cmd.Process.Wait()
@@ -130,19 +129,44 @@ func (v *qemuVM) Stop() error {
 	return nil
 }
 
-func (v *qemuVM) SetProcess(pid int) error {
-	process, err := os.FindProcess(pid)
+// A reattached process need not be our child, so os.Process.Wait can return
+// ECHILD even while the VM is alive. Poll its pinned handle for actual exit.
+func stopRestored(process *os.Process) error {
+	exited, err := waitForRestoredProcess(process, shutdownTimeout)
 	if err != nil {
 		return err
 	}
-
-	exe, args, err := v.executableAndArgs()
-	if err != nil {
-		return err
+	if !exited {
+		if err := process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
+			return err
+		}
+		exited, err = waitForRestoredProcess(process, shutdownTimeout)
+		if err != nil {
+			return err
+		}
+		if !exited {
+			return errors.New("VM did not exit after kill")
+		}
 	}
+	return process.Release()
+}
 
-	v.cmd = exec.Command(exe, args...)
-	v.cmd.Process = process
+// SetProcess cannot safely identify a VM from its PID alone. Retain the
+// method for existing callers, but require identity verification to reattach.
+func (v *qemuVM) SetProcess(int) error {
+	return errors.New("VM reattachment requires a verified process identity")
+}
+
+// SetVerifiedProcess takes ownership of a process returned by RestoreProcess.
+func (v *qemuVM) SetVerifiedProcess(process *os.Process) error {
+	if process == nil {
+		return errors.New("missing verified process")
+	}
+	if err := process.WithHandle(func(uintptr) {}); err != nil {
+		return fmt.Errorf("VM reattachment requires a pinned process handle: %w", err)
+	}
+	v.cmd = &exec.Cmd{Process: process}
+	v.restored = true
 	return nil
 }
 
@@ -167,32 +191,6 @@ func (v *qemuVM) executableAndArgs() (string, []string, error) {
 	}
 
 	return exe, args, nil
-}
-
-func (v *qemuVM) checkVMProcessPeriodically() {
-	for {
-		if !processExists(v.GetProcess()) {
-			break
-		}
-		time.Sleep(interval)
-	}
-}
-
-func processExists(pid int) bool {
-	process, err := os.FindProcess(pid)
-	if err != nil {
-		return false
-	}
-
-	// On Unix systems, FindProcess always succeeds and returns a Process for the given pid, regardless of whether the process exists.
-	// To test whether the process actually exists, see whether p.Signal(syscall.Signal(0)) reports an error.
-	if err = process.Signal(syscall.Signal(0)); err == nil {
-		return true
-	}
-	if err == syscall.ESRCH {
-		return false
-	}
-	return false
 }
 
 func (v *qemuVM) GetConfig() any {

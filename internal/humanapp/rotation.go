@@ -39,12 +39,8 @@ func validateInitializedDirectory(dir string) error {
 	if strings.TrimSpace(dir) == "" {
 		return ErrInvalid
 	}
-	info, err := os.Lstat(dir)
-	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
-		return fmt.Errorf("data directory must be a real directory")
-	}
-	if runtime.GOOS != goosWindows && info.Mode().Perm()&0o077 != 0 {
-		return fmt.Errorf("data directory must be private (mode 0700)")
+	if err := validatePrivateDirectory(dir); err != nil {
+		return err
 	}
 	marker, err := os.ReadFile(filepath.Join(dir, "initialized"))
 	if err != nil || string(marker) != credentialsVersion {
@@ -144,10 +140,7 @@ func validatePrivateDirectory(dir string) error {
 	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
 		return fmt.Errorf("credential directory must be a real directory")
 	}
-	if runtime.GOOS != goosWindows && info.Mode().Perm()&0o077 != 0 {
-		return fmt.Errorf("credential directory must be private (mode 0700)")
-	}
-	return nil
+	return checkDirectoryPermissions(dir, info)
 }
 
 func newCredentialGenerationName() (string, error) {
@@ -198,6 +191,9 @@ func credentialStatusUnlocked(dir string) (CredentialStatus, error) {
 }
 
 func activeCredentialDirectory(dir string) (string, string, error) {
+	if err := validatePrivateDirectory(dir); err != nil {
+		return "", "", err
+	}
 	pointer := filepath.Join(dir, credentialPointerFile)
 	info, err := os.Lstat(pointer)
 	if errors.Is(err, os.ErrNotExist) {
@@ -220,7 +216,11 @@ func activeCredentialDirectory(dir string) (string, string, error) {
 	if !validGenerationName(name) {
 		return "", "", fmt.Errorf("invalid credential generation pointer")
 	}
-	credentialDir := filepath.Join(dir, credentialSetsDir, name)
+	setsDir := filepath.Join(dir, credentialSetsDir)
+	if err := validatePrivateDirectory(setsDir); err != nil {
+		return "", "", err
+	}
+	credentialDir := filepath.Join(setsDir, name)
 	if err := validatePrivateDirectory(credentialDir); err != nil {
 		return "", "", err
 	}

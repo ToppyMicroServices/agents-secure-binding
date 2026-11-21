@@ -107,17 +107,10 @@ func TestStop(t *testing.T) {
 	})
 }
 
-func TestSetProcess(t *testing.T) {
-	vm := &qemuVM{
-		vmi: VMInfo{
-			Config: Config{QemuBinPath: "echo"}, // Use 'echo' as a dummy QEMU binary
-		},
-	}
-
-	err := vm.SetProcess(os.Getpid()) // Use current process as a dummy
-	assert.NoError(t, err)
-	assert.NotNil(t, vm.cmd)
-	assert.NotNil(t, vm.cmd.Process)
+func TestSetProcessRequiresIdentity(t *testing.T) {
+	vm := &qemuVM{}
+	assert.Error(t, vm.SetProcess(os.Getpid()))
+	assert.Nil(t, vm.cmd)
 }
 
 func TestGetProcess(t *testing.T) {

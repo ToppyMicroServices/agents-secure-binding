@@ -5,6 +5,7 @@ package manager
 import (
 	"context"
 	"crypto"
+	stderrors "errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -14,7 +15,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 	"unicode"
 
@@ -249,37 +249,43 @@ func (ms *managerService) CreateVM(ctx context.Context, req *CreateReq) (string,
 		}
 		return "", id, ErrMaxVMsExceeded
 	}
-	ms.vms[id] = cvm
-	ms.mu.Unlock()
-
+	defer ms.mu.Unlock()
+	state := qemu.VMState{ID: id, VMinfo: cfg, PID: cvm.GetProcess()}
 	if req.Ttl != "" {
-		ms.ttlManager.SetTTL(id, ttl, func() { //nolint:contextcheck
-			if err := ms.RemoveVM(context.Background(), id); err != nil {
-				ms.logger.Error("Failed to remove VM after TTL expiry", "vmID", id, "error", err)
-			} else {
-				ms.logger.Info("Successfully removed VM after TTL expiry", "vmID", id)
-			}
-		})
+		state.ExpiresAt = time.Now().UTC().Add(ttl)
 	}
-
-	pid := cvm.GetProcess()
-
-	state := qemu.VMState{
-		ID:     id,
-		VMinfo: cfg,
-		PID:    pid,
+	state.ProcessIdentity, err = qemu.CaptureProcessIdentity(state.PID)
+	if err == nil {
+		err = ms.persistence.SaveVM(state)
 	}
-	if err := ms.persistence.SaveVM(state); err != nil {
-		ms.logger.Error("Failed to persist VM state", "error", err)
+	if err != nil {
+		if stopErr := cvm.Stop(); stopErr != nil {
+			// Keep a live handle so the operator can retry cleanup.
+			ms.vms[id] = cvm
+			ms.logger.Error("Failed to stop an uncommitted VM", "vmID", id, "error", stopErr)
+			return "", id, stderrors.Join(err, stopErr)
+		}
+		return "", id, fmt.Errorf("could not save recoverable VM state: %w", err)
 	}
-
-	ms.mu.Lock()
-	if err := ms.vms[id].Transition(manager.VmRunning); err != nil {
+	if err := cvm.Transition(manager.VmRunning); err != nil {
 		ms.logger.Warn("Failed to transition VM state", "cvm", id, "error", err)
 	}
-	ms.mu.Unlock()
+	ms.vms[id] = cvm
+	ms.armExpiry(state)
 
 	return fmt.Sprint(agentPort), id, nil
+}
+
+// armExpiry runs under ms.mu after a VM and its durable deadline are committed.
+func (ms *managerService) armExpiry(state qemu.VMState) {
+	if state.ExpiresAt.IsZero() {
+		return
+	}
+	ms.ttlManager.SetTTL(state.ID, time.Until(state.ExpiresAt), func() {
+		if err := ms.RemoveVM(context.Background(), state.ID); err != nil && !stderrors.Is(err, ErrNotFound) {
+			ms.logger.Error("Failed to remove VM after TTL expiry", "vmID", state.ID, "error", err)
+		}
+	})
 }
 
 func (ms *managerService) RemoveVM(ctx context.Context, computationID string) error {
@@ -312,10 +318,9 @@ func (ms *managerService) ReturnCVMInfo(ctx context.Context) (string, int, strin
 func (ms *managerService) Shutdown() error {
 	ms.logger.Info("Shutting down manager service")
 
-	ms.ttlManager.CancelAll()
-
 	ms.mu.Lock()
 	defer ms.mu.Unlock()
+	ms.ttlManager.CancelAll()
 
 	ms.vms = make(map[string]vm.VM)
 	if closer, ok := ms.persistence.(io.Closer); ok {
@@ -399,53 +404,53 @@ func (ms *managerService) restoreVMs() error {
 		return err
 	}
 
+	ms.mu.Lock()
+	defer ms.mu.Unlock()
+	var timedVMs []qemu.VMState
 	for _, state := range states {
 		if state.PID <= 0 {
 			return fmt.Errorf("invalid persisted VM PID %d", state.PID)
 		}
-		if !ms.processExists(state.PID) {
+		if state.ProcessIdentity == (qemu.ProcessIdentity{}) {
+			ms.logger.Warn("VM record has no process identity; reconcile it manually", "vmID", state.ID)
+			continue
+		}
+		process, err := qemu.RestoreProcess(state.PID, state.ProcessIdentity)
+		if stderrors.Is(err, qemu.ErrVMProcessGone) {
 			if err := ms.persistence.DeleteVM(state.ID); err != nil {
-				ms.logger.Error("Failed to delete persisted VM state", "computation", state.ID, "error", err)
+				ms.logger.Error("Failed to delete persisted state for non-existent process", "vmID", state.ID, "error", err)
 			}
-			ms.logger.Info("Deleted persisted state for non-existent process", "computation", state.ID, "pid", state.PID)
 			continue
 		}
-
+		if err != nil {
+			ms.logger.Warn("VM identity could not be verified; retaining record for reconciliation", "vmID", state.ID, "error", err)
+			continue
+		}
 		cvm := ms.vmFactory(state.VMinfo, state.ID, ms.logger)
-
-		if err = cvm.SetProcess(state.PID); err != nil {
-			ms.logger.Warn("Failed to reattach to process", "computation", state.ID, "pid", state.PID, "error", err)
-			continue
+		receiver, ok := cvm.(vm.Restorable)
+		if !ok {
+			_ = process.Release()
+			return fmt.Errorf("VM provider does not support verified recovery for %s", state.ID)
 		}
-
+		if err := receiver.SetVerifiedProcess(process); err != nil {
+			_ = process.Release()
+			return fmt.Errorf("reattach VM %s: %w", state.ID, err)
+		}
 		if err := cvm.Transition(manager.VmRunning); err != nil {
 			ms.logger.Warn("Failed to transition VM state", "computation", state.ID, "error", err)
 		}
 
 		ms.vms[state.ID] = cvm
+		if !state.ExpiresAt.IsZero() {
+			timedVMs = append(timedVMs, state)
+		}
 		ms.logger.Info("Successfully restored VM state", "id", state.ID, "computationId", state.ID, "pid", state.PID)
 	}
 
+	for _, state := range timedVMs {
+		ms.armExpiry(state)
+	}
 	return nil
-}
-
-func (ms *managerService) processExists(pid int) bool {
-	if pid <= 0 {
-		return false
-	}
-	process, err := os.FindProcess(pid)
-	if err != nil {
-		ms.logger.Warn("Failed to find process", "pid", pid, "error", err)
-		return false
-	}
-
-	if err = process.Signal(syscall.Signal(0)); err == nil {
-		return true
-	}
-	if err == syscall.ESRCH {
-		return false
-	}
-	return false
 }
 
 func tempCertMount(id string, req *CreateReq) (string, error) {

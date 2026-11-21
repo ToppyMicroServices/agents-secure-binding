@@ -74,3 +74,14 @@ func syncDirectory(dir string) error {
 	}
 	return closeErr
 }
+
+func makeDataDirectory(dir string) error {
+	return os.MkdirAll(dir, 0o700)
+}
+
+func checkDirectoryPermissions(_ string, info os.FileInfo) error {
+	if info.Mode().Perm()&0o077 != 0 {
+		return fmt.Errorf("data directory must be private (mode 0700)")
+	}
+	return nil
+}
